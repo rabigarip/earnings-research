@@ -21,3 +21,6 @@ cache/
 
 # OS
 .DS_Store
+
+# Frontend (build output goes to static/ — commit that for one-site deploy)
+frontend/node_modules/

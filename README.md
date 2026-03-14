@@ -32,14 +32,23 @@ uvicorn src.api:app --reload --port 8000
 
 ---
 
-## Deploy to Render
+## Deploy to Render (one site = API + UI at one URL)
 
-1. Push this repo to **GitHub**.
-2. In [Render](https://render.com): **New → Web Service**, connect the repo.
-3. Render will use `render.yaml` (or set **Build**: `pip install -r requirements.txt`, **Start**: `uvicorn src.api:app --host 0.0.0.0 --port $PORT`).
-4. Add env vars in the dashboard if needed: `GEMINI_API_KEY`, `CORS_ORIGINS`.
+1. **Build the frontend** into `static/` (so one Web Service can serve both):
+   ```bash
+   ./scripts/build_static.sh
+   ```
+2. **Commit and push** (including the `static/` folder):
+   ```bash
+   git add static/
+   git commit -m "Add static frontend for one-site deploy"
+   git push origin main
+   ```
+3. In [Render](https://render.com): **New → Web Service**, connect **earnings-research**.
+4. **Build:** `pip install -r requirements.txt` · **Start:** `uvicorn src.api:app --host 0.0.0.0 --port $PORT`
+5. Open your Render URL — you get the **full app** (login, reports, New Report) at that one address. API docs: `/docs`.
 
-Full steps and frontend wiring: **`docs/DEPLOY-RENDER.md`**.
+Details: **`docs/ONE-SITE-RENDER.md`**. For API-only or separate frontend deploy: **`docs/DEPLOY-RENDER.md`**.
 
 ---
 

@@ -8,17 +8,26 @@ Endpoints:
   GET  /api/reports         — List pipeline runs (for earnings-preview frontend)
   POST /api/reports         — Create run (run preview), returns report row + payload
   GET  /api/reports/:id     — Get one run (steps, no payload)
+  GET  /api/reports/:id/download — Download memo .docx file
   POST /api/reports/:id/rerun — Rerun preview for that ticker
   POST /api/preview         — Run earnings preview; returns step results + report payload
 """
 
 from __future__ import annotations
 import os
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+
+# When frontend is built into static/, we serve it at / (one site on Render)
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+STATIC_INDEX = STATIC_DIR / "index.html"
+SERVE_FRONTEND = STATIC_INDEX.exists()
 
 # Load env before importing pipeline (needs GEMINI_API_KEY etc.)
 try:
@@ -29,10 +38,12 @@ except ImportError:
 
 
 def _ensure_db() -> None:
-    from src.storage.db import init_db, seed_companies, _db_path
+    from src.storage.db import init_db, seed_companies, ensure_migrations, _db_path
     if not _db_path().exists():
         init_db()
         seed_companies()
+    else:
+        ensure_migrations()
 
 
 @asynccontextmanager
@@ -78,8 +89,20 @@ def health():
     return {"status": "ok"}
 
 
+class LoginRequest(BaseModel):
+    accessCode: str = ""
+
+
+@app.post("/api/auth/login")
+def auth_login(req: LoginRequest):
+    """Stub: accept any access code so the frontend login works (one-site mode). Replace with real auth if needed."""
+    return {"token": "ok", "message": "ok"}
+
+
 @app.get("/")
 def root():
+    if SERVE_FRONTEND:
+        return FileResponse(STATIC_INDEX, media_type="text/html")
     return {"service": "earnings-research-api", "docs": "/docs"}
 
 
@@ -142,6 +165,28 @@ def get_report(run_id: str):
     row = _run_to_report_row(run)
     row["steps"] = run.get("step_results", [])
     return row
+
+
+@app.get("/api/reports/{run_id}/download")
+def download_report(run_id: str):
+    """Download the memo .docx file for this run. Returns 404 if file not found (e.g. after Render redeploy)."""
+    from src.storage.db import load_run
+    from src.config import root, cfg
+    run = load_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Report not found")
+    memo_filename = (run.get("memo_path") or "").strip()
+    if not memo_filename or ".." in memo_filename:
+        raise HTTPException(status_code=404, detail="No memo file for this run")
+    out_dir = root() / cfg()["report"]["output_dir"]
+    file_path = out_dir / memo_filename
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Memo file no longer available (may have been removed)")
+    return FileResponse(
+        path=str(file_path),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=memo_filename,
+    )
 
 
 def _run_preview_and_response(ticker: str, skip_llm: bool = True) -> dict:
@@ -260,3 +305,20 @@ def run_preview_api(req: PreviewRequest):
 
     steps = [r.to_log_dict() for r in results]
     return PreviewResponse(run_id=run_id, overall=overall, steps=steps, payload=payload)
+
+
+# ─── One site: serve frontend from static/ when present ─────────────────────
+
+if SERVE_FRONTEND:
+    assets_dir = STATIC_DIR / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    @app.get("/{path:path}")
+    def serve_spa(path: str):
+        """SPA fallback: serve index.html for non-API routes (e.g. /reports/123)."""
+        if path.startswith("api/") or path == "api":
+            raise HTTPException(status_code=404, detail="Not found")
+        if path.startswith("docs") or path.startswith("openapi") or path == "health":
+            raise HTTPException(status_code=404, detail="Not found")
+        return FileResponse(STATIC_INDEX, media_type="text/html")
