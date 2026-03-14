@@ -1,0 +1,161 @@
+[general]
+app_name = "earnings-research"
+version = "0.1.0"
+
+[scraping]
+timeout_seconds = 15
+min_delay_seconds = 1.0
+max_delay_seconds = 3.0
+cache_html = true
+user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+[thresholds]
+revenue_warn_pct = 5.0
+revenue_alert_pct = 15.0
+eps_warn_pct = 10.0
+
+[news]
+# Recent context window for memo (extended to 60 days for broader coverage)
+recent_days = 60
+lookback_months = 6
+max_per_source = 50
+# Optional: NewsAPI key for SCMP (China). If set, SCMP uses API instead of browser/scraping. Get key at https://newsapi.org
+# Can also set env NEWSAPI_KEY (e.g. in .env)
+newsapi_key = ""
+# Provider-based: allowlist of provider ids for Recent Context (from context_providers)
+recent_context_sources = ["reuters", "zawya", "scmp", "newsapi", "google_news", "business_standard", "economic_times", "business_day", "daily_investor", "moneyweb"]
+recent_context_enrichment_max_fetch = 20
+
+# Context provider registry: each provider implements search + parse + enrich.
+# Optional "countries" = [ISO codes]: use this provider only for those countries; omit or [] = global.
+[[news.context_providers]]
+provider_name = "reuters"
+enabled = true
+countries = []  # global: used for every country
+domain_patterns = ["reuters.com"]
+source_priority = 1
+source_type = "wire"
+allowed_for_company_facts = true
+allowed_for_sector_context = true
+date_confidence_policy = "from_source"
+
+[[news.context_providers]]
+provider_name = "zawya"
+enabled = true
+countries = ["SA", "AE", "BH", "KW", "OM", "QA", "EG"]  # MENA
+domain_patterns = ["zawya.com"]
+source_priority = 2
+source_type = "regional"
+allowed_for_company_facts = true
+allowed_for_sector_context = true
+date_confidence_policy = "from_source"
+
+# China – South China Morning Post (via NewsAPI when key set; else scrape/browser)
+[[news.context_providers]]
+provider_name = "scmp"
+enabled = true
+countries = ["CN"]
+domain_patterns = ["scmp.com"]
+source_priority = 3
+source_type = "regional"
+allowed_for_company_facts = true
+allowed_for_sector_context = true
+date_confidence_policy = "from_source"
+
+# Google News RSS — universal, reliable, no auth required
+[[news.context_providers]]
+provider_name = "google_news"
+enabled = true
+countries = []
+domain_patterns = []
+source_priority = 2
+source_type = "aggregator"
+allowed_for_company_facts = true
+allowed_for_sector_context = true
+date_confidence_policy = "from_source"
+
+# NewsAPI — global fallback when regional providers return 0 results
+[[news.context_providers]]
+provider_name = "newsapi"
+enabled = true
+countries = []
+domain_patterns = []
+source_priority = 5
+source_type = "wire"
+allowed_for_company_facts = true
+allowed_for_sector_context = false
+date_confidence_policy = "from_source"
+
+# India – Business Standard
+[[news.context_providers]]
+provider_name = "business_standard"
+enabled = true
+countries = ["IN"]
+domain_patterns = ["business-standard.com"]
+source_priority = 5
+source_type = "regional"
+allowed_for_company_facts = true
+allowed_for_sector_context = true
+date_confidence_policy = "from_source"
+
+# India – Economic Times
+[[news.context_providers]]
+provider_name = "economic_times"
+enabled = true
+countries = ["IN"]
+domain_patterns = ["economictimes.indiatimes.com"]
+source_priority = 6
+source_type = "regional"
+allowed_for_company_facts = true
+allowed_for_sector_context = true
+date_confidence_policy = "from_source"
+
+# South Africa – Business Day (businesslive.co.za)
+[[news.context_providers]]
+provider_name = "business_day"
+enabled = true
+countries = ["ZA"]
+domain_patterns = ["businesslive.co.za"]
+source_priority = 7
+source_type = "regional"
+allowed_for_company_facts = true
+allowed_for_sector_context = true
+date_confidence_policy = "from_source"
+
+# South Africa – Daily Investor
+[[news.context_providers]]
+provider_name = "daily_investor"
+enabled = true
+countries = ["ZA"]
+domain_patterns = ["dailyinvestor.com"]
+source_priority = 8
+source_type = "regional"
+allowed_for_company_facts = true
+allowed_for_sector_context = true
+date_confidence_policy = "from_source"
+
+# South Africa – Moneyweb
+[[news.context_providers]]
+provider_name = "moneyweb"
+enabled = true
+countries = ["ZA"]
+domain_patterns = ["moneyweb.co.za"]
+source_priority = 9
+source_type = "regional"
+allowed_for_company_facts = true
+allowed_for_sector_context = true
+date_confidence_policy = "from_source"
+
+[gemini]
+# Use 2.5-flash (2.0-flash no longer available to new users per API 404)
+model = "gemini-2.5-flash"
+max_tokens = 8192
+temperature = 0.2
+
+[database]
+path = "data/earnings.db"
+
+[report]
+output_dir = "outputs"
+# Set to true to also write QA audit as JSON (for debugging). Primary review format is QA .docx.
+qa_audit_json = false

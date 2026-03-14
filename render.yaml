@@ -1,0 +1,24 @@
+# Render Blueprint — deploy as Web Service
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: earnings-research-api
+    runtime: python
+    region: oregon
+
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn src.api:app --host 0.0.0.0 --port $PORT
+
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      # Optional: restrict CORS to your frontend (comma-separated origins)
+      # - key: CORS_ORIGINS
+      #   value: https://your-app.onrender.com,https://your-custom-domain.com
+      # For Gemini news summarization (set in Render dashboard if you use it):
+      # - key: GEMINI_API_KEY
+      #   sync: false
+
+    # Render free tier has 30s request timeout; preview can take 30–90s with LLM.
+    # Increase on paid plan or use skip_llm=true from frontend for faster demos.
+    # healthCheckPath: /health

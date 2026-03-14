@@ -1,0 +1,647 @@
+"""
+Gemini LLM provider — used ONLY for:
+  • Investment View generation (disciplined, evidence-based)
+  • news summarisation & theme extraction
+  • relevance classification
+
+NEVER used for:
+  • numeric truth (revenue, EPS, market cap)
+  • ticker validation
+  • primary reconciliation
+  • guessing missing values
+
+Model version is pinned in config/settings.toml for governance.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+
+from src.config import cfg
+
+log = logging.getLogger(__name__)
+
+_model = None
+
+
+def _get_model():
+    global _model
+    if _model is not None:
+        return _model
+
+    import google.generativeai as genai
+
+    key = os.environ.get("GEMINI_API_KEY", "")
+    if not key:
+        raise EnvironmentError(
+            "GEMINI_API_KEY not set. "
+            "Copy .env.example → .env and fill in your key."
+        )
+    genai.configure(api_key=key)
+    settings = cfg()
+    _model = genai.GenerativeModel(settings["gemini"]["model"])
+    return _model
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Evidence brief builder
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _build_evidence_brief(
+    company_name: str,
+    memo_fact_pack: dict | None,
+    articles: list[dict] | None,
+) -> tuple[str, str]:
+    """
+    Build a structured evidence document from memo data and articles.
+    Returns (evidence_text, data_density).
+    data_density: "rich" (>=8 data points) | "moderate" (4–7) | "sparse" (<4).
+    """
+    fp = memo_fact_pack or {}
+    sections: list[str] = []
+    data_points = 0
+
+    # ── Company identity ──
+    identity = [f"COMPANY: {company_name}"]
+    ticker = fp.get("ticker", "")
+    if ticker:
+        identity[0] += f" ({ticker})"
+    industry = fp.get("industry", "")
+    if industry:
+        identity.append(f"INDUSTRY: {industry}")
+    is_bank = fp.get("is_bank", False)
+    identity.append(f"TYPE: {'Bank / Financial institution' if is_bank else 'Industrial / Corporate'}")
+    currency = fp.get("currency", "")
+    if currency:
+        identity.append(f"REPORTING CURRENCY: {currency}")
+    sections.append("\n".join(identity))
+
+    # ── Quarter context ──
+    quarter_parts: list[str] = []
+    pq = fp.get("preview_quarter_short")
+    if pq:
+        quarter_parts.append(f"PREVIEW QUARTER: {pq}")
+        data_points += 1
+    ned = fp.get("next_earnings_date")
+    if ned:
+        quarter_parts.append(f"EXPECTED EARNINGS DATE: {ned}")
+        data_points += 1
+    if quarter_parts:
+        sections.append("\n".join(quarter_parts))
+
+    # ── Consensus & valuation ──
+    cons: list[str] = []
+    rec = fp.get("consensus_recommendation")
+    if rec is not None:
+        try:
+            rv = float(rec)
+            if rv >= 4.5:
+                label = "Strong Buy"
+            elif rv >= 3.5:
+                label = "Buy / Outperform"
+            elif rv >= 2.5:
+                label = "Hold"
+            elif rv >= 1.5:
+                label = "Underperform"
+            else:
+                label = "Sell"
+            cons.append(f"Consensus recommendation: {label} ({rv:.1f}/5)")
+        except (ValueError, TypeError):
+            cons.append(f"Consensus recommendation: {rec}")
+        data_points += 1
+
+    ac = fp.get("consensus_analyst_count")
+    if ac:
+        cons.append(f"Analyst coverage: {ac} analysts")
+        data_points += 1
+
+    tp = fp.get("consensus_target_price")
+    qp = fp.get("quote_price") or fp.get("consensus_last_close")
+    if tp and qp:
+        upside = fp.get("spread_pct") or fp.get("implied_upside_pct")
+        line = f"Target price: {currency} {tp:,.1f} vs current {currency} {qp:,.1f}"
+        if upside is not None:
+            line += f" → implied upside {upside:+.1f}%"
+        cons.append(line)
+        data_points += 1
+    elif tp:
+        cons.append(f"Average target price: {currency} {tp:,.1f}")
+        data_points += 1
+
+    rev_cons = fp.get("next_quarter_consensus_revenue")
+    eps_cons = fp.get("next_quarter_consensus_eps")
+    if rev_cons is not None:
+        cons.append(f"Revenue consensus ({pq or 'next Q'}): {currency} {rev_cons:,.0f}")
+        data_points += 1
+    if eps_cons is not None:
+        cons.append(f"EPS consensus ({pq or 'next Q'}): {currency} {eps_cons:,.2f}")
+        data_points += 1
+
+    qoq_rev = fp.get("qoq_revenue_pct")
+    yoy_rev = fp.get("yoy_revenue_pct_table")
+    qoq_eps = fp.get("qoq_eps_pct")
+    yoy_eps = fp.get("yoy_eps_pct_table")
+    if qoq_rev is not None:
+        cons.append(f"Consensus revenue QoQ: {qoq_rev:+.1f}%")
+        data_points += 1
+    if yoy_rev is not None:
+        cons.append(f"Consensus revenue YoY: {yoy_rev:+.1f}%")
+        data_points += 1
+    if qoq_eps is not None:
+        cons.append(f"Consensus EPS QoQ: {qoq_eps:+.1f}%")
+    if yoy_eps is not None:
+        cons.append(f"Consensus EPS YoY: {yoy_eps:+.1f}%")
+
+    if cons:
+        sections.append("CONSENSUS & VALUATION:\n" + "\n".join(f"- {c}" for c in cons))
+
+    # ── Recent execution (beat/miss history) ──
+    exec_parts: list[str] = []
+    avg_rev_s = fp.get("avg_revenue_surprise_pct")
+    avg_eps_s = fp.get("avg_eps_surprise_pct")
+    consec = fp.get("consecutive_revenue_beats")
+    rev_hist = fp.get("revenue_surprise_history") or []
+    eps_hist = fp.get("eps_surprise_history") or []
+
+    if avg_rev_s is not None:
+        beat_count = sum(1 for e in rev_hist if (e.get("surprise_pct") or 0) >= 0)
+        exec_parts.append(f"Avg revenue surprise: {avg_rev_s:+.1f}% (beats: {beat_count}/{len(rev_hist)})")
+        data_points += 1
+    if avg_eps_s is not None:
+        beat_count = sum(1 for e in eps_hist if (e.get("surprise_pct") or 0) >= 0)
+        exec_parts.append(f"Avg EPS surprise: {avg_eps_s:+.1f}% (beats: {beat_count}/{len(eps_hist)})")
+        data_points += 1
+    if consec is not None:
+        exec_parts.append(f"Consecutive revenue beats: {consec}")
+    if rev_hist:
+        recent = rev_hist[-4:]
+        exec_parts.append("Recent revenue surprises: " + ", ".join(
+            f"{e.get('period', '?')}: {e.get('surprise_pct', 0):+.1f}%" for e in recent))
+    if eps_hist:
+        recent = eps_hist[-4:]
+        exec_parts.append("Recent EPS surprises: " + ", ".join(
+            f"{e.get('period', '?')}: {e.get('surprise_pct', 0):+.1f}%" for e in recent))
+
+    if exec_parts:
+        sections.append("RECENT EXECUTION (beat/miss history):\n" + "\n".join(f"- {e}" for e in exec_parts))
+
+    # ── Recent news facts ──
+    if articles:
+        news_lines: list[str] = []
+        for a in articles[:10]:
+            idx = a.get("index", "?")
+            src = a.get("source", "Unknown")
+            date = a.get("date", "")
+            headline = a.get("headline", "")
+            snippet = (a.get("snippet") or "")[:200]
+            line = f'[{idx}] "{headline}" ({src}, {date})'
+            if snippet:
+                line += f" — {snippet}"
+            news_lines.append(line)
+        sections.append("RECENT NEWS:\n" + "\n".join(news_lines))
+        data_points += min(len(articles), 3)
+
+    # ── Data gaps ──
+    gaps: list[str] = []
+    if not fp.get("next_earnings_date"):
+        gaps.append("No confirmed earnings date")
+    if rev_cons is None:
+        gaps.append("No revenue consensus available")
+    if eps_cons is None:
+        gaps.append("No EPS consensus available")
+    if not rev_hist:
+        gaps.append("No beat/miss history available")
+    if not fp.get("consensus_recommendation"):
+        gaps.append("No consensus recommendation available")
+    if not articles:
+        gaps.append("No recent news articles available")
+    if gaps:
+        sections.append("DATA GAPS (do NOT fabricate these — acknowledge them):\n" + "\n".join(f"- {g}" for g in gaps))
+
+    density = "rich" if data_points >= 8 else ("moderate" if data_points >= 4 else "sparse")
+    return "\n\n".join(sections), density
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Post-generation validation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+BANNED_PHRASES_IV = [
+    "investors will focus on key metrics",
+    "guidance will be closely watched",
+    "earnings quality matters",
+    "market participants will monitor",
+    "investors will monitor",
+    "stock reaction will hinge on",
+    "a strong quarter would support the case",
+    "investors will focus on",
+    "the market will closely watch",
+    "key metrics will be in focus",
+    "all eyes will be on",
+]
+
+UNSUPPORTED_CONFIDENCE_WORDS = [
+    "supportive", "encouraging", "robust", "stellar",
+    "impressive", "outstanding", "excellent", "remarkable",
+]
+
+REACTION_MARKERS = [
+    r"stock\s+(reaction|move|response|price)",
+    r"share\s+price",
+    r"market\s+(reaction|response)",
+    r"(drive|determine|shape)\s+(the\s+)?(stock|share|trading)",
+    r"sentiment",
+    r"re-?rat(e|ing)",
+    r"matter(s)?\s+for\s+the\s+stock",
+    r"(clean|weak|strong)er?[\s-]+than[\s-]+(feared|expected|hoped)",
+    r"(up|down)side\s+(risk|surprise|from\s+here)",
+]
+
+
+def _validate_iv_output(
+    p1: str,
+    p2: str,
+    company_name: str,
+    evidence_brief: str,
+    data_density: str,
+) -> tuple[bool, list[str]]:
+    """
+    Validate Investment View quality.
+    Returns (is_valid, list_of_issues).
+    """
+    combined = f"{p1} {p2}".strip()
+    if not combined:
+        return False, ["empty output"]
+
+    issues: list[str] = []
+    lower = combined.lower()
+
+    # 1. Banned generic phrases
+    for phrase in BANNED_PHRASES_IV:
+        if phrase.lower() in lower:
+            issues.append(f"banned phrase: '{phrase}'")
+
+    # 2. Unsupported confidence words without nearby quantitative backing
+    for word in UNSUPPORTED_CONFIDENCE_WORDS:
+        for m in re.finditer(rf"\b{word}\b", combined, re.I):
+            ctx = combined[max(0, m.start() - 80):min(len(combined), m.end() + 80)]
+            if not re.search(r"\d+\.?\d*\s*%|\d+(?:\.\d+)?[xX]", ctx):
+                issues.append(f"unsupported confidence word '{word}' without quantitative context")
+                break
+
+    # 3. Word count (target 120-180, tolerate 90-250)
+    wc = len(combined.split())
+    if wc < 80:
+        issues.append(f"too short ({wc} words, need >=100)")
+    elif wc > 280:
+        issues.append(f"too long ({wc} words, need <=220)")
+
+    # 4. Company-specific content (>=3 identifiable terms)
+    specific = 0
+    name_tokens = {t.lower() for t in company_name.split()
+                   if len(t) > 2 and t.lower() not in {
+                       "the", "of", "and", "for", "in", "a", "an", "co", "inc",
+                       "ltd", "corp", "plc", "group", "company", "corporation", "limited"}}
+    if any(t in lower for t in name_tokens):
+        specific += 1
+    if re.search(r"\d{1,2}Q\d{2}", combined):
+        specific += 1
+    if re.search(r"(?:revenue|eps|net\s+income|earnings|net\s+sales)", lower):
+        specific += 1
+    if re.search(r"\d+\.?\d*\s*%", combined):
+        specific += 1
+    if re.search(r"(?:qoq|yoy|quarter[- ]over[- ]quarter|year[- ]over[- ]year)", lower):
+        specific += 1
+    if re.search(
+        r"(?:margin|profitability|operating\s+income|EBIT|EBITDA|capacity|"
+        r"utilization|ASP|volume|yield|NIM|NPL|cost[- ]to[- ]income|provisions|"
+        r"impairment|backlog|occupancy|load\s+factor|ARPU|subscriber|"
+        r"production|throughput|pricing|spread)", combined, re.I,
+    ):
+        specific += 1
+    if specific < 3:
+        issues.append(f"insufficient company-specific content ({specific} terms, need >=3)")
+
+    # 5. Reaction-function sentence
+    if not any(re.search(p, combined, re.I) for p in REACTION_MARKERS):
+        issues.append("missing stock-reaction framing (what drives the stock this quarter)")
+
+    # 6. Clear stance in paragraph 1
+    stance_words = [
+        "constructive", "cautious", "balanced", "negative", "neutral",
+        "bullish", "bearish", "defensive", "optimistic", "skeptic",
+        "positive", "weak", "challenged", "demanding", "low bar", "high bar",
+        "into the print",
+    ]
+    if not any(s in p1.lower() for s in stance_words):
+        issues.append("paragraph 1 lacks a clear stance word (constructive/cautious/balanced/etc.)")
+
+    # 7. Evidence contradiction: if evidence shows negative growth but text sounds bullish
+    if data_density != "sparse":
+        ev_lower = evidence_brief.lower()
+        has_negative_growth = bool(re.search(r"(?:qoq|yoy).*?-\d+\.?\d*%", ev_lower))
+        uses_bullish = any(w in lower for w in ["strong growth", "accelerating", "outperformance", "beat expectations"])
+        if has_negative_growth and uses_bullish:
+            issues.append("tone mismatch: evidence shows negative growth but text uses bullish language without explaining why")
+
+    return len(issues) == 0, issues
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Prompt builders
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _build_main_prompt(company_name: str, evidence_brief: str, data_density: str) -> str:
+    sparse_block = ""
+    if data_density == "sparse":
+        sparse_block = """
+SPARSE DATA MODE — data is limited. You MUST:
+- Explicitly acknowledge limited disclosure in your opening stance.
+- Focus on scenario framing and reaction drivers, not point estimates.
+- Include one sentence starting with "With limited pre-release disclosure…" or similar.
+- Avoid false precision. Frame around what KIND of outcome matters.
+"""
+
+    return f"""You are a disciplined equity research analyst writing the "Investment View" for an earnings preview memo on {company_name}. You write with incomplete data. You NEVER invent what you do not have.
+
+═══ EVIDENCE BRIEF ═══
+{evidence_brief}
+═══ END EVIDENCE ═══
+
+TASK: Write the Investment View as exactly 2 paragraphs, totalling 120–180 words.
+{sparse_block}
+REQUIRED STRUCTURE:
+
+Paragraph 1 — Stance + Drivers (~80–100 words):
+• Sentence 1: Clear stance into the print (constructive / cautious / balanced / negative / neutral) with a brief WHY grounded in the evidence.
+• Sentences 2–3: 2–4 company-specific drivers for this quarter. Each MUST reference a concrete metric, business line, or operating concept from the evidence brief (e.g. consensus QoQ/YoY direction, beat history, a news fact). Do not list generic headings.
+
+Paragraph 2 — Reaction driver + Risk (~40–80 words):
+• Sentence 4: What will MOST LIKELY drive the stock reaction this quarter? Name the specific metric or outcome, not a generic list.
+• Sentence 5: Key risk or what would INVALIDATE this view. Name a concrete scenario.
+• If data is sparse, add one explicit uncertainty sentence acknowledging the limitation.
+
+REASONING FRAMEWORK — apply internally before writing:
+• FACT = directly stated in the evidence brief above.
+• INFERENCE = reasonable interpretation from the evidence.
+• UNKNOWN = not supported by the evidence.
+
+Only FACT and INFERENCE may appear as statements.
+UNKNOWN may ONLY appear as explicit uncertainty — NEVER as a disguised fact.
+
+STRICT RULES:
+1. Minimum 3 company-specific nouns, drivers, or operating concepts relevant to {company_name}.
+2. Do NOT invent KPIs, consensus values, guidance, margins, management comments, product trends, or catalysts not in the evidence.
+3. Do NOT say "supportive," "encouraging," "strong," or "improving" UNLESS the evidence quantitatively supports it (e.g. avg surprise > 0, YoY growth positive).
+4. BANNED phrases — do NOT use:
+   "investors will focus on key metrics" / "guidance will be closely watched" / "earnings quality matters" / "market participants will monitor" / "stock reaction will hinge on" / "a strong quarter would support the case" / "all eyes will be on"
+5. Tone MUST match the evidence: weak numbers → do not sound bullish without explaining why weakness may be priced or non-recurring. Constructive setup → say so directly.
+6. When citing a news article, include its index in brackets, e.g. [0].
+
+SELF-CHECK — before returning, score 0–5 on:
+1. Company specificity (3+ company-specific concepts?)
+2. Consistency with evidence (every claim traceable?)
+3. Clear stance (opening sentence unambiguous?)
+4. Stock-reaction framing (what drives the stock?)
+5. Honest uncertainty handling (admits what it doesn't know?)
+If total < 20/25, rewrite once.
+
+Respond with ONLY a JSON object. No markdown fences, no commentary.
+{{
+  "themes": ["theme1", "theme2"],
+  "overall_sentiment": "positive" | "negative" | "neutral" | "mixed",
+  "key_items": ["most important observation"],
+  "uncertainty_factors": ["key uncertainty"],
+  "summary_text": "One-sentence summary.",
+  "investment_view_paragraph_1": "Paragraph 1: Stance + drivers.",
+  "investment_view_paragraph_2": "Paragraph 2: Reaction driver + risk.",
+  "referenced_article_indices": [0],
+  "citation_placements": [{{"paragraph": 1, "after_sentence": 1, "article_index": 0}}],
+  "self_check_score": 22
+}}
+
+citation_placements: paragraph 1 or 2, after_sentence 0-based, article_index from RECENT NEWS.
+You MUST cite at least one article when articles appear in the evidence brief."""
+
+
+def _build_retry_prompt(
+    company_name: str,
+    evidence_brief: str,
+    data_density: str,
+    original_p1: str,
+    original_p2: str,
+    issues: list[str],
+) -> str:
+    issues_text = "\n".join(f"- {i}" for i in issues)
+    return f"""Your previous Investment View draft for {company_name} failed quality validation.
+
+═══ EVIDENCE BRIEF ═══
+{evidence_brief}
+═══ END EVIDENCE ═══
+
+YOUR PREVIOUS OUTPUT:
+Paragraph 1: {original_p1}
+Paragraph 2: {original_p2}
+
+VALIDATION ISSUES:
+{issues_text}
+
+REWRITE both paragraphs to fix ALL issues above:
+- Paragraph 1: clear stance + 2–4 company-specific drivers (80–100 words)
+- Paragraph 2: what drives the stock + key risk (40–80 words)
+- Total 120–180 words
+- Use ONLY evidence from the brief
+- Include 3+ company-specific terms
+- Be specific about what drives the stock reaction
+- Admit uncertainty where evidence is thin
+
+Respond with ONLY a JSON object:
+{{
+  "investment_view_paragraph_1": "Rewritten paragraph 1.",
+  "investment_view_paragraph_2": "Rewritten paragraph 2.",
+  "referenced_article_indices": [],
+  "citation_placements": []
+}}"""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Gemini call helper
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _extract_json(text: str) -> dict | None:
+    """Extract a JSON object from possibly wrapped text (fences, preamble, thinking, etc.)."""
+    text = text.strip()
+    if not text:
+        return None
+
+    # Strip markdown code fences (one or more blocks)
+    fenced = re.search(r"```(?:json)?\s*\n([\s\S]*?)```", text)
+    if fenced:
+        text = fenced.group(1).strip()
+
+    # Direct parse
+    try:
+        out = json.loads(text)
+        return out if isinstance(out, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    # Find the outermost { ... } block (handles preamble/postscript text)
+    first = text.find("{")
+    last = text.rfind("}")
+    if first != -1 and last > first:
+        candidate = text[first:last + 1]
+        try:
+            out = json.loads(candidate)
+            return out if isinstance(out, dict) else None
+        except json.JSONDecodeError:
+            # Try cleaning common issues: trailing commas, unescaped newlines
+            cleaned = re.sub(r",\s*([}\]])", r"\1", candidate)
+            try:
+                out = json.loads(cleaned)
+                return out if isinstance(out, dict) else None
+            except json.JSONDecodeError:
+                pass
+
+    return None
+
+
+def _call_gemini(prompt: str) -> dict | None:
+    """Call Gemini and parse JSON response. Returns None on failure."""
+    settings = cfg()
+    try:
+        model = _get_model()
+        resp = model.generate_content(
+            prompt,
+            generation_config={
+                "max_output_tokens": settings["gemini"]["max_tokens"],
+                "temperature": settings["gemini"]["temperature"],
+            },
+        )
+        text = (resp.text or "").strip()
+        if not text:
+            return None
+        out = _extract_json(text)
+        if out is None:
+            log.warning("Gemini returned non-JSON response: %s…", text[:200])
+        return out
+    except Exception as exc:
+        log.warning("Gemini call failed: %s", exc)
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Main entry point
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def summarize_news(
+    company_name: str,
+    articles: list[dict] | None = None,
+    headlines_fallback: list[str] | None = None,
+    memo_fact_pack: dict | None = None,
+) -> dict:
+    """Send evidence to Gemini, get structured Investment View back."""
+    if articles:
+        return _summarize_with_evidence(company_name, articles, memo_fact_pack)
+    if memo_fact_pack:
+        return _summarize_with_evidence(company_name, None, memo_fact_pack)
+    headlines = headlines_fallback or []
+    if not headlines:
+        return _empty_summary("No headlines or fact pack provided.")
+    return _summarize_headlines_only(company_name, headlines)
+
+
+def _summarize_with_evidence(
+    company_name: str,
+    articles: list[dict] | None,
+    memo_fact_pack: dict | None,
+) -> dict:
+    """Primary path: evidence-based IV with validation and one retry."""
+    evidence_brief, data_density = _build_evidence_brief(company_name, memo_fact_pack, articles)
+    log.info("Evidence brief: %d chars, density=%s", len(evidence_brief), data_density)
+
+    prompt = _build_main_prompt(company_name, evidence_brief, data_density)
+    out = _call_gemini(prompt)
+    if not out:
+        return _empty_summary("Gemini returned empty or unparseable response.")
+
+    _normalize_summary_out(out)
+    p1 = out.get("investment_view_paragraph_1", "")
+    p2 = out.get("investment_view_paragraph_2", "")
+
+    # Post-generation validation → retry once if issues found
+    is_valid, issues = _validate_iv_output(p1, p2, company_name, evidence_brief, data_density)
+    if not is_valid and p1 and p2:
+        log.info("IV validation failed (%d issues), retrying: %s", len(issues), "; ".join(issues))
+        retry_prompt = _build_retry_prompt(company_name, evidence_brief, data_density, p1, p2, issues)
+        retry_out = _call_gemini(retry_prompt)
+        if retry_out:
+            rp1 = (retry_out.get("investment_view_paragraph_1") or "").strip()
+            rp2 = (retry_out.get("investment_view_paragraph_2") or "").strip()
+            if rp1 and rp2:
+                _, issues2 = _validate_iv_output(rp1, rp2, company_name, evidence_brief, data_density)
+                if len(issues2) < len(issues):
+                    log.info("Retry improved: %d → %d issues", len(issues), len(issues2))
+                    out["investment_view_paragraph_1"] = rp1
+                    out["investment_view_paragraph_2"] = rp2
+                    if retry_out.get("referenced_article_indices"):
+                        out["referenced_article_indices"] = retry_out["referenced_article_indices"]
+                    if retry_out.get("citation_placements"):
+                        out["citation_placements"] = retry_out["citation_placements"]
+                else:
+                    log.info("Retry did not improve; keeping original")
+
+    ref_indices = out.get("referenced_article_indices")
+    out["referenced_article_indices"] = [int(x) for x in ref_indices] if isinstance(ref_indices, list) else []
+    placements = out.get("citation_placements")
+    out["citation_placements"] = placements if isinstance(placements, list) else []
+    return out
+
+
+def _summarize_headlines_only(company_name: str, headlines: list[str]) -> dict:
+    """Fallback: headlines only — sparse-data aware prompt."""
+    evidence_brief = (
+        f"COMPANY: {company_name}\nTYPE: Unknown\n\n"
+        "HEADLINES:\n" + "\n".join(f"- {h}" for h in headlines[:30]) +
+        "\n\nDATA GAPS:\n"
+        "- No financial data, consensus, or beat/miss history available\n"
+        "- Only headlines provided — treat all claims as LOW confidence"
+    )
+    prompt = _build_main_prompt(company_name, evidence_brief, "sparse")
+    out = _call_gemini(prompt)
+    if not out:
+        return _empty_summary("Gemini returned empty response.")
+    _normalize_summary_out(out)
+    out["referenced_article_indices"] = []
+    out["citation_placements"] = []
+    return out
+
+
+def _normalize_summary_out(out: dict) -> None:
+    bullets = out.get("investment_view_bullets")
+    if isinstance(bullets, list):
+        out["investment_view_bullets"] = [str(b).strip() for b in bullets if b]
+    else:
+        out["investment_view_bullets"] = []
+    p1 = out.get("investment_view_paragraph_1")
+    p2 = out.get("investment_view_paragraph_2")
+    out["investment_view_paragraph_1"] = (p1 and str(p1).strip()) or ""
+    out["investment_view_paragraph_2"] = (p2 and str(p2).strip()) or ""
+
+
+def _empty_summary(reason: str = "") -> dict:
+    return {
+        "themes": [],
+        "overall_sentiment": "unknown",
+        "key_items": [],
+        "uncertainty_factors": [],
+        "summary_text": reason or "",
+        "investment_view_bullets": [],
+        "investment_view_paragraph_1": "",
+        "investment_view_paragraph_2": "",
+        "referenced_article_indices": [],
+        "citation_placements": [],
+    }

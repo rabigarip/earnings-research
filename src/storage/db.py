@@ -1,0 +1,389 @@
+"""
+SQLite storage layer.
+
+Why SQLite (not JSON/CSV):
+  - Query across runs ("show all failures this week")
+  - Foreign keys keep data consistent
+  - Transactions for free
+  - Migration to Postgres later is one afternoon of work
+  - Zero setup, zero cost, single file
+
+company_master.json stays as the human-curated seed. Everything else
+lives in SQLite from the start.
+"""
+
+from __future__ import annotations
+import json
+import logging
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+from src.config import cfg, root
+
+log = logging.getLogger(__name__)
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS company_master (
+    ticker                      TEXT PRIMARY KEY,
+    company_name                TEXT NOT NULL,
+    company_name_long           TEXT DEFAULT '',
+    exchange                    TEXT NOT NULL,
+    country                     TEXT NOT NULL,
+    currency                    TEXT NOT NULL,
+    isin                        TEXT DEFAULT '',
+    marketscreener_id           TEXT DEFAULT '',
+    marketscreener_company_url  TEXT DEFAULT '',
+    marketscreener_symbol       TEXT DEFAULT '',
+    marketscreener_status       TEXT DEFAULT '',
+    marketscreener_rejection_reason TEXT DEFAULT '',
+    last_verified               TEXT DEFAULT '',
+    zawya_slug                  TEXT DEFAULT '',
+    sector                      TEXT DEFAULT '',
+    industry                    TEXT DEFAULT '',
+    is_bank                     INTEGER DEFAULT 0,
+    notes                       TEXT DEFAULT '',
+    created_at                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    run_id          TEXT PRIMARY KEY,
+    ticker          TEXT NOT NULL,
+    mode            TEXT NOT NULL,
+    started_at      TEXT NOT NULL,
+    finished_at     TEXT,
+    overall_status  TEXT,
+    step_results    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS financial_snapshots (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id           TEXT NOT NULL,
+    ticker           TEXT NOT NULL,
+    source           TEXT NOT NULL,
+    period_type      TEXT NOT NULL,
+    period_label     TEXT NOT NULL,
+    revenue          REAL,
+    ebitda           REAL,
+    ebit             REAL,
+    net_income       REAL,
+    eps              REAL,
+    dps              REAL,
+    announcement_date TEXT,
+    is_consensus     INTEGER DEFAULT 0,
+    currency         TEXT DEFAULT 'SAR',
+    fetched_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS news_items (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id                TEXT NOT NULL,
+    ticker                TEXT NOT NULL,
+    source                TEXT NOT NULL,
+    headline              TEXT NOT NULL,
+    url                   TEXT,
+    published_at          TEXT,
+    snippet               TEXT,
+    sentiment             TEXT,
+    is_likely_stock_moving INTEGER DEFAULT 0,
+    language              TEXT DEFAULT 'en',
+    fetched_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ms_fingerprints (
+    ticker       TEXT PRIMARY KEY,
+    fingerprint  TEXT NOT NULL,
+    run_id       TEXT NOT NULL,
+    updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS report_outputs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id       TEXT NOT NULL,
+    ticker       TEXT NOT NULL,
+    file_path    TEXT NOT NULL,
+    generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+
+def _db_path() -> Path:
+    return root() / cfg()["database"]["path"]
+
+
+def get_conn() -> sqlite3.Connection:
+    p = _db_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(p))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def init_db() -> None:
+    conn = get_conn()
+    conn.executescript(_SCHEMA)
+    _migrate_company_master_identifier_columns(conn)
+    conn.commit()
+    conn.close()
+    log.info("Initialized → %s", _db_path())
+
+
+def _migrate_company_master_identifier_columns(conn: sqlite3.Connection) -> None:
+    """Add identifier-layer columns if missing (for existing DBs)."""
+    cur = conn.execute("PRAGMA table_info(company_master)")
+    names = {row[1] for row in cur.fetchall()}
+    for col, typ in [
+        ("marketscreener_company_url", "TEXT DEFAULT ''"),
+        ("marketscreener_symbol", "TEXT DEFAULT ''"),
+        ("marketscreener_status", "TEXT DEFAULT ''"),
+        ("marketscreener_rejection_reason", "TEXT DEFAULT ''"),
+        ("last_verified", "TEXT DEFAULT ''"),
+    ]:
+        if col not in names:
+            conn.execute(f"ALTER TABLE company_master ADD COLUMN {col} {typ}")
+
+
+def seed_companies() -> int:
+    seed = root() / "data" / "company_master.json"
+    if not seed.exists():
+        log.warning("Seed file not found: %s", seed)
+        return 0
+    with open(seed) as f:
+        rows = json.load(f)
+    conn = get_conn()
+    n = 0
+    for c in rows:
+        slug = c.get("marketscreener_id", "")
+        ms_url = (
+            f"https://www.marketscreener.com/quote/stock/{slug}/"
+            if slug else ""
+        )
+        ms_status = "ok" if slug else ""
+        last_verified = datetime.now(timezone.utc).isoformat() if slug else ""
+
+        conn.execute("""
+            INSERT INTO company_master
+                (ticker, company_name, company_name_long, exchange, country,
+                 currency, isin, marketscreener_id, marketscreener_company_url,
+                 marketscreener_symbol, marketscreener_status, last_verified,
+                 zawya_slug, sector, industry, is_bank, notes)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(ticker) DO UPDATE SET
+                company_name=excluded.company_name,
+                company_name_long=excluded.company_name_long,
+                exchange=excluded.exchange,
+                country=excluded.country,
+                currency=excluded.currency,
+                isin=excluded.isin,
+                marketscreener_id=CASE
+                    WHEN excluded.marketscreener_id != '' THEN excluded.marketscreener_id
+                    ELSE company_master.marketscreener_id
+                END,
+                marketscreener_company_url=CASE
+                    WHEN excluded.marketscreener_company_url != '' THEN excluded.marketscreener_company_url
+                    ELSE company_master.marketscreener_company_url
+                END,
+                marketscreener_symbol=CASE
+                    WHEN excluded.marketscreener_symbol != '' THEN excluded.marketscreener_symbol
+                    ELSE company_master.marketscreener_symbol
+                END,
+                marketscreener_status=CASE
+                    WHEN excluded.marketscreener_status != '' THEN excluded.marketscreener_status
+                    ELSE company_master.marketscreener_status
+                END,
+                last_verified=CASE
+                    WHEN excluded.last_verified != '' THEN excluded.last_verified
+                    ELSE company_master.last_verified
+                END,
+                zawya_slug=excluded.zawya_slug,
+                sector=excluded.sector,
+                industry=excluded.industry,
+                is_bank=excluded.is_bank,
+                notes=excluded.notes,
+                updated_at=CURRENT_TIMESTAMP
+        """, (
+            c["ticker"], c["company_name"], c.get("company_name_long", ""),
+            c["exchange"], c["country"], c["currency"],
+            c.get("isin", ""), slug, ms_url,
+            c.get("marketscreener_symbol", "") or c.get("ticker", ""),
+            ms_status, last_verified,
+            c.get("zawya_slug", ""),
+            c.get("sector", ""), c.get("industry", ""),
+            c.get("is_bank", False), c.get("notes", ""),
+        ))
+        n += 1
+    conn.commit()
+    conn.close()
+    log.info("Seeded %s companies", n)
+    return n
+
+
+def load_company(ticker: str) -> dict | None:
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM company_master WHERE ticker = ?", (ticker,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_companies() -> list[dict]:
+    """Return all companies for API/UI: ticker, company_name, exchange, country."""
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT ticker, company_name, exchange, country, currency FROM company_master ORDER BY ticker"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_company_marketscreener(
+    ticker: str,
+    marketscreener_company_url: str,
+    marketscreener_symbol: str,
+    marketscreener_status: str,
+    last_verified: str,
+    marketscreener_id: str | None = None,
+) -> None:
+    """Update cached MarketScreener fields after ISIN-based resolution."""
+    slug = marketscreener_id
+    if not slug and marketscreener_company_url:
+        import re
+        m = re.search(r"/quote/stock/([^/]+)/?", marketscreener_company_url)
+        if m:
+            slug = m.group(1)
+    conn = get_conn()
+    conn.execute("""
+        UPDATE company_master SET
+            marketscreener_company_url = ?,
+            marketscreener_symbol = ?,
+            marketscreener_status = ?,
+            marketscreener_rejection_reason = '',
+            last_verified = ?,
+            marketscreener_id = COALESCE(?, marketscreener_id),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE ticker = ?
+    """, (
+        marketscreener_company_url,
+        marketscreener_symbol,
+        marketscreener_status,
+        last_verified,
+        slug,
+        ticker,
+    ))
+    conn.commit()
+    conn.close()
+
+
+def invalidate_marketscreener_cache(ticker: str) -> None:
+    """Mark cached MarketScreener URL as stale (e.g. after redirect to homepage). Does not clear URL/slug."""
+    conn = get_conn()
+    conn.execute("""
+        UPDATE company_master SET
+            marketscreener_status = 'stale',
+            last_verified = '',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE ticker = ?
+    """, (ticker,))
+    conn.commit()
+    conn.close()
+
+
+def reject_marketscreener_candidate(ticker: str, reason: str, status: str = "needs_review") -> None:
+    """
+    Record that a re-resolved candidate was rejected. Do not overwrite URL/slug.
+    Sets marketscreener_status = status (default needs_review) and stores reason.
+    """
+    conn = get_conn()
+    conn.execute("""
+        UPDATE company_master SET
+            marketscreener_status = ?,
+            marketscreener_rejection_reason = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE ticker = ?
+    """, (status, reason[:500] if reason else "", ticker))
+    conn.commit()
+    conn.close()
+
+
+def set_marketscreener_source_redirect(ticker: str) -> None:
+    """
+    Mark MarketScreener as source_redirect: entity/slug is correct but
+    company/consensus URLs redirect to homepage (known source-behavior exception).
+    Does not clear URL/slug; stops repeated re-resolution attempts.
+    """
+    conn = get_conn()
+    conn.execute("""
+        UPDATE company_master SET
+            marketscreener_status = 'source_redirect',
+            marketscreener_rejection_reason = '',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE ticker = ?
+    """, (ticker,))
+    conn.commit()
+    conn.close()
+
+
+def save_run(run_id: str, ticker: str, mode: str, started_at: str,
+             finished_at: str, status: str, steps: list[dict]) -> None:
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO pipeline_runs
+            (run_id, ticker, mode, started_at, finished_at, overall_status, step_results)
+        VALUES (?,?,?,?,?,?,?)
+    """, (run_id, ticker, mode, started_at, finished_at, status, json.dumps(steps)))
+    conn.commit()
+    conn.close()
+
+
+def list_runs() -> list[dict]:
+    """List pipeline runs with company name and country from company_master."""
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT r.run_id, r.ticker, r.started_at, r.finished_at, r.overall_status, r.step_results,
+               c.company_name, c.country
+        FROM pipeline_runs r
+        LEFT JOIN company_master c ON c.ticker = r.ticker
+        ORDER BY r.started_at DESC
+    """).fetchall()
+    conn.close()
+    out = []
+    for row in rows:
+        d = dict(row)
+        # Parse step_results for warnings count
+        steps_raw = d.get("step_results") or "[]"
+        try:
+            steps = json.loads(steps_raw) if isinstance(steps_raw, str) else steps_raw
+        except Exception:
+            steps = []
+        warnings = sum(1 for s in steps if s.get("status") in ("partial", "failed"))
+        d["warnings"] = warnings
+        d["step_results"] = steps
+        out.append(d)
+    return out
+
+
+def load_run(run_id: str) -> dict | None:
+    """Load one run by run_id with step_results parsed."""
+    conn = get_conn()
+    row = conn.execute("""
+        SELECT r.run_id, r.ticker, r.mode, r.started_at, r.finished_at, r.overall_status, r.step_results,
+               c.company_name, c.country
+        FROM pipeline_runs r
+        LEFT JOIN company_master c ON c.ticker = r.ticker
+        WHERE r.run_id = ?
+    """, (run_id,)).fetchone()
+    conn.close()
+    if not row:
+        return None
+    d = dict(row)
+    steps_raw = d.get("step_results") or "[]"
+    try:
+        steps = json.loads(steps_raw) if isinstance(steps_raw, str) else steps_raw
+    except Exception:
+        steps = []
+    d["step_results"] = steps
+    d["warnings"] = sum(1 for s in steps if s.get("status") in ("partial", "failed"))
+    return d

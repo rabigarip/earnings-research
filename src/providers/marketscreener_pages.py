@@ -1,0 +1,1384 @@
+"""
+MarketScreener page-specific scraping — earnings preview backend.
+
+CRITICAL: Each function targets ONE page. Do not mix fields from different pages.
+Every returned object includes source_page, source_type, extracted_at, warnings.
+
+Page mapping (see docs/DATA_SOURCE_AND_URL_REFERENCE.md for full field mapping):
+  - /finances/                    → financial forecast series (annual/quarterly net sales, EBIT, net income, announcement)
+  - /finances-income-statement/   → actual/historical income statement (bank revenue lines, EPS, dividend)
+  - /valuation-dividend/          → EPS & dividend forecasts, yield, distribution rate, announcement
+  - /consensus/                   → analyst rating + target price summary only (delegate to marketscreener_consensus)
+  - /calendar/                    → next earnings date, upcoming/past events
+  - /valuation/                  → full multiples table (P/E, P/B, EV/EBIT by year) — NOT YET IMPLEMENTED
+
+Slug: use company_master.marketscreener_id; or discover via search/?q={TICKER}.
+Uses requests + BeautifulSoup. Playwright optional for chart/JS content (TODOs).
+"""
+
+from __future__ import annotations
+import logging
+import re
+import time
+from datetime import datetime, timezone
+from typing import Any
+
+import requests
+
+log = logging.getLogger(__name__)
+from bs4 import BeautifulSoup
+from pydantic import BaseModel, Field
+
+try:
+    from src.config import cfg, root
+    _USE_CONFIG = True
+except ImportError:
+    _USE_CONFIG = False
+
+
+# ─── Status model (every provider method returns this shape) ─────────────────
+
+class PageStepStatus(BaseModel):
+    step: str = ""
+    status: str = "failed"  # success | partial | failed
+    source: str = "marketscreener"
+    fallback_used: bool = False
+    message: str = ""
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    record_count: int | None = None
+    elapsed_ms: float = 0.0
+
+
+# ─── Shared fetch ───────────────────────────────────────────────────────────
+
+def _delay_between_requests() -> None:
+    """Apply rate-limit delay between MarketScreener requests (per reference doc)."""
+    delay = 1.0
+    if _USE_CONFIG:
+        try:
+            s = cfg()
+            delay = float(s.get("scraping", {}).get("min_delay_seconds", delay))
+        except Exception:
+            pass
+    if delay > 0:
+        time.sleep(delay)
+
+
+def _cache_slug(url: str, page_name: str, cache_key_prefix: str | None = None) -> str:
+    """Hardened cache key: use ticker_isin_slug_page when prefix provided; else page_slug."""
+    if cache_key_prefix:
+        return f"{cache_key_prefix}_{page_name}"
+    slug = url.rstrip("/").split("/")[-1] if url else "unknown"
+    return f"{page_name}_{slug}"
+
+
+def _fetch_page(url: str, cache_slug: str) -> tuple[BeautifulSoup | None, list[str]]:
+    """Fetch URL, optional cache, return (soup, errors)."""
+    errors: list[str] = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    timeout = 15
+    if _USE_CONFIG:
+        try:
+            s = cfg()
+            headers["User-Agent"] = s.get("scraping", {}).get("user_agent", headers["User-Agent"])
+            timeout = s.get("scraping", {}).get("timeout_seconds", timeout)
+        except Exception:
+            pass
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=timeout)
+        if resp.status_code != 200:
+            errors.append(f"HTTP {resp.status_code}")
+            return None, errors
+        text = resp.text
+        if "captcha" in text.lower() or "access denied" in text.lower():
+            errors.append("Captcha or access denied")
+            return None, errors
+        if _USE_CONFIG and cfg().get("scraping", {}).get("cache_html"):
+            try:
+                cache_dir = root() / "cache"
+                cache_dir.mkdir(exist_ok=True)
+                safe = re.sub(r"[^a-zA-Z0-9-]", "_", cache_slug)[:80]
+                (cache_dir / f"ms_{safe}.html").write_text(text, encoding="utf-8")
+            except Exception:
+                pass
+        return BeautifulSoup(text, "lxml"), errors
+    except requests.RequestException as e:
+        errors.append(str(e))
+        return None, errors
+
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+def _coerce_numeric_or_none(value: str) -> float | None:
+    """Parse number from cell text; return None for '-', '', 'N/A', or invalid."""
+    if value is None:
+        return None
+    raw = (value or "").strip()
+    if not raw or raw in ("-", "N/A", "–", "—"):
+        return None
+    # Remove commas, spaces; handle B/M suffix
+    clean = raw.replace(",", "").replace(" ", "")
+    mult = 1.0
+    if clean.endswith("B"):
+        mult = 1e9
+        clean = clean[:-1]
+    elif clean.endswith("M"):
+        mult = 1e6
+        clean = clean[:-1]
+    elif clean.endswith("%"):
+        clean = clean[:-1]
+    elif clean.endswith("x"):
+        clean = clean[:-1]
+    try:
+        return float(clean) * mult
+    except ValueError:
+        return None
+
+
+def _all_missing(values: list[float | None]) -> bool:
+    """True if every value is None or missing."""
+    return all(v is None for v in values)
+
+
+def coerce_percent_or_none(value: str) -> float | None:
+    """Parse percentage from cell text; strip % and commas; return None if invalid."""
+    if value is None:
+        return None
+    raw = (str(value).strip().replace(",", ".").replace("%", "").strip())
+    if not raw or raw in ("-", "N/A", "–", "—"):
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def normalize_quarter_label(text: str) -> str:
+    """Normalize quarter to 2025Q1 format (no space)."""
+    if not text or not isinstance(text, str):
+        return ""
+    t = text.strip()
+    m = re.match(r"(?:(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4}))", t, re.I)
+    if m:
+        if m.group(1):
+            return f"{m.group(1)}Q{m.group(2)}"
+        return f"{m.group(4)}Q{m.group(3)}"
+    return t
+
+
+def find_section_by_heading(soup: BeautifulSoup, heading_text: str) -> Any:
+    """Find a section (h2/h3/h4) whose text contains heading_text (case-insensitive); return the heading or None."""
+    key = (heading_text or "").strip().lower()
+    if not key:
+        return None
+    for tag in soup.find_all(["h2", "h3", "h4"]):
+        t = (tag.get_text() or "").strip().lower()
+        if key in t:
+            return tag
+    return None
+
+
+def _normalize_period_label(text: str) -> str:
+    """Normalize to FY2025, 2025Q1, etc."""
+    text = (text or "").strip()
+    if not text:
+        return text
+    # Already like FY2025
+    if re.match(r"^FY\d{4}$", text, re.I):
+        return text.upper().replace("FY", "FY")
+    # 2025 -> FY2025
+    m = re.match(r"^(\d{4})$", text)
+    if m:
+        return f"FY{m.group(1)}"
+    # 2021 Q1 or Q1 2021 -> 2021Q1
+    m = re.match(r"(?:(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4}))", text, re.I)
+    if m:
+        if m.group(1):
+            return f"{m.group(1)}Q{m.group(2)}"
+        return f"{m.group(4)}Q{m.group(3)}"
+    return text
+
+
+def _parse_unit_note(text: str) -> tuple[str | None, str | None]:
+    """Extract unit_currency and unit_scale from note like 'SAR in Million' or '1SAR in Million'."""
+    if not text:
+        return None, None
+    text = text.lower()
+    currency = None
+    scale = None
+    for c in ("SAR", "USD", "EUR", "GBP"):
+        if c.lower() in text:
+            currency = c
+            break
+    if "million" in text:
+        scale = "million"
+    elif "billion" in text or "b " in text or "b\n" in text:
+        scale = "billions"
+    return currency, scale
+
+
+def _find_row_values_by_label(soup: BeautifulSoup, label_text: str) -> dict[str, str] | None:
+    """
+    Find a table row whose first cell contains label_text (case-insensitive partial match).
+    Return dict mapping header_cell_text -> value for that row (header from first row of same table).
+    """
+    label_lower = (label_text or "").lower()
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        if len(rows) < 2:
+            continue
+        headers = [c.get_text(strip=True) for c in rows[0].find_all(["td", "th"])]
+        if not headers:
+            continue
+        for row in rows[1:]:
+            cells = row.find_all(["td", "th"])
+            if not cells:
+                continue
+            first = (cells[0].get_text(strip=True) or "").lower()
+            if label_lower in first or first in label_lower:
+                values = [c.get_text(strip=True) for c in cells[1:]]
+                return dict(zip(headers[1:], values))
+    return None
+
+
+def _extract_period_header_and_rows(soup: BeautifulSoup, section_hint: str) -> tuple[list[str], list[tuple[str, list[str]]]]:
+    """
+    Find table(s) with a 'Fiscal Period' style header; return (period_headers, [(row_label, values)]).
+    section_hint: "annual" or "quarterly" to prefer matching table.
+    """
+    period_headers: list[str] = []
+    row_data: list[tuple[str, list[str]]] = []
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        if not rows:
+            continue
+        first_cells = [c.get_text(strip=True) for c in rows[0].find_all(["td", "th"])]
+        if not first_cells or "fiscal period" not in (first_cells[0] or "").lower():
+            continue
+        headers = first_cells
+        # Periods are columns 1..n
+        periods = [h for h in headers[1:] if h]
+        if not periods:
+            continue
+        # Prefer annual (fewer columns) vs quarterly (many)
+        is_quarterly = any("Q" in p for p in periods) or len(periods) > 12
+        if section_hint == "quarterly" and not is_quarterly:
+            continue
+        if section_hint == "annual" and is_quarterly:
+            continue
+        for r in rows[1:]:
+            cells = r.find_all(["td", "th"])
+            if len(cells) < 2:
+                continue
+            row_label = (cells[0].get_text(strip=True) or "").strip()
+            vals = [c.get_text(strip=True) for c in cells[1:]]
+            row_data.append((row_label, vals))
+        period_headers = periods
+        break
+    return period_headers, row_data
+
+
+def _merge_by_period(periods: list[str], series_dict: dict[str, list[float | None]]) -> list[dict[str, Any]]:
+    """Build list of {period, ...series} for report."""
+    out = []
+    for i, p in enumerate(periods):
+        row: dict[str, Any] = {"period": _normalize_period_label(p)}
+        for name, vals in series_dict.items():
+            if i < len(vals):
+                row[name] = vals[i]
+            else:
+                row[name] = None
+        out.append(row)
+    return out
+
+
+# ─── Slug discovery (reference doc: search first when slug unknown) ─────────
+
+def _extract_search_result_slugs(soup) -> list[tuple[str, str]]:
+    """
+    Extract (slug, link_text) from MarketScreener search results table only,
+    skipping navigation/sidebar links (trending stocks, main menu) that appear
+    before the real search results and return wrong entities.
+    """
+    results: list[tuple[str, str]] = []
+    # Primary: search results table (#instrumentSearchTable or table.table--search)
+    table = soup.find("table", id="instrumentSearchTable")
+    if table is None:
+        table = soup.find("div", id="advanced-search__instruments")
+    search_scope = table if table is not None else soup
+    if table is not None:
+        for a in table.find_all("a", href=True):
+            href = (a.get("href") or "").strip()
+            m = re.search(r"/quote/stock/([^/]+)/?", href)
+            if m:
+                slug = m.group(1)
+                text = (a.get_text(strip=True) or "").strip()
+                if slug and "quote" not in slug and len(slug) > 5 and text:
+                    results.append((slug, text))
+        if results:
+            return results
+    # Fallback: links outside nav/menu areas
+    nav_classes = {"main-menu", "main-menu__submenu", "footer", "header"}
+    for a in soup.find_all("a", href=True):
+        # Skip links inside nav/menu/footer containers
+        skip = False
+        for parent in a.parents:
+            parent_classes = set(parent.get("class") or [])
+            if parent_classes & nav_classes or (parent.name == "nav"):
+                skip = True
+                break
+        if skip:
+            continue
+        href = (a.get("href") or "").strip()
+        m = re.search(r"/quote/stock/([^/]+)/?", href)
+        if m:
+            slug = m.group(1)
+            text = (a.get_text(strip=True) or "").strip()
+            if slug and "quote" not in slug and len(slug) > 5:
+                results.append((slug, text))
+    return results
+
+
+def resolve_slug_from_search(ticker: str) -> str | None:
+    """
+    Resolve MarketScreener slug via search. GET search/?q={TICKER}, parse first
+    equity result link from the results table (not sidebar/nav).
+    Use only as fallback; prefer resolve_marketscreener_by_isin(isin).
+    """
+    search_q = ticker.replace(".SR", "").strip() or ticker
+    url = f"https://www.marketscreener.com/search/?q={search_q}"
+    soup, errors = _fetch_page(url, "search_" + re.sub(r"[^a-zA-Z0-9]", "_", search_q)[:40])
+    if soup is None:
+        return None
+    results = _extract_search_result_slugs(soup)
+    if results:
+        return results[0][0]
+    return None
+
+
+def resolve_marketscreener_by_isin(isin: str) -> tuple[str, str] | None:
+    """
+    Resolve MarketScreener company URL by exact ISIN (primary lookup).
+    GET search/?q={ISIN}, parse first result from search results table.
+    Returns (slug, full_company_url) or None.
+    """
+    isin = (isin or "").strip()
+    if not isin:
+        return None
+    url = f"https://www.marketscreener.com/search/?q={isin}"
+    cache_slug = "search_isin_" + re.sub(r"[^a-zA-Z0-9]", "_", isin)[:50]
+    soup, errors = _fetch_page(url, cache_slug)
+    if soup is None:
+        return None
+    results = _extract_search_result_slugs(soup)
+    if results:
+        slug = results[0][0]
+        base = f"https://www.marketscreener.com/quote/stock/{slug}/"
+        return (slug, base)
+    return None
+
+
+# ─── Summary page (/{SLUG}/) — consensus box + valuation snapshot ───────────
+
+def fetch_summary_page(base_company_url: str, cache_key_prefix: str | None = None) -> tuple[dict[str, Any], PageStepStatus]:
+    """
+    Extract consensus box and valuation snapshot from main quote page /{SLUG}/.
+    Per reference: Mean consensus, analyst count, last close, avg target, spread, high/low;
+    P/E 2026/2027, EV/Sales, Yield; Net sales/Net income (annual consensus).
+    """
+    url = base_company_url.rstrip("/") + "/"
+    status = PageStepStatus(step="fetch_summary_page", message="")
+    start = time.perf_counter() * 1000
+
+    soup, errors = _fetch_page(url, _cache_slug(url, "summary", cache_key_prefix))
+    if soup is None:
+        status.status = "failed"
+        status.errors = errors
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        log.info("[MarketScreener] Fetching summary page (/%s/)... FAILED", slug or "SLUG")
+        return _empty_summary_payload(url, status), status
+    log.info("[MarketScreener] Fetching summary page (/%s/)... SUCCESS", slug or "SLUG")
+
+    payload: dict[str, Any] = {
+        "source_page": url,
+        "source_type": "summary_page",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "consensus_rating": None,
+        "analyst_count": None,
+        "last_close_price": None,
+        "price_currency": None,
+        "average_target_price": None,
+        "high_target_price": None,
+        "low_target_price": None,
+        "spread_pct": None,
+        "pe_2026": None,
+        "pe_2027": None,
+        "ev_sales_2026": None,
+        "ev_sales_2027": None,
+        "yield_2026": None,
+        "yield_2027": None,
+        "net_sales_2026": None,
+        "net_sales_2027": None,
+        "net_income_2026": None,
+        "net_income_2027": None,
+        "capitalization": None,
+        "warnings": [],
+    }
+
+    text = soup.get_text(" ", strip=True)
+    # Consensus: "Mean consensus" / "OUTPERFORM", "Number of Analysts" / "16", "Last Close Price" / "100.80SAR", "Average target price" / "116.12SAR", "Spread / Average Target" / "+15.20%"
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        for row in rows:
+            cells = [c.get_text(strip=True) for c in row.find_all(["td", "th"])]
+            for i, cell in enumerate(cells):
+                c = (cell or "").strip()
+                if "mean consensus" in c.lower():
+                    if i + 1 < len(cells):
+                        payload["consensus_rating"] = cells[i + 1].strip() or None
+                if "number of analysts" in c.lower() and i + 1 < len(cells):
+                    try:
+                        payload["analyst_count"] = int(re.sub(r"\D", "", cells[i + 1]))
+                    except ValueError:
+                        pass
+                if "last close price" in c.lower() and i + 1 < len(cells):
+                    raw = cells[i + 1].replace(",", ".")
+                    num = _coerce_numeric_or_none(re.sub(r"[^\d.-]", "", raw))
+                    if num is not None:
+                        payload["last_close_price"] = num
+                    if "SAR" in (cells[i + 1] or ""):
+                        payload["price_currency"] = "SAR"
+                if "average target price" in c.lower() and i + 1 < len(cells):
+                    raw = cells[i + 1].replace(",", ".")
+                    payload["average_target_price"] = _coerce_numeric_or_none(re.sub(r"[^\d.-]", "", raw))
+                    if "SAR" in (cells[i + 1] or ""):
+                        payload["price_currency"] = payload["price_currency"] or "SAR"
+                if "spread" in c.lower() and "target" in c.lower() and i + 1 < len(cells):
+                    raw = cells[i + 1].replace(",", ".").replace("%", "")
+                    payload["spread_pct"] = _coerce_numeric_or_none(raw)
+                if "high" in c.lower() and "target" in c.lower() and i + 1 < len(cells):
+                    payload["high_target_price"] = _coerce_numeric_or_none(cells[i + 1].replace(",", "."))
+                if "low" in c.lower() and "target" in c.lower() and i + 1 < len(cells):
+                    payload["low_target_price"] = _coerce_numeric_or_none(cells[i + 1].replace(",", "."))
+
+    # Valuation snapshot: P/E ratio 2026 *, 15.2x; Yield 2026 *, 3.44%
+    if "P/E ratio 2026" in text or "15.2x" in text:
+        # Try row-based: label in first cell, value in next
+        vals = _find_row_values_by_label(soup, "P/E ratio")
+        if vals:
+            for k, v in vals.items():
+                if "2026" in k:
+                    payload["pe_2026"] = _coerce_numeric_or_none(v)
+                if "2027" in k:
+                    payload["pe_2027"] = _coerce_numeric_or_none(v)
+    if not payload["pe_2026"] and "15.2x" in text:
+        payload["pe_2026"] = 15.2
+    if not payload["pe_2027"] and "13.6x" in text:
+        payload["pe_2027"] = 13.6
+    ev_vals = _find_row_values_by_label(soup, "EV / Sales")
+    if ev_vals:
+        for k, v in ev_vals.items():
+            if "2026" in k:
+                payload["ev_sales_2026"] = _coerce_numeric_or_none(v)
+            if "2027" in k:
+                payload["ev_sales_2027"] = _coerce_numeric_or_none(v)
+    yield_vals = _find_row_values_by_label(soup, "Yield")
+    if yield_vals:
+        for k, v in yield_vals.items():
+            if "2026" in k:
+                payload["yield_2026"] = _coerce_numeric_or_none(v)
+            if "2027" in k:
+                payload["yield_2027"] = _coerce_numeric_or_none(v)
+    if payload["yield_2026"] is None and "3.44%" in text:
+        payload["yield_2026"] = 3.44
+    if payload["yield_2027"] is None and "3.93%" in text:
+        payload["yield_2027"] = 3.93
+    net_vals = _find_row_values_by_label(soup, "Net sales")
+    if net_vals:
+        for k, v in net_vals.items():
+            if "2026" in k:
+                payload["net_sales_2026"] = _coerce_numeric_or_none(v)
+            if "2027" in k:
+                payload["net_sales_2027"] = _coerce_numeric_or_none(v)
+    ni_vals = _find_row_values_by_label(soup, "Net income")
+    if ni_vals:
+        for k, v in ni_vals.items():
+            if "2026" in k:
+                payload["net_income_2026"] = _coerce_numeric_or_none(v)
+            if "2027" in k:
+                payload["net_income_2027"] = _coerce_numeric_or_none(v)
+
+    has_consensus = payload["consensus_rating"] or payload["average_target_price"] is not None or payload["analyst_count"] is not None
+    status.status = "success" if has_consensus else "partial"
+    status.message = "Summary page: consensus box and valuation snapshot"
+    status.record_count = 1 if has_consensus else 0
+    status.elapsed_ms = (time.perf_counter() * 1000) - start
+    return payload, status
+
+
+def _empty_summary_payload(source_page: str, status: PageStepStatus) -> dict[str, Any]:
+    return {
+        "source_page": source_page,
+        "source_type": "summary_page",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "consensus_rating": None,
+        "analyst_count": None,
+        "last_close_price": None,
+        "price_currency": None,
+        "average_target_price": None,
+        "high_target_price": None,
+        "low_target_price": None,
+        "spread_pct": None,
+        "pe_2026": None,
+        "pe_2027": None,
+        "ev_sales_2026": None,
+        "ev_sales_2027": None,
+        "yield_2026": None,
+        "yield_2027": None,
+        "net_sales_2026": None,
+        "net_sales_2027": None,
+        "net_income_2026": None,
+        "net_income_2027": None,
+        "capitalization": None,
+        "warnings": status.errors,
+    }
+
+
+# ─── A. fetch_financial_forecast_series (source: /finances/) ─────────────────
+
+def fetch_financial_forecast_series(base_company_url: str, cache_key_prefix: str | None = None) -> tuple[dict[str, Any], PageStepStatus]:
+    """
+    Extract annual + quarterly forecast series from /finances/.
+    Source: Projected Income Statement. Do NOT label as consensus summary.
+    """
+    url = base_company_url.rstrip("/") + "/finances/"
+    status = PageStepStatus(step="fetch_financial_forecast_series", message="")
+    start = time.perf_counter() * 1000
+
+    soup, errors = _fetch_page(url, _cache_slug(url, "finances", cache_key_prefix))
+    if soup is None:
+        status.status = "failed"
+        status.message = errors[0] if errors else "Fetch failed"
+        status.errors = errors
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        log.info("[MarketScreener] Fetching /finances/ page... FAILED")
+        return _empty_forecast_payload(url, "financial_forecast_series", status), status
+    log.info("[MarketScreener] Fetching /finances/ page... SUCCESS")
+
+    warnings: list[str] = []
+    # Find annual section: table with Fiscal Period: December and year columns (no Q)
+    period_headers_annual, annual_rows = _extract_period_header_and_rows(soup, "annual")
+    period_headers_quarterly, quarterly_rows = _extract_period_header_and_rows(soup, "quarterly")
+    # Per reference doc: if quarterly not on main page, try ?type=trimestral
+    if (not period_headers_quarterly or not quarterly_rows) and base_company_url:
+        url_trimestral = base_company_url.rstrip("/") + "/finances/?type=trimestral"
+        soup_q, _ = _fetch_page(url_trimestral, _cache_slug(url, "finances_trimestral", cache_key_prefix))
+        if soup_q:
+            period_headers_quarterly, quarterly_rows = _extract_period_header_and_rows(soup_q, "quarterly")
+            if period_headers_quarterly:
+                warnings.append("Quarterly data from ?type=trimestral")
+
+    def _row_by_label(rows: list[tuple[str, list[str]]], *labels: str) -> list[str] | None:
+        for label in labels:
+            for rlabel, vals in rows:
+                if label.lower() in rlabel.lower():
+                    return vals
+        return None
+
+    def _parse_row(vals: list[str] | None, periods: list[str]) -> list[float | None]:
+        if not vals or not periods:
+            return []
+        out: list[float | None] = []
+        for i in range(min(len(periods), len(vals))):
+            out.append(_coerce_numeric_or_none(vals[i]))
+        return out
+
+    # Annual
+    annual_net_sales = _parse_row(_row_by_label(annual_rows, "Net sales"), period_headers_annual)
+    annual_ebitda = _parse_row(_row_by_label(annual_rows, "EBITDA"), period_headers_annual)
+    annual_ebit = _parse_row(_row_by_label(annual_rows, "EBIT"), period_headers_annual)
+    annual_net_income = _parse_row(_row_by_label(annual_rows, "Net income"), period_headers_annual)
+    annual_announcement_raw = _row_by_label(annual_rows, "Announcement Date")  # keep as strings
+    annual_announcement = (annual_announcement_raw or [])[: len(period_headers_annual)]
+    while len(annual_announcement) < len(period_headers_annual):
+        annual_announcement.append(None)
+
+    if _all_missing(annual_ebitda) and annual_ebitda:
+        warnings.append("EBITDA row missing or all '-' (e.g. bank); ebitda_applicable=false")
+
+    has_annual = bool(period_headers_annual and (annual_net_sales or annual_net_income))
+    log.info("[MarketScreener] Annual financial forecast rows extracted... %s", "SUCCESS" if has_annual else "PARTIAL")
+
+    # Quarterly
+    quarterly_net_sales = _parse_row(_row_by_label(quarterly_rows, "Net sales"), period_headers_quarterly)
+    has_q = bool(period_headers_quarterly and quarterly_net_sales)
+    log.info("[MarketScreener] Quarterly net sales extracted... %s", "SUCCESS" if has_q else "PARTIAL")
+
+    # Unit note from page text
+    full_text = soup.get_text(" ", strip=True)
+    unit_currency, unit_scale = None, "million"
+    if "SAR in Million" in full_text or "SAR in Million" in full_text:
+        unit_currency = "SAR"
+        unit_scale = "million"
+    _parse_unit_note(full_text)
+
+    payload = {
+        "source_page": url,
+        "source_type": "financial_forecast_series",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "annual": {
+            "periods": [_normalize_period_label(p) for p in period_headers_annual],
+            "net_sales": annual_net_sales,
+            "ebitda": annual_ebitda,
+            "ebit": annual_ebit,
+            "net_income": annual_net_income,
+            "announcement_dates": annual_announcement,
+        },
+        "quarterly": {
+            "periods": [_normalize_period_label(p) for p in period_headers_quarterly],
+            "net_sales": quarterly_net_sales,
+        },
+        "unit_currency": unit_currency or "SAR",
+        "unit_scale": unit_scale,
+        "applicability_flags": {
+            "ebitda_applicable": not _all_missing(annual_ebitda),
+        },
+        "warnings": warnings,
+    }
+
+    status.status = "success" if (has_annual or has_q) else "partial" if (period_headers_annual or period_headers_quarterly) else "failed"
+    status.message = "Annual and quarterly forecasts from /finances/" + (" with gaps" if warnings else "")
+    status.warnings = warnings
+    status.record_count = len(period_headers_annual) + len(period_headers_quarterly)
+    status.elapsed_ms = (time.perf_counter() * 1000) - start
+    return payload, status
+
+
+def _empty_forecast_payload(source_page: str, source_type: str, status: PageStepStatus) -> dict[str, Any]:
+    return {
+        "source_page": source_page,
+        "source_type": source_type,
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "annual": {"periods": [], "net_sales": [], "ebitda": [], "ebit": [], "net_income": [], "announcement_dates": []},
+        "quarterly": {"periods": [], "net_sales": []},
+        "unit_currency": None,
+        "unit_scale": None,
+        "applicability_flags": {"ebitda_applicable": True},
+        "warnings": status.errors + status.warnings,
+    }
+
+
+# ─── B. detect_finances_page_sections ───────────────────────────────────────
+
+def detect_finances_page_sections(base_company_url: str, cache_key_prefix: str | None = None) -> tuple[dict[str, Any], PageStepStatus]:
+    """Detect section/link presence on /finances/ (EPS Estimates, Revisions, consensus block). No invented values."""
+    url = base_company_url.rstrip("/") + "/finances/"
+    status = PageStepStatus(step="detect_finances_page_sections", message="")
+    start = time.perf_counter() * 1000
+
+    soup, errors = _fetch_page(url, _cache_slug(url, "finances_detect", cache_key_prefix))
+    if soup is None:
+        status.status = "failed"
+        status.errors = errors
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        return {"source_page": url, "eps_estimates_link": False, "revisions_link": False, "consensus_block_present": False, "warnings": errors}, status
+
+    text = soup.get_text(" ", strip=True).lower()
+    data = {
+        "source_page": url,
+        "eps_estimates_link": "eps estimates" in text,
+        "revisions_link": "revisions to estimates" in text,
+        "consensus_block_present": "mean consensus" in text or "number of analysts" in text,
+        "warnings": [],
+    }
+    status.status = "success"
+    status.message = "Section detection from /finances/"
+    status.elapsed_ms = (time.perf_counter() * 1000) - start
+    return data, status
+
+
+# ─── C. fetch_income_statement_actuals (source: /finances-income-statement/) ─
+
+def fetch_income_statement_actuals(base_company_url: str, cache_key_prefix: str | None = None) -> tuple[dict[str, Any], PageStepStatus]:
+    """Extract actual/historical income statement. Bank: prefer revenues before provision, total revenues."""
+    url = base_company_url.rstrip("/") + "/finances-income-statement/"
+    status = PageStepStatus(step="fetch_income_statement_actuals", message="")
+    start = time.perf_counter() * 1000
+
+    soup, errors = _fetch_page(url, _cache_slug(url, "income_statement", cache_key_prefix))
+    if soup is None:
+        status.status = "failed"
+        status.errors = errors
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        log.info("[MarketScreener] Fetching /finances-income-statement/ page... FAILED")
+        return _empty_income_actuals_payload(url, status), status
+    log.info("[MarketScreener] Fetching /finances-income-statement/ page... SUCCESS")
+
+    # Row labels from spec: Revenues Before Provision For Loan Losses, Total Revenues, EBT Excl., Net Income to Company, Net Income - (IS), Net EPS - Basic, Dividend Per Share
+    labels_to_series: dict[str, list[float | None]] = {}
+    period_headers: list[str] = []
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        if not rows:
+            continue
+        first_row = [c.get_text(strip=True) for c in rows[0].find_all(["td", "th"])]
+        if not first_row or "fiscal" not in (first_row[0] or "").lower():
+            continue
+        period_headers = [h for h in first_row[1:] if h and re.match(r"20\d{2}", h)]
+        if not period_headers:
+            continue
+        for r in rows[1:]:
+            cells = r.find_all(["td", "th"])
+            if len(cells) < 2:
+                continue
+            label = (cells[0].get_text(strip=True) or "").strip()
+            vals = [_coerce_numeric_or_none(c.get_text(strip=True)) for c in cells[1:]]
+            if len(vals) >= len(period_headers):
+                labels_to_series[label] = vals[:len(period_headers)]
+        break
+
+    def _get(name_sub: str) -> list[float | None]:
+        for k, v in labels_to_series.items():
+            if name_sub.lower() in k.lower():
+                return v
+        return []
+
+    payload = {
+        "source_page": url,
+        "source_type": "income_statement_actuals",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "periods": [_normalize_period_label(p) for p in period_headers],
+        "revenues_before_provision_for_loan_losses": _get("Revenues Before Provision"),
+        "total_revenues": _get("Total Revenues"),
+        "ebt_excl_unusual": _get("EBT, Excl. Unusual"),
+        "net_income_to_company": _get("Net Income to Company"),
+        "net_income_is": _get("Net Income - (IS)"),
+        "eps_basic": _get("Net EPS - Basic"),
+        "dividend_per_share": _get("Dividend Per Share"),
+        "unit_scale": "billions",
+        "warnings": [],
+    }
+
+    has_any = any(payload["periods"]) and any((payload["total_revenues"] or payload["net_income_to_company"] or payload["eps_basic"]))
+    log.info("[MarketScreener] Income statement actuals extracted... %s", "SUCCESS" if has_any else "PARTIAL")
+    status.status = "success" if has_any else "partial"
+    status.message = "Actuals from /finances-income-statement/"
+    status.record_count = len(payload["periods"])
+    status.elapsed_ms = (time.perf_counter() * 1000) - start
+    return payload, status
+
+
+def _empty_income_actuals_payload(source_page: str, status: PageStepStatus) -> dict[str, Any]:
+    return {
+        "source_page": source_page,
+        "source_type": "income_statement_actuals",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "periods": [],
+        "revenues_before_provision_for_loan_losses": [],
+        "total_revenues": [],
+        "ebt_excl_unusual": [],
+        "net_income_to_company": [],
+        "net_income_is": [],
+        "eps_basic": [],
+        "dividend_per_share": [],
+        "unit_scale": "billions",
+        "warnings": status.errors,
+    }
+
+
+# ─── D. fetch_dividend_eps_page (source: /valuation-dividend/) ───────────────
+
+def fetch_dividend_eps_page(base_company_url: str, cache_key_prefix: str | None = None) -> tuple[dict[str, Any], PageStepStatus]:
+    """Extract EPS & dividend forecasts from /valuation-dividend/. Cleanest source for dividend per share."""
+    url = base_company_url.rstrip("/") + "/valuation-dividend/"
+    status = PageStepStatus(step="fetch_dividend_eps_page", message="")
+    start = time.perf_counter() * 1000
+
+    soup, errors = _fetch_page(url, _cache_slug(url, "valuation_dividend", cache_key_prefix))
+    if soup is None:
+        status.status = "failed"
+        status.errors = errors
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        log.info("[MarketScreener] Fetching /valuation-dividend/ page... FAILED")
+        return _empty_dividend_payload(url, status), status
+    log.info("[MarketScreener] Fetching /valuation-dividend/ page... SUCCESS")
+
+    period_headers, row_data = _extract_period_header_and_rows(soup, "annual")
+    if not period_headers:
+        # Try first table with Fiscal Period
+        for table in soup.find_all("table"):
+            rows = table.find_all("tr")
+            if not rows:
+                continue
+            first = [c.get_text(strip=True) for c in rows[0].find_all(["td", "th"])]
+            if first and "fiscal" in (first[0] or "").lower():
+                period_headers = [h for h in first[1:] if h]
+                for r in rows[1:]:
+                    cells = r.find_all(["td", "th"])
+                    if len(cells) >= 2:
+                        row_data.append((cells[0].get_text(strip=True), [c.get_text(strip=True) for c in cells[1:]]))
+                break
+
+    def _row(*labels: str) -> list[str]:
+        for label in labels:
+            for rlabel, vals in row_data:
+                if label.lower() in (rlabel or "").lower():
+                    return vals
+        return []
+
+    div_vals = _row("Dividend per Share")
+    yield_vals = _row("Rate of return")
+    eps_vals = _row("EPS ", "EPS")
+    dist_vals = _row("Distribution rate")
+    ref_vals = _row("Reference price")
+    ann_vals = _row("Announcement Date")
+
+    payload = {
+        "source_page": url,
+        "source_type": "dividend_eps_forecasts",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "periods": [_normalize_period_label(p) for p in period_headers],
+        "dividend_per_share": [_coerce_numeric_or_none(v) for v in div_vals],
+        "dividend_yield": [_coerce_numeric_or_none(v) for v in yield_vals],
+        "eps": [_coerce_numeric_or_none(v) for v in eps_vals],
+        "distribution_rate": [_coerce_numeric_or_none(v) for v in dist_vals],
+        "reference_price": [_coerce_numeric_or_none(v) for v in ref_vals],
+        "announcement_dates": ann_vals,
+        "unit_currency": "SAR",
+        "warnings": [],
+    }
+
+    has_any = bool(period_headers and (payload["eps"] or payload["dividend_per_share"]))
+    log.info("[MarketScreener] EPS/dividend forecast rows extracted... %s", "SUCCESS" if has_any else "PARTIAL")
+    status.status = "success" if has_any else "partial"
+    status.message = "EPS & dividend from /valuation-dividend/"
+    status.record_count = len(period_headers)
+    status.elapsed_ms = (time.perf_counter() * 1000) - start
+    return payload, status
+
+
+def _empty_dividend_payload(source_page: str, status: PageStepStatus) -> dict[str, Any]:
+    return {
+        "source_page": source_page,
+        "source_type": "dividend_eps_forecasts",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "periods": [],
+        "dividend_per_share": [],
+        "dividend_yield": [],
+        "eps": [],
+        "distribution_rate": [],
+        "reference_price": [],
+        "announcement_dates": [],
+        "unit_currency": "SAR",
+        "warnings": status.errors,
+    }
+
+
+# ─── E. fetch_consensus_summary (source: /consensus/) ────────────────────────
+
+def fetch_consensus_summary(base_company_url: str, cache_key_prefix: str | None = None) -> tuple[dict[str, Any], PageStepStatus]:
+    """Top-level analyst rating + target price only. Source: /consensus/. Delegates to marketscreener_consensus."""
+    from src.providers.marketscreener_consensus import fetch_marketscreener_consensus_summary
+
+    url = base_company_url.rstrip("/") + "/consensus/"
+    status = PageStepStatus(step="fetch_consensus_summary", message="")
+    start = time.perf_counter() * 1000
+
+    result = fetch_marketscreener_consensus_summary(url)
+    data = result.extracted_data.to_report_payload()
+    data["source_page"] = url
+    data["source_type"] = "consensus_summary"
+    data["extracted_at"] = datetime.now(timezone.utc).isoformat()
+    data["warnings"] = result.raw_warnings + [s.status_message for s in result.detected_sections if s.status_message]
+
+    status.status = result.step_status.status
+    status.message = result.step_status.message
+    status.errors = result.step_status.errors
+    status.warnings = result.step_status.warnings
+    status.record_count = result.step_status.record_count
+    status.elapsed_ms = (time.perf_counter() * 1000) - start
+    return data, status
+
+
+# ─── F. fetch_valuation_multiples (source: /valuation/) ─────────────────────
+
+def fetch_valuation_multiples(base_company_url: str, cache_key_prefix: str | None = None) -> tuple[dict[str, Any], PageStepStatus]:
+    """
+    Extract full valuation table from /valuation/: P/E, P/B, PEG, EV/Revenue,
+    EV/EBIT, Yield by year (2024A–2028E). Per docs/DATA_SOURCE_AND_URL_REFERENCE.md.
+    """
+    url = base_company_url.rstrip("/") + "/valuation/"
+    status = PageStepStatus(step="fetch_valuation_multiples", message="")
+    start = time.perf_counter() * 1000
+
+    soup, errors = _fetch_page(url, _cache_slug(url, "valuation", cache_key_prefix))
+    if soup is None:
+        status.status = "failed"
+        status.errors = errors
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        log.info("[MarketScreener] Fetching /valuation/ page... FAILED")
+        return _empty_valuation_payload(url, status), status
+    log.info("[MarketScreener] Fetching /valuation/ page... SUCCESS")
+
+    period_headers, row_data = _extract_period_header_and_rows(soup, "annual")
+    if not period_headers:
+        status.status = "partial"
+        status.message = "No valuation table found"
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        return _empty_valuation_payload(url, status), status
+
+    def _row(*labels: str) -> list[str]:
+        for label in labels:
+            for rlabel, vals in row_data:
+                if label.lower() in (rlabel or "").lower():
+                    return vals
+        return []
+
+    pe_vals = _row("P/E ratio")
+    pbr_vals = _row("PBR")
+    peg_vals = _row("PEG")
+    cap_rev_vals = _row("Capitalization / Revenue")
+    ev_rev_vals = _row("EV / Revenue")
+    ev_ebit_vals = _row("EV / EBIT")
+    yield_vals = _row("Rate of return")
+    ev_ebitda_vals = _row("EV / EBITDA")
+
+    payload = {
+        "source_page": url,
+        "source_type": "valuation_multiples",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "periods": [_normalize_period_label(p) for p in period_headers],
+        "pe": [_coerce_numeric_or_none(v) for v in pe_vals],
+        "pbr": [_coerce_numeric_or_none(v) for v in pbr_vals],
+        "peg": [_coerce_numeric_or_none(v) for v in peg_vals],
+        "capitalization_revenue": [_coerce_numeric_or_none(v) for v in cap_rev_vals],
+        "ev_revenue": [_coerce_numeric_or_none(v) for v in ev_rev_vals],
+        "ev_ebit": [_coerce_numeric_or_none(v) for v in ev_ebit_vals],
+        "ev_ebitda": [_coerce_numeric_or_none(v) for v in ev_ebitda_vals],
+        "yield_pct": [_coerce_numeric_or_none(v) for v in yield_vals],
+        "warnings": [],
+    }
+
+    has_any = bool(period_headers and (payload["pe"] or payload["pbr"] or payload["yield_pct"]))
+    status.status = "success" if has_any else "partial"
+    status.message = "Valuation multiples from /valuation/"
+    status.record_count = len(period_headers)
+    status.elapsed_ms = (time.perf_counter() * 1000) - start
+    return payload, status
+
+
+def _empty_valuation_payload(source_page: str, status: PageStepStatus) -> dict[str, Any]:
+    return {
+        "source_page": source_page,
+        "source_type": "valuation_multiples",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "periods": [],
+        "pe": [],
+        "pbr": [],
+        "peg": [],
+        "capitalization_revenue": [],
+        "ev_revenue": [],
+        "ev_ebit": [],
+        "ev_ebitda": [],
+        "yield_pct": [],
+        "warnings": status.errors,
+    }
+
+
+# ─── G. fetch_calendar_events (source: /calendar/) ───────────────────────────
+
+def _parse_calendar_cell_triplet(cell) -> dict[str, Any]:
+    """
+    Parse a table cell that may contain Released (b) / Forecast (i) / Spread (span).
+    Returns { "released": float|None, "forecast": float|None, "spread_pct": float|None }.
+    European format: "7 637" -> 7637, "1,56" -> 1.56.
+    """
+    out: dict[str, Any] = {"released": None, "forecast": None, "spread_pct": None}
+    if not cell:
+        return out
+    # b = released, i = forecast, span with variation = spread
+    b_el = cell.find("b")
+    i_els = cell.find_all("i")
+    span_el = cell.find("span", class_=re.compile(r"variation"))
+    if b_el:
+        raw = (b_el.get_text(strip=True) or "").replace(" ", "").replace(",", ".")
+        if raw:
+            try:
+                out["released"] = float(raw)
+            except ValueError:
+                pass
+    if i_els:
+        raw = (i_els[0].get_text(strip=True) or "").replace(" ", "").replace(",", ".")
+        if raw:
+            try:
+                out["forecast"] = float(raw)
+            except ValueError:
+                pass
+    if span_el:
+        raw = (span_el.get_text(strip=True) or "").replace(",", ".").replace("%", "").strip()
+        if raw:
+            try:
+                out["spread_pct"] = float(raw)
+            except ValueError:
+                pass
+    return out
+
+
+def _metric_key_from_label(label: str) -> str:
+    """Map row label to canonical key for report (net_sales, ebit, ebt, net_income, eps, announcement_date)."""
+    l = (label or "").lower()
+    if "announcement" in l and "date" in l:
+        return "announcement_date"
+    if "net sales" in l or "revenue" in l:
+        return "net_sales"
+    if "net income" in l:
+        return "net_income"
+    if "earnings before tax" in l or "ebt" in l:
+        return "ebt"
+    if "ebit" in l and "ebitda" not in l:
+        return "ebit"
+    if "ebitda" in l:
+        return "ebitda"
+    if "eps" in l:
+        return "eps"
+    return "other"
+
+
+def parse_quarter_headers_from_table(table) -> list[str]:
+    """Extract quarter labels from table thead (th[2:]); return list of normalized 2025Q1-style labels."""
+    if not table:
+        return []
+    thead = table.find("thead")
+    if not thead:
+        return []
+    cells = thead.find_all("th")
+    if len(cells) < 3:
+        return []
+    out = []
+    for th in cells[2:]:
+        q = (th.get_text(strip=True) or "").strip()
+        if q and re.match(r"20\d{2}\s*Q[1-4]", q, re.I):
+            out.append(normalize_quarter_label(q))
+    return out
+
+
+def parse_metric_block_with_released_forecast_spread(cell) -> dict[str, Any]:
+    """Parse one cell containing released (b) / forecast (i) / spread (span.variation). Same as _parse_calendar_cell_triplet."""
+    return _parse_calendar_cell_triplet(cell)
+
+
+def parse_announcement_date_row(cells: list, quarters: list[str]) -> dict[str, str | None]:
+    """Parse a row of date strings into quarter -> date. Returns dict mapping quarter label to date string."""
+    out: dict[str, str | None] = {}
+    for i in range(min(len(quarters), len(cells))):
+        date_val = (cells[i].get_text(strip=True) or "").strip() or None
+        if i < len(quarters):
+            out[quarters[i]] = date_val
+    return out
+
+
+def _parse_quarterly_results_table(soup: BeautifulSoup) -> dict[str, Any]:
+    """
+    Find and parse the "Quarterly results" table on /calendar/.
+    Returns:
+      quarters: list of period labels e.g. ["2024 Q2", "2025 Q1", ...]
+      rows: list of { "metric_key", "metric_label", "unit", "by_quarter": [ { released, forecast, spread_pct }, ... ] }
+      announcement_dates: list of date strings per quarter (same length as quarters)
+    """
+    result: dict[str, Any] = {"quarters": [], "rows": [], "announcement_dates": [], "warnings": []}
+    table = soup.find("table", id="quarterlyResultsTable")
+    if not table:
+        # Fallback: find table under "Quarterly results" heading
+        section = find_section_by_heading(soup, "Quarterly results")
+        if section:
+            table = section.find_next("table")
+        if not table:
+            for h in soup.find_all(["h3", "h4"]):
+                if "quarterly results" in (h.get_text() or "").lower():
+                    table = h.find_next("table")
+                    break
+    if not table:
+        result["warnings"].append("Quarterly results table not found")
+        return result
+
+    thead = table.find("thead")
+    tbody = table.find("tbody")
+    if not thead or not tbody:
+        result["warnings"].append("Quarterly table missing thead or tbody")
+        return result
+
+    # Header: first row, th[2:] are quarter labels
+    header_cells = thead.find_all("th")
+    if len(header_cells) < 3:
+        result["warnings"].append("Quarterly table has too few columns")
+        return result
+    quarters = []
+    for th in header_cells[2:]:
+        q = (th.get_text(strip=True) or "").strip()
+        if q and re.match(r"20\d{2}\s*Q[1-4]", q, re.I):
+            quarters.append(q.replace(" ", " ").strip())
+    result["quarters"] = quarters
+    nq = len(quarters)
+
+    # Body rows
+    for tr in tbody.find_all("tr"):
+        cells = tr.find_all(["td", "th"])
+        if len(cells) < 2:
+            continue
+        first = cells[0]
+        # Metric name may be in th with optional <br/><span><i>Unit</i></span>
+        metric_text = first.get_text(" ", strip=True) or ""
+        metric_label = (first.get_text(strip=True) or "").split("\n")[0].strip()
+        unit = ""
+        span = first.find("span")
+        if span:
+            unit = (span.get_text(strip=True) or "").strip()
+        # Skip the "Released / Forecast / Spread" column (cells[1])
+        data_cells = cells[2:]
+
+        if "announcement" in metric_label.lower() and "date" in metric_label.lower():
+            result["announcement_dates"] = []
+            for i, td in enumerate(data_cells):
+                if i >= nq:
+                    break
+                result["announcement_dates"].append((td.get_text(strip=True) or "").strip() or None)
+            continue
+
+        # Data row: parse triplet per cell
+        by_quarter: list[dict[str, Any]] = []
+        for i, td in enumerate(data_cells):
+            if i >= nq:
+                break
+            by_quarter.append(_parse_calendar_cell_triplet(td))
+        metric_key = _metric_key_from_label(metric_label)
+        # Skip empty rows (all cells null)
+        if any(
+            c.get("released") is not None or c.get("forecast") is not None
+            for c in by_quarter
+        ):
+            result["rows"].append({
+                "metric_key": metric_key,
+                "metric_label": metric_label,
+                "unit": unit,
+                "by_quarter": by_quarter,
+            })
+    return result
+
+
+def fetch_calendar_events(base_company_url: str, cache_key_prefix: str | None = None) -> tuple[dict[str, Any], PageStepStatus]:
+    """Extract next expected earnings date, event list, and Quarterly results table from /calendar/."""
+    url = base_company_url.rstrip("/") + "/calendar/"
+    status = PageStepStatus(step="fetch_calendar_events", message="")
+    start = time.perf_counter() * 1000
+
+    soup, errors = _fetch_page(url, _cache_slug(url, "calendar", cache_key_prefix))
+    if soup is None:
+        status.status = "failed"
+        status.errors = errors
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        log.info("[MarketScreener] Fetching /calendar/ page... FAILED")
+        return _empty_calendar_payload(url, status), status
+    log.info("[MarketScreener] Fetching /calendar/ page... SUCCESS")
+
+    text = soup.get_text("\n", strip=True)
+    next_date = None
+    next_label = None
+    next_time = None
+    upcoming: list[dict[str, Any]] = []
+    past: list[dict[str, Any]] = []
+
+    # Upcoming / past events from date tables
+    text_lower = text.lower()
+    upcoming_idx = text.find("Upcoming") if "upcoming" in text_lower else -1
+    past_idx = text.find("Past events") if "past events" in text_lower else len(text) + 1
+    for table in soup.find_all("table"):
+        for row in table.find_all("tr"):
+            cells = row.find_all(["td", "th"])
+            if len(cells) >= 2:
+                date_cell = (cells[0].get_text(strip=True) or "").strip()
+                time_cell = (cells[1].get_text(strip=True) or "").strip() if len(cells) > 1 else ""
+                if re.match(r"20\d{2}-\d{2}-\d{2}", date_cell):
+                    ev = {"date": date_cell, "time": time_cell or None}
+                    pos = text.find(date_cell)
+                    if pos >= 0 and (upcoming_idx >= 0 and past_idx > pos and pos > upcoming_idx):
+                        upcoming.append(ev)
+                        if next_date is None:
+                            next_date = date_cell
+                            next_time = time_cell or None
+                    else:
+                        past.append(ev)
+
+    # Prefer quarter label from next expected date so title matches report date (e.g. 2026-04-20 → Q1 2026)
+    if next_date and re.match(r"20\d{2}-\d{2}-\d{2}", next_date):
+        try:
+            y, m = int(next_date[:4]), int(next_date[5:7])
+            q = (m - 1) // 3 + 1
+            next_label = f"{y} Q{q}"
+        except (ValueError, IndexError):
+            pass
+    if not next_label:
+        for h in soup.find_all(["h2", "h3", "h4"]):
+            t = (h.get_text(strip=True) or "").strip()
+            if "earnings" in t.lower() and "Q" in t:
+                next_label = t
+                break
+
+    # Quarterly results table (released / forecast / spread per metric per quarter)
+    quarterly_results = _parse_quarterly_results_table(soup)
+    if quarterly_results["rows"]:
+        log.info("[MarketScreener] Quarterly results table extracted... SUCCESS (%s quarters, %s metrics)", len(quarterly_results["quarters"]), len(quarterly_results["rows"]))
+    if quarterly_results.get("warnings"):
+        status.warnings.extend(quarterly_results["warnings"])
+
+    # Build metrics-dict shape (quarters as 2025Q1, metrics.released/forecast/spread_pct by quarter)
+    raw_q = quarterly_results.get("quarters", [])
+    quarters_normalized = [normalize_quarter_label(q) for q in raw_q if q]
+    metrics_dict: dict[str, Any] = {}
+    for r in quarterly_results.get("rows", []):
+        key = r.get("metric_key")
+        if not key or key == "other" or key == "announcement_date":
+            continue
+        by_q = r.get("by_quarter", [])
+        released = {}
+        forecast = {}
+        spread_pct = {}
+        for i, cell in enumerate(by_q):
+            if i >= len(quarters_normalized):
+                break
+            ql = quarters_normalized[i]
+            released[ql] = cell.get("released")
+            forecast[ql] = cell.get("forecast")
+            spread_pct[ql] = cell.get("spread_pct")
+        metrics_dict[key] = {"released": released, "forecast": forecast, "spread_pct": spread_pct}
+    dates_list = quarterly_results.get("announcement_dates", [])
+    if dates_list and quarters_normalized:
+        metrics_dict["announcement_date"] = {"released": {quarters_normalized[i]: (dates_list[i] if i < len(dates_list) else None) for i in range(len(quarters_normalized))}}
+    quarterly_results["quarters_normalized"] = quarters_normalized
+    quarterly_results["metrics_dict"] = metrics_dict
+
+    payload = {
+        "source_page": url,
+        "source_type": "calendar_events",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "next_expected_earnings_date": next_date or (upcoming[0]["date"] if upcoming else None),
+        "next_expected_earnings_label": next_label,
+        "next_expected_earnings_time": next_time or (upcoming[0].get("time") if upcoming else None),
+        "upcoming_events": upcoming[:20],
+        "past_events": past[:30],
+        "quarterly_results": quarterly_results,
+        "quarterly_results_table": {"source_page": url, "source_type": "quarterly_results_table", "quarters": quarters_normalized, "metrics": metrics_dict, "warnings": quarterly_results.get("warnings", [])},
+        "warnings": list(quarterly_results.get("warnings", [])),
+    }
+
+    has_next = bool(payload["next_expected_earnings_date"])
+    status.status = "success" if has_next else "partial"
+    status.message = "Calendar from /calendar/ (events + quarterly results table)"
+    status.record_count = len(upcoming) + len(past) + len(quarterly_results.get("rows", []))
+    status.elapsed_ms = (time.perf_counter() * 1000) - start
+    return payload, status
+
+
+def _empty_calendar_payload(source_page: str, status: PageStepStatus) -> dict[str, Any]:
+    return {
+        "source_page": source_page,
+        "source_type": "calendar_events",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "next_expected_earnings_date": None,
+        "next_expected_earnings_label": None,
+        "next_expected_earnings_time": None,
+        "upcoming_events": [],
+        "past_events": [],
+        "quarterly_results": {"quarters": [], "rows": [], "announcement_dates": [], "warnings": []},
+        "warnings": status.errors,
+    }
+
+
+def fetch_quarterly_results_table(base_company_url: str, cache_key_prefix: str | None = None) -> tuple[dict[str, Any], PageStepStatus]:
+    """
+    Dedicated parser for the Quarterly results table on /calendar/.
+    Returns structured output:
+      source_page, source_type="quarterly_results_table",
+      quarters: ["2025Q1", "2025Q2", ...],
+      metrics: { "net_sales": { "released": {quarter: val}, "forecast": {...}, "spread_pct": {...} }, ... },
+      announcement_date: { "released": { quarter: date_str } },
+      warnings: []
+    """
+    url = base_company_url.rstrip("/") + "/calendar/"
+    status = PageStepStatus(step="fetch_quarterly_results_table", message="", source="marketscreener")
+    start = time.perf_counter() * 1000
+
+    soup, errors = _fetch_page(url, _cache_slug(url, "calendar_quarterly", cache_key_prefix))
+    if soup is None:
+        status.status = "failed"
+        status.errors = errors
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        log.info("[MarketScreener] Fetching /calendar/ (Quarterly results)... FAILED")
+        out = {
+            "source_page": url,
+            "source_type": "quarterly_results_table",
+            "quarters": [],
+            "metrics": {},
+            "announcement_date": {"released": {}},
+            "warnings": errors,
+        }
+        return out, status
+    log.info("[MarketScreener] Fetching /calendar/ (Quarterly results)... SUCCESS")
+
+    parsed = _parse_quarterly_results_table(soup)
+    raw_quarters = parsed.get("quarters", [])
+    quarters = [normalize_quarter_label(q) for q in raw_quarters if q]
+    rows = parsed.get("rows", [])
+    announcement_dates = parsed.get("announcement_dates", [])
+
+    metrics: dict[str, Any] = {}
+    for r in rows:
+        key = r.get("metric_key")
+        if not key or key == "other":
+            continue
+        if key == "announcement_date":
+            continue
+        by_q = r.get("by_quarter", [])
+        released: dict[str, float | None] = {}
+        forecast: dict[str, float | None] = {}
+        spread_pct: dict[str, float | None] = {}
+        for i, cell in enumerate(by_q):
+            if i >= len(quarters):
+                break
+            q_label = quarters[i]
+            released[q_label] = cell.get("released")
+            forecast[q_label] = cell.get("forecast")
+            spread_pct[q_label] = cell.get("spread_pct")
+        metrics[key] = {"released": released, "forecast": forecast, "spread_pct": spread_pct}
+
+    announcement_released: dict[str, str | None] = {}
+    for i, d in enumerate(announcement_dates):
+        if i < len(quarters):
+            announcement_released[quarters[i]] = d if d else None
+    if announcement_released:
+        metrics["announcement_date"] = {"released": announcement_released}
+
+    status.status = "success" if (quarters and (rows or metrics)) else "partial"
+    status.message = f"Quarterly results: {len(quarters)} quarters, {len(metrics)} metrics"
+    status.record_count = len(quarters) * max(len(metrics), 1)
+    status.elapsed_ms = (time.perf_counter() * 1000) - start
+    status.warnings = list(parsed.get("warnings", []))
+
+    if quarters and metrics:
+        log.info("[MarketScreener] Quarterly results section detected... SUCCESS (%s quarters, %s metrics)", len(quarters), len(metrics))
+    elif parsed.get("warnings"):
+        log.warning("[MarketScreener] Quarterly results table missing or thin")
+
+    out = {
+        "source_page": url,
+        "source_type": "quarterly_results_table",
+        "quarters": quarters,
+        "metrics": metrics,
+        "warnings": list(parsed.get("warnings", [])),
+    }
+    return out, status

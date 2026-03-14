@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Generated at runtime
+data/earnings.db
+outputs/
+logs/
+cache/
+
+# Secrets
+.env
+
+# IDE
+.cursor/
+.vscode/
+.idea/
+
+# OS
+.DS_Store

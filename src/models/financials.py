@@ -1,0 +1,41 @@
+"""Financial data models — quotes, period snapshots, derived metrics."""
+
+from __future__ import annotations
+from pydantic import BaseModel
+
+
+class QuoteSnapshot(BaseModel):
+    ticker:     str
+    price:      float | None = None
+    change:     float | None = None
+    change_pct: float | None = None
+    volume:     int   | None = None
+    market_cap: float | None = None
+    currency:   str          = "SAR"
+    source:     str          = "yahoo"
+
+
+class FinancialPeriod(BaseModel):
+    """One row of financial data (actual or consensus)."""
+    period_label:      str              # "2024-Q3" or "FY2024"
+    period_type:       str              # "quarterly" | "annual" | "estimate"
+    source:            str              # "yahoo" | "marketscreener"
+    is_consensus:      bool = False
+    revenue:           float | None = None
+    ebitda:            float | None = None    # None for banks
+    ebit:              float | None = None
+    net_income:        float | None = None
+    eps:               float | None = None
+    dps:               float | None = None    # dividends per share
+    announcement_date: str   | None = None
+    currency:          str          = "SAR"
+
+
+class DerivedMetrics(BaseModel):
+    ticker:                    str
+    is_bank:                   bool = False
+    quarterly_revenue_growth:  list[dict] = []   # [{period, pct}, ...]
+    avg_4q_revenue_growth:     float | None = None
+    quarterly_ni_growth:       list[dict] = []
+    avg_4q_ni_growth:          float | None = None
+    warnings:                  list[str]  = []
