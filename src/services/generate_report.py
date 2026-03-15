@@ -116,15 +116,24 @@ def _is_valid_recent_context_article(art) -> bool:
     return True
 
 
+def _company_attr(company, key: str, default: str = ""):
+    """Read sector/industry/etc. from company whether it's a model instance or a dict (e.g. after serialization)."""
+    if company is None:
+        return default
+    if isinstance(company, dict):
+        return (company.get(key) or default) if isinstance(default, str) else company.get(key, default)
+    return (getattr(company, key, None) or default) if isinstance(default, str) else getattr(company, key, default)
+
+
 def _sector_operating_kpis_and_what_matters(company) -> tuple[list[str], list[str], str]:
     """
     Return (operating_metrics_kpis[4], what_matters_bullets[5], fallback_para2_snippet).
     fallback_para2 is publishable analyst prose only (no "Focus on...", "Do not use..." instructions).
     """
-    sector = (getattr(company, "sector", None) or "").strip().lower()
-    industry = (getattr(company, "industry", None) or "").strip().lower()
+    sector = (_company_attr(company, "sector", "") or "").strip().lower()
+    industry = (_company_attr(company, "industry", "") or "").strip().lower()
     ind = industry or sector
-    is_bank = getattr(company, "is_bank", False)
+    is_bank = bool(_company_attr(company, "is_bank", False))
 
     if is_bank:
         kpis = ["Loans", "Deposits", "NIM", "Cost of Risk"]
@@ -140,7 +149,7 @@ def _sector_operating_kpis_and_what_matters(company) -> tuple[list[str], list[st
 
     if "telecom" in ind or "communication" in sector or "communication" in ind:
         kpis = ["Subscribers", "ARPU", "Churn", "Capex intensity"]
-        matters = ["Subscriber additions", "ARPU trend", "Churn", "Capex intensity", "India wireless competition" if "india" in (getattr(company, "country", "") or "").lower() else "Wireless competition", "Enterprise / data centre contribution"]
+        matters = ["Subscriber additions", "ARPU trend", "Churn", "Capex intensity", "India wireless competition" if "india" in ((_company_attr(company, "country", "") or "").lower()) else "Wireless competition", "Enterprise / data centre contribution"]
         p2 = "For telecoms and communication equipment, subscriber trends, ARPU, churn, and capex intensity are central where relevant; enterprise and product-cycle dynamics often drive the story."
         return kpis, matters[:5], p2
 
@@ -162,7 +171,13 @@ def _sector_operating_kpis_and_what_matters(company) -> tuple[list[str], list[st
         p2 = "Sector operating metrics and headline results versus consensus are key; guidance and main metrics typically drive the stock."
         return kpis, matters[:5], p2
 
-    if "chem" in ind or "material" in ind:
+    if "mining" in ind or "metals" in ind:
+        kpis = ["Production / throughput", "Commodity prices", "Costs", "Guidance"]
+        matters = ["Production and sales volume", "Commodity price realizations", "Cost and margin", "Guidance", "Key metrics"]
+        p2 = "For metals and mining, the narrative typically turns on production, realized commodity prices, and costs; guidance and key operating metrics often drive the stock."
+        return kpis, matters[:5], p2
+
+    if "chem" in ind or "material" in ind or "material" in sector:
         kpis = ["Volume", "Realized price", "Utilization", "Feedstock spread"]
         matters = ["Volume and realized price", "Utilization", "Feedstock spread", "Guidance", "Key metrics"]
         p2 = "Volume, realized price, utilization, and feedstock spread are the main levers; guidance and key metrics drive the story."
@@ -319,6 +334,14 @@ def _build(payload: ReportPayload, path: Path, memo_data: dict | None = None, qa
     p = doc.add_paragraph()
     p.paragraph_format.space_after = SPACE_SMALL
     _run(p, f"Expected report date: {exp_date}", size_pt=SMALL_PT, color=GRAY)
+    try:
+        app_version = cfg().get("general", {}).get("version", "0.1.0")
+        p_ver = doc.add_paragraph()
+        p_ver.paragraph_format.space_before = SPACE_NONE
+        p_ver.paragraph_format.space_after = SPACE_NONE
+        _run(p_ver, f"Generated with earnings-research v{app_version}", size_pt=8, color=GRAY)
+    except Exception:
+        pass
 
     # ─── 2. Top summary strip (compact dashboard) ────────────────────────
     strip_parts = [
@@ -329,10 +352,18 @@ def _build(payload: ReportPayload, path: Path, memo_data: dict | None = None, qa
         f"{curr} {target:,.2f}" if target is not None and isinstance(target, (int, float)) else "—",
         _fmt_pct(spread, signed=True) if spread is not None else "—",
     ]
-    p = doc.add_paragraph()
-    p.paragraph_format.space_before = SPACE_NONE
-    p.paragraph_format.space_after = SPACE_SMALL
-    _run(p, "  |  ".join(str(x) for x in strip_parts), size_pt=SMALL_PT, color=BODY)
+    dash_count = sum(1 for x in strip_parts if x == "—")
+    strip_text = "  |  ".join(str(x) for x in strip_parts) if dash_count < len(strip_parts) else (
+        f"Expected report date: {exp_date}." if exp_date != "—" else "—"
+    )
+    if strip_text and strip_text != "—":
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = SPACE_NONE
+        p.paragraph_format.space_after = SPACE_SMALL
+        if dash_count == len(strip_parts):
+            _run(p, "Consensus and price data not available for this run.", size_pt=SMALL_PT, color=GRAY)
+        else:
+            _run(p, strip_text, size_pt=SMALL_PT, color=BODY)
 
     # MarketScreener: explicit warning when data suppressed (entity mismatch, contamination, or redirect)
     ms_avail = getattr(payload, "marketscreener_availability", "") or ""
