@@ -86,7 +86,12 @@ class PreviewResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    try:
+        from src.config import cfg
+        v = cfg().get("general", {}).get("version", "0.1.0")
+        return {"status": "ok", "version": v}
+    except Exception:
+        return {"status": "ok"}
 
 
 class LoginRequest(BaseModel):

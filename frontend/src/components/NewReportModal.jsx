@@ -80,7 +80,7 @@ export default function NewReportModal({ open, onClose, onGenerate }) {
             className="w-full bg-[#0d1221] border border-[#1e2a4a] focus:border-[#3b6cb5] rounded-lg pl-11 pr-4 py-3 text-sm text-white placeholder-[#3a4a6a] outline-none transition-colors font-mono"
           />
         </div>
-        <p className="text-[#5a6a8a] text-xs mb-4">Search across 300+ tickers from global markets.</p>
+        <p className="text-[#5a6a8a] text-xs mb-4">Search across 300+ tickers from global markets. Report generation can take 1–2 minutes; on free hosting it may time out—retry if needed.</p>
         {results.length > 0 && !selected && (
           <div className="max-h-48 overflow-y-auto mb-4 border border-[#1e2a4a] rounded-lg">
             {results.map((item) => (

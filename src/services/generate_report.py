@@ -138,10 +138,16 @@ def _sector_operating_kpis_and_what_matters(company) -> tuple[list[str], list[st
         p2 = "For oil and gas, the narrative typically turns on production volumes, realized prices, and lifting costs; reserve replacement and field startup impact also matter, and capex and project ramp-up often drive the story."
         return kpis, matters, p2
 
-    if "telecom" in ind or "communication" in sector:
+    if "telecom" in ind or "communication" in sector or "communication" in ind:
         kpis = ["Subscribers", "ARPU", "Churn", "Capex intensity"]
         matters = ["Subscriber additions", "ARPU trend", "Churn", "Capex intensity", "India wireless competition" if "india" in (getattr(company, "country", "") or "").lower() else "Wireless competition", "Enterprise / data centre contribution"]
-        p2 = "For telecoms, subscriber trends, ARPU, churn, and capex intensity are central; enterprise and data centre contribution matter where relevant."
+        p2 = "For telecoms and communication equipment, subscriber trends, ARPU, churn, and capex intensity are central where relevant; enterprise and product-cycle dynamics often drive the story."
+        return kpis, matters[:5], p2
+
+    if "technology" in sector or "software" in ind or "semiconductor" in ind or "equipment" in ind:
+        kpis = ["Revenue growth", "Margin", "Guidance", "Key product metrics"]
+        matters = ["Revenue mix and growth", "Margin and profitability", "Guidance", "Product cycles", "Competitive dynamics"]
+        p2 = "For technology and communication equipment names, the narrative typically turns on revenue mix, margins, and guidance; product cycles and competitive dynamics often drive the stock."
         return kpis, matters[:5], p2
 
     if "industrial" in sector or "capital good" in ind or "aerospace" in ind or "machinery" in ind:

@@ -106,9 +106,18 @@ export default function ReportsPage({ onSignOut }) {
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         const detail = errData.detail;
-        const msg = Array.isArray(detail)
-          ? detail.map((d) => d.msg ?? d).join(", ")
-          : detail || "Failed to create report";
+        let msg =
+          typeof detail === "string"
+            ? detail
+            : Array.isArray(detail)
+              ? detail.map((d) => d.msg ?? d).join(", ")
+              : "";
+        if (!msg) {
+          if (res.status === 504 || res.status === 502)
+            msg =
+              "Request timed out or server unavailable. Report generation can take 1–2 minutes; try again or use a faster connection.";
+          else msg = "Failed to create report.";
+        }
         throw new Error(msg);
       }
       const data = await res.json();
