@@ -279,8 +279,16 @@ def _validate_iv_output(
     if not combined:
         return False, ["empty output"]
 
-    issues: list[str] = []
+    # Reject instruction/placeholder leakage (model returned prompt text instead of analyst content)
     lower = combined.lower()
+    if "paragraph 1:" in lower and "stance + drivers" in lower and len(combined.split()) < 30:
+        return False, ["output looks like instructions or placeholder, not analyst text"]
+    if "paragraph 2:" in lower and "reaction driver + risk" in lower and len(combined.split()) < 30:
+        return False, ["output looks like instructions or placeholder, not analyst text"]
+    if "respond with only a json" in lower or "you are a disciplined equity research" in lower:
+        return False, ["output contains prompt leakage; must be analyst text only"]
+
+    issues: list[str] = []
 
     # 1. Banned generic phrases
     for phrase in BANNED_PHRASES_IV:
@@ -295,12 +303,15 @@ def _validate_iv_output(
                 issues.append(f"unsupported confidence word '{word}' without quantitative context")
                 break
 
-    # 3. Word count (target 120-180, tolerate 90-250)
+    # 3. Word count (target 120-180, tolerate 90-250); each paragraph must be substantive
     wc = len(combined.split())
+    w1, w2 = len((p1 or "").split()), len((p2 or "").split())
     if wc < 80:
         issues.append(f"too short ({wc} words, need >=100)")
     elif wc > 280:
         issues.append(f"too long ({wc} words, need <=220)")
+    if (p1 and w1 < 25) or (p2 and w2 < 25):
+        issues.append("each paragraph must be at least ~25 words (substantive analyst text, not a label)")
 
     # 4. Company-specific content (>=3 identifiable terms)
     specific = 0
@@ -435,22 +446,21 @@ SELF-CHECK — before returning, score 0–5 on:
 5. Honest uncertainty handling (admits what it doesn't know?)
 If total < 20/25, rewrite once.
 
-Respond with ONLY a JSON object. No markdown fences, no commentary.
+OUTPUT FORMAT: Return ONLY a JSON object. No markdown fences, no commentary. The values for investment_view_paragraph_1 and investment_view_paragraph_2 must be the actual analyst prose only (2–4 sentences each, 40+ words per paragraph). Never output placeholder labels like "Paragraph 1: Stance + drivers" or instruction text—only publishable analyst content suitable for the memo.
 {{
   "themes": ["theme1", "theme2"],
   "overall_sentiment": "positive" | "negative" | "neutral" | "mixed",
   "key_items": ["most important observation"],
   "uncertainty_factors": ["key uncertainty"],
   "summary_text": "One-sentence summary.",
-  "investment_view_paragraph_1": "Paragraph 1: Stance + drivers.",
-  "investment_view_paragraph_2": "Paragraph 2: Reaction driver + risk.",
+  "investment_view_paragraph_1": "Your first paragraph of analyst text here (stance and drivers).",
+  "investment_view_paragraph_2": "Your second paragraph of analyst text here (reaction driver and risk).",
   "referenced_article_indices": [0],
   "citation_placements": [{{"paragraph": 1, "after_sentence": 1, "article_index": 0}}],
   "self_check_score": 22
 }}
 
-citation_placements: paragraph 1 or 2, after_sentence 0-based, article_index from RECENT NEWS.
-You MUST cite at least one article when articles appear in the evidence brief."""
+citation_placements: paragraph 1 or 2, after_sentence 0-based, article_index from RECENT NEWS. Cite at least one article when the evidence brief contains articles."""
 
 
 def _build_retry_prompt(
@@ -484,10 +494,10 @@ REWRITE both paragraphs to fix ALL issues above:
 - Be specific about what drives the stock reaction
 - Admit uncertainty where evidence is thin
 
-Respond with ONLY a JSON object:
+Respond with ONLY a JSON object. Values must be the actual rewritten analyst text (no labels or instructions):
 {{
-  "investment_view_paragraph_1": "Rewritten paragraph 1.",
-  "investment_view_paragraph_2": "Rewritten paragraph 2.",
+  "investment_view_paragraph_1": "Your rewritten first paragraph text.",
+  "investment_view_paragraph_2": "Your rewritten second paragraph text.",
   "referenced_article_indices": [],
   "citation_placements": []
 }}"""
@@ -660,6 +670,77 @@ def _summarize_headlines_only(company_name: str, headlines: list[str]) -> dict:
     return out
 
 
+# Placeholder/instruction text that must never appear in final memo (from our prompt schema or model leakage)
+IV_PLACEHOLDER_OR_INSTRUCTION = [
+    "paragraph 1: stance + drivers",
+    "paragraph 2: reaction driver + risk",
+    "paragraph 1: stance + drivers.",
+    "paragraph 2: reaction driver + risk.",
+    "respond with only a json",
+    "no markdown fences",
+    "no commentary",
+    "you are a disciplined equity research analyst",
+    "task: write the investment view",
+    "required structure:",
+    "self-check — before returning",
+    "citation_placements:",
+    "you must cite at least one article",
+    "rewritten paragraph 1.",
+    "rewritten paragraph 2.",
+    "investment_view_paragraph_1",
+    "investment_view_paragraph_2",
+]
+
+
+def _sanitize_iv_paragraph(text: str) -> str:
+    """
+    Remove instruction/placeholder leakage from Investment View paragraph.
+    Returns clean, factual text only; empty string if content is only instructions.
+    """
+    if not text or not isinstance(text, str):
+        return ""
+    s = text.strip()
+    if not s:
+        return ""
+    lower = s.lower()
+    # Exact match to schema placeholders → treat as empty
+    for ph in ["paragraph 1: stance + drivers.", "paragraph 2: reaction driver + risk.", "paragraph 1: stance + drivers", "paragraph 2: reaction driver + risk", "rewritten paragraph 1.", "rewritten paragraph 2."]:
+        if lower == ph or lower.startswith(ph + " ") or lower == ph.rstrip("."):
+            return ""
+    # If the whole paragraph is just instruction-like (one of the placeholder phrases), empty
+    if len(s.split()) <= 12 and any(ph in lower for ph in IV_PLACEHOLDER_OR_INSTRUCTION if len(ph) > 15):
+        return ""
+    # Strip leading "Paragraph 1:" / "Paragraph 2:" label; keep the rest if it's real content
+    for prefix in (r"^paragraph\s+1\s*:\s*", r"^paragraph\s+2\s*:\s*"):
+        m = re.match(prefix, s, re.I)
+        if m:
+            rest = s[m.end():].strip()
+            rest_lower = rest.lower()
+            if not rest:
+                return ""
+            if any(rest_lower == ph or rest_lower.startswith(ph + " ") for ph in ["stance + drivers", "reaction driver + risk", "rewritten paragraph"]):
+                return ""
+            s = rest
+            break
+    # Remove lines that are clearly instruction blocks (often model echoes the prompt)
+    lines = s.split("\n")
+    kept = []
+    for line in lines:
+        line_stripped = line.strip()
+        if not line_stripped:
+            continue
+        line_lower = line_stripped.lower()
+        if any(inst in line_lower for inst in ["respond with only", "no markdown", "you are a disciplined", "task:", "required structure", "self-check", "citation_placements:", "you must cite", "evidence brief", "end evidence", "strict rules", "reasoning framework"]):
+            continue
+        kept.append(line_stripped)
+    s = " ".join(kept).strip()
+    # If after stripping we're left with placeholder-only, return empty
+    if not s or len(s) < 50:
+        if any(ph in s.lower() for ph in IV_PLACEHOLDER_OR_INSTRUCTION):
+            return ""
+    return s
+
+
 def _normalize_summary_out(out: dict) -> None:
     bullets = out.get("investment_view_bullets")
     if isinstance(bullets, list):
@@ -668,8 +749,13 @@ def _normalize_summary_out(out: dict) -> None:
         out["investment_view_bullets"] = []
     p1 = out.get("investment_view_paragraph_1")
     p2 = out.get("investment_view_paragraph_2")
-    out["investment_view_paragraph_1"] = (p1 and str(p1).strip()) or ""
-    out["investment_view_paragraph_2"] = (p2 and str(p2).strip()) or ""
+    p1 = (p1 and str(p1).strip()) or ""
+    p2 = (p2 and str(p2).strip()) or ""
+    # Strip any LLM instruction/placeholder leakage so memo is factual only
+    p1 = _sanitize_iv_paragraph(p1)
+    p2 = _sanitize_iv_paragraph(p2)
+    out["investment_view_paragraph_1"] = p1
+    out["investment_view_paragraph_2"] = p2
 
 
 def _empty_summary(reason: str = "") -> dict:
