@@ -245,10 +245,16 @@ def _build(payload: ReportPayload, path: Path, memo_data: dict | None = None, qa
     doc = Document()
     c = payload.company
     memo = payload.memo_computed or {}
-    cs = payload.consensus_summary or {}
+    # Section-level lineage: do not use MS-derived data when entity/ticker mismatch or contamination (better blank than wrong)
+    payload_entity_match = getattr(payload, "payload_entity_match", True)
+    payload_source_ticker = (getattr(payload, "payload_source_ticker", "") or "").strip()
+    current_ticker = (getattr(c, "ticker", "") or "").strip()
+    cross_contamination = getattr(payload, "cross_company_contamination_detected", False)
+    use_ms_for_render = payload_entity_match and (payload_source_ticker == current_ticker) and not cross_contamination
+    cs = (payload.consensus_summary or {}) if use_ms_for_render else {}
     q = payload.quote
     curr = (c.currency or "SAR").strip()
-    # When memo_data is present, use validated header/display values only
+    # When memo_data is present, use validated header/display values only (memo_data already blanks MS when suppressed)
     if memo_data:
         header = memo_data.get("header") or {}
         preview_short = memo_data.get("preview_short") or memo.get("preview_quarter_short") or "1Q26"
@@ -316,12 +322,17 @@ def _build(payload: ReportPayload, path: Path, memo_data: dict | None = None, qa
     p.paragraph_format.space_after = SPACE_SMALL
     _run(p, "  |  ".join(str(x) for x in strip_parts), size_pt=SMALL_PT, color=BODY)
 
-    # MarketScreener source_redirect: be explicit that MS data is unavailable
+    # MarketScreener: explicit warning when data suppressed (entity mismatch, contamination, or redirect)
     ms_avail = getattr(payload, "marketscreener_availability", "") or ""
-    if ms_avail == "source_redirect":
+    if not use_ms_for_render or ms_avail == "source_redirect":
         p = doc.add_paragraph()
         p.paragraph_format.space_after = SPACE_TINY
-        _run(p, "MarketScreener consensus and appendices unavailable (source redirect). Figures from other sources.", size_pt=SMALL_PT, color=GRAY)
+        if cross_contamination or getattr(payload, "reused_default_payload_detected", False):
+            _run(p, "MarketScreener data suppressed (cross-company contamination or reused payload detected). Header, Key Preview, and Appendices A–D show blanks. Better blank than wrong.", size_pt=SMALL_PT, color=GRAY)
+        elif not payload_entity_match or payload_source_ticker != current_ticker:
+            _run(p, "MarketScreener data suppressed (entity mismatch or missing current-company data). Header, Key Preview, and Appendices A–D show blanks.", size_pt=SMALL_PT, color=GRAY)
+        elif ms_avail == "source_redirect":
+            _run(p, "MarketScreener consensus and appendices unavailable (source redirect). Figures from other sources.", size_pt=SMALL_PT, color=GRAY)
 
     # ─── 3. Investment View (2 substantial paragraphs; inline source links when available) ─
     p = doc.add_paragraph()
@@ -763,12 +774,19 @@ def _build(payload: ReportPayload, path: Path, memo_data: dict | None = None, qa
     # ═══════════════════════════════════════════════════════════════════
 
     appendix_sections = getattr(payload, "appendix_sections", None) or ["annual_forecasts", "quarterly_detail", "eps_dividend", "valuation", "audit"]
+    appendix_suppressed_due_to_entity = not use_ms_for_render and (cross_contamination or not payload_entity_match or getattr(payload, "reused_default_payload_detected", False))
 
     doc.add_paragraph()
     p = doc.add_paragraph()
     p.paragraph_format.page_break_before = True
     _run(p, "Appendix", bold=True, size_pt=SECTION_PT, color=ACCENT)
-    p.paragraph_format.space_after = SPACE_SMALL
+    p.paragraph_format.space_after = SPACE_TINY
+    if appendix_suppressed_due_to_entity:
+        p = doc.add_paragraph()
+        _run(p, "Appendices A–D suppressed (entity mismatch or contamination). No MarketScreener-derived figures shown.", size_pt=SMALL_PT, color=GRAY)
+        p.paragraph_format.space_after = SPACE_SMALL
+    else:
+        p.paragraph_format.space_after = SPACE_SMALL
 
     # Appendix A — Annual Financial Forecasts
     if "annual_forecasts" in appendix_sections:

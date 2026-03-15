@@ -63,6 +63,22 @@ def build_qa_audit_docx(
     _run(p, f"  {ticker}", size_pt=TITLE_PT, color=BODY)
     p = doc.add_paragraph()
     _run(p, f"Generated: {qa_audit.get('generated_at', '')}", size_pt=SMALL_PT, color=GRAY)
+    # MS section suppression (better blank than wrong)
+    if qa_audit.get("ms_section_suppressed_due_to_entity_mismatch") or qa_audit.get("ms_section_suppressed_due_to_contamination") or qa_audit.get("reused_default_payload_detected"):
+        p = doc.add_paragraph()
+        _run(p, "MarketScreener payload validation:", bold=True, size_pt=SMALL_PT)
+        parts = []
+        if qa_audit.get("ms_section_suppressed_due_to_missing_current_data"):
+            parts.append("suppressed (missing current data)")
+        if qa_audit.get("ms_section_suppressed_due_to_entity_mismatch"):
+            parts.append("suppressed (entity mismatch)")
+        if qa_audit.get("ms_section_suppressed_due_to_contamination"):
+            parts.append("suppressed (cross-company contamination)")
+        if qa_audit.get("reused_default_payload_detected"):
+            parts.append("reused default payload detected")
+        p = doc.add_paragraph()
+        _run(p, "  ".join(parts), size_pt=SMALL_PT, color=GRAY)
+        _run(p, f"  |  payload_entity_match={qa_audit.get('payload_entity_match', True)}  |  payload_source_ticker={qa_audit.get('payload_source_ticker', '')}", size_pt=SMALL_PT, color=GRAY)
     doc.add_paragraph()
 
     entries = qa_audit.get("entries") or []

@@ -540,7 +540,19 @@ def run(
             and (consensus_summary or ms_annual_forecasts or ms_calendar_events)
         ):
             entity_ok = True
+        # Suppression reasons for QA and rendering (better blank than wrong)
+        had_ms_data = bool(
+            consensus_summary or ms_annual_forecasts or ms_calendar_events
+            or ms_quarterly_forecasts or ms_eps_dividend_forecasts
+            or ms_valuation_multiples or ms_quarterly_results_table or ms_summary
+        )
+        ms_suppressed_missing = not entity_ok and not lineage
+        ms_suppressed_entity_mismatch = not entity_ok
+        ms_suppressed_contamination = cross_company_contamination_detected
+        reused_default_detected = (not entity_ok and had_ms_data) or cross_company_contamination_detected
+
         if not entity_ok or cross_company_contamination_detected:
+            # Hard fail-safe: do not preserve any previous MS values
             consensus_summary = None
             ms_summary = None
             ms_annual_forecasts = None
@@ -580,6 +592,9 @@ def run(
                 )
                 if fp_cross:
                     cross_company_contamination_detected = True
+                    ms_suppressed_contamination = True
+                    reused_default_detected = True
+                    # No stale carry-forward: null every MS section
                     consensus_summary = None
                     ms_summary = None
                     ms_annual_forecasts = None
@@ -596,6 +611,19 @@ def run(
         payload_source_ticker = (lineage.source_ticker if lineage else "") or (getattr(company, "ticker", "") or "")
         payload_entity_match = entity_ok
         if not entity_ok:
+            ms_fingerprint = ""
+
+        # Final defensive null: ensure no MS data survives when entity/contamination invalid
+        if not payload_entity_match or cross_company_contamination_detected:
+            consensus_summary = None
+            ms_summary = None
+            ms_annual_forecasts = None
+            ms_quarterly_forecasts = None
+            ms_eps_dividend_forecasts = None
+            ms_income_statement_actuals = None
+            ms_valuation_multiples = None
+            ms_calendar_events = None
+            ms_quarterly_results_table = None
             ms_fingerprint = ""
 
         # ── Memo-specific computed (for front-page memo) ─────────────────────
@@ -656,17 +684,20 @@ def run(
                 fallback_used=False,
             ).model_dump()
 
-        # Suppress appendix sections when data is thin
-        appendix_sections = ["annual_forecasts", "quarterly_detail", "eps_dividend", "valuation", "audit"]
-        if not ms_annual_forecasts or not (ms_annual_forecasts.get("annual") or {}).get("periods"):
-            appendix_sections = [s for s in appendix_sections if s != "annual_forecasts"]
-        qr = (ms_calendar_events or {}).get("quarterly_results", {}) or {}
-        if not ms_quarterly_results_table and not qr.get("rows"):
-            appendix_sections = [s for s in appendix_sections if s != "quarterly_detail"]
-        if not ms_eps_dividend_forecasts or not (ms_eps_dividend_forecasts.get("periods") and ms_eps_dividend_forecasts.get("eps")):
-            appendix_sections = [s for s in appendix_sections if s != "eps_dividend"]
-        if not ms_valuation_multiples or not ms_valuation_multiples.get("periods"):
-            appendix_sections = [s for s in appendix_sections if s != "valuation"]
+        # Suppress appendix sections when data is thin or when MS data is invalid (better blank than wrong)
+        if not payload_entity_match or cross_company_contamination_detected:
+            appendix_sections = ["audit"]
+        else:
+            appendix_sections = ["annual_forecasts", "quarterly_detail", "eps_dividend", "valuation", "audit"]
+            if not ms_annual_forecasts or not (ms_annual_forecasts.get("annual") or {}).get("periods"):
+                appendix_sections = [s for s in appendix_sections if s != "annual_forecasts"]
+            qr = (ms_calendar_events or {}).get("quarterly_results", {}) or {}
+            if not ms_quarterly_results_table and not qr.get("rows"):
+                appendix_sections = [s for s in appendix_sections if s != "quarterly_detail"]
+            if not ms_eps_dividend_forecasts or not (ms_eps_dividend_forecasts.get("periods") and ms_eps_dividend_forecasts.get("eps")):
+                appendix_sections = [s for s in appendix_sections if s != "eps_dividend"]
+            if not ms_valuation_multiples or not ms_valuation_multiples.get("periods"):
+                appendix_sections = [s for s in appendix_sections if s != "valuation"]
 
         payload = ReportPayload(
             run_id=run_id,
@@ -717,6 +748,10 @@ def run(
             cross_company_contamination_detected=cross_company_contamination_detected,
             identical_to_previous_ticker_payload=identical_to_previous_ticker_payload,
             ms_payload_fingerprint=ms_fingerprint,
+            ms_section_suppressed_due_to_missing_current_data=ms_suppressed_missing,
+            ms_section_suppressed_due_to_entity_mismatch=ms_suppressed_entity_mismatch,
+            ms_section_suppressed_due_to_contamination=ms_suppressed_contamination,
+            reused_default_payload_detected=reused_default_detected,
             has_consensus=bool(consensus),
             has_news=bool(news_items),
             warnings=list(warnings),

@@ -271,11 +271,15 @@ def _ts(snap: Any) -> Any:
 def build_memo_data(payload, snapshots: SourceSnapshots) -> dict:
     c = getattr(payload, "company", None)
     memo = getattr(payload, "memo_computed", None) or {}
-    cs = getattr(payload, "consensus_summary", None) or {}
     q = getattr(payload, "quote", None)
     currency = (getattr(c, "currency", None) or "SAR").strip() if c else "SAR"
-    ticker = getattr(c, "ticker", "") if c else ""
+    ticker = (getattr(c, "ticker", "") or "").strip() if c else ""
     company_name = getattr(c, "company_name", "") if c else ""
+    # Section-level lineage validation: do not use MS-derived data when entity/ticker mismatch or contamination
+    payload_entity_match = getattr(payload, "payload_entity_match", True)
+    payload_source_ticker = (getattr(payload, "payload_source_ticker", "") or "").strip()
+    use_ms_sections = payload_entity_match and (payload_source_ticker == ticker) and not getattr(payload, "cross_company_contamination_detected", False)
+    cs = getattr(payload, "consensus_summary", None) or {} if use_ms_sections else {}
 
     entity = {
         "company_name": company_name, "ticker": ticker, "currency": currency,
@@ -348,10 +352,19 @@ def build_memo_data(payload, snapshots: SourceSnapshots) -> dict:
     from src.services.generate_report import _sector_operating_kpis_and_what_matters
     _, what_matters, _ = _sector_operating_kpis_and_what_matters(c)
 
-    appendix_a = _normalize_appendix_a(payload, snapshots)
-    appendix_b = _normalize_appendix_b(payload, snapshots)
-    appendix_c = _normalize_appendix_c(payload, snapshots)
-    appendix_d = _normalize_appendix_d(payload, snapshots)
+    appendix_a = _normalize_appendix_a(payload, snapshots) if use_ms_sections else []
+    appendix_b = _normalize_appendix_b(payload, snapshots) if use_ms_sections else {"quarters": [], "rows": [], "has_data": False}
+    appendix_c = _normalize_appendix_c(payload, snapshots) if use_ms_sections else {"rows": []}
+    appendix_d = _normalize_appendix_d(payload, snapshots) if use_ms_sections else []
+
+    if not use_ms_sections:
+        # Blank MS-derived header fields only; keep Yahoo quote_price so report can show at least current price
+        ms_header_keys = {"expected_report_date", "recommendation", "analyst_count", "consensus_page_price", "average_target_price", "upside_pct"}
+        for k in ms_header_keys:
+            if k in header:
+                header[k] = _field(None, None, "suppressed", "", None, None, status=SUPPRESSED, notes="MS data suppressed (entity mismatch or contamination)")
+        key_preview = []
+        street_snapshot = {k: _field(None, None, "suppressed", "", None, None, status=SUPPRESSED) for k in list(street_snapshot.keys())}
 
     return {
         "entity": entity, "header": header, "key_preview": key_preview,
@@ -363,6 +376,12 @@ def build_memo_data(payload, snapshots: SourceSnapshots) -> dict:
         "prior_quarter_short": prev_q_short,
         "prior_year_same_quarter_short": same_q_short,
         "qa": {},
+        "ms_section_suppressed_due_to_missing_current_data": getattr(payload, "ms_section_suppressed_due_to_missing_current_data", False),
+        "ms_section_suppressed_due_to_entity_mismatch": getattr(payload, "ms_section_suppressed_due_to_entity_mismatch", False),
+        "ms_section_suppressed_due_to_contamination": getattr(payload, "ms_section_suppressed_due_to_contamination", False),
+        "reused_default_payload_detected": getattr(payload, "reused_default_payload_detected", False),
+        "payload_entity_match": payload_entity_match,
+        "payload_source_ticker": payload_source_ticker,
     }
 
 
@@ -966,5 +985,12 @@ def run_qa(payload) -> tuple[dict, dict]:
     apply_qa_rules(memo_data, snapshots)
     apply_valuation_basis(memo_data)
     qa_audit = export_qa_audit(memo_data, snapshots)
+    # Propagate MS section suppression flags for QA doc and debugging
+    qa_audit["ms_section_suppressed_due_to_missing_current_data"] = memo_data.get("ms_section_suppressed_due_to_missing_current_data", False)
+    qa_audit["ms_section_suppressed_due_to_entity_mismatch"] = memo_data.get("ms_section_suppressed_due_to_entity_mismatch", False)
+    qa_audit["ms_section_suppressed_due_to_contamination"] = memo_data.get("ms_section_suppressed_due_to_contamination", False)
+    qa_audit["reused_default_payload_detected"] = memo_data.get("reused_default_payload_detected", False)
+    qa_audit["payload_entity_match"] = memo_data.get("payload_entity_match", True)
+    qa_audit["payload_source_ticker"] = memo_data.get("payload_source_ticker", "")
     memo_data["qa"] = {"audit_available": True}
     return memo_data, qa_audit

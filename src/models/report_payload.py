@@ -120,6 +120,11 @@ class ReportPayload(BaseModel):
     cross_company_contamination_detected: bool = False
     identical_to_previous_ticker_payload: bool = False
     ms_payload_fingerprint: str = ""  # SHA256 of MS sections; used for persistence and contamination check
+    # Section-level suppression reasons (better blank than wrong)
+    ms_section_suppressed_due_to_missing_current_data: bool = False
+    ms_section_suppressed_due_to_entity_mismatch: bool = False
+    ms_section_suppressed_due_to_contamination: bool = False
+    reused_default_payload_detected: bool = False
 
     # Flags
     has_consensus:        bool       = False
