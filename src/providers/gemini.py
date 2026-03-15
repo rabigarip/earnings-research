@@ -69,7 +69,10 @@ def _build_evidence_brief(
     ticker = fp.get("ticker", "")
     if ticker:
         identity[0] += f" ({ticker})"
-    industry = fp.get("industry", "")
+    sector = (fp.get("sector") or "").strip()
+    industry = (fp.get("industry") or "").strip()
+    if sector:
+        identity.append(f"SECTOR: {sector}")
     if industry:
         identity.append(f"INDUSTRY: {industry}")
     is_bank = fp.get("is_bank", False)
@@ -354,7 +357,22 @@ def _validate_iv_output(
 # Prompt builders
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _build_main_prompt(company_name: str, evidence_brief: str, data_density: str) -> str:
+def _sector_instruction(sector: str, industry: str, is_bank: bool) -> str:
+    """Return strict sector-specific language rules so IV uses correct drivers (oil & gas vs telecom vs bank)."""
+    s = (sector or "").lower()
+    ind = (industry or "").lower()
+    if is_bank:
+        return "SECTOR: Banks. Use only bank-appropriate drivers: NIM, loan growth, asset quality, funding mix, capital. Do NOT use oil & gas (production, lifting costs) or telecom (ARPU, subscribers) or industrial (backlog, utilization) language."
+    if "oil" in ind or "gas" in ind or "energy" in s or "exploration" in ind or "petroleum" in ind:
+        return "SECTOR: Oil & Gas. Use ONLY oil & gas drivers: production volumes, realized oil/gas prices, lifting costs, capex, reserve replacement, field startup. Do NOT use: asset quality, demand and orders, backlog/utilization, NIM, subscribers, ARPU."
+    if "telecom" in ind or "communication" in s:
+        return "SECTOR: Telecom. Use ONLY telecom drivers: subscriber additions, ARPU, churn, capex intensity, wireless competition, enterprise/data centre. Do NOT use: asset quality (bank), production volumes (energy), backlog (industrial)."
+    if "industrial" in s or "capital good" in ind or "aerospace" in ind or "machinery" in ind:
+        return "SECTOR: Industrials. Use demand, orders, backlog, utilization, margin, guidance. Do NOT use asset quality (banks) or production volumes (energy)."
+    return "SECTOR: General. Use only drivers appropriate to the company's sector and industry. Do NOT use bank-only language (e.g. asset quality) for non-banks, or oil & gas language for non-energy names."
+
+
+def _build_main_prompt(company_name: str, evidence_brief: str, data_density: str, memo_fact_pack: dict | None = None) -> str:
     sparse_block = ""
     if data_density == "sparse":
         sparse_block = """
@@ -364,8 +382,16 @@ SPARSE DATA MODE — data is limited. You MUST:
 - Include one sentence starting with "With limited pre-release disclosure…" or similar.
 - Avoid false precision. Frame around what KIND of outcome matters.
 """
+    fp = memo_fact_pack or {}
+    sector_rule = _sector_instruction(
+        fp.get("sector") or "",
+        fp.get("industry") or "",
+        fp.get("is_bank", False),
+    )
 
     return f"""You are a disciplined equity research analyst writing the "Investment View" for an earnings preview memo on {company_name}. You write with incomplete data. You NEVER invent what you do not have.
+
+{sector_rule}
 
 ═══ EVIDENCE BRIEF ═══
 {evidence_brief}
@@ -509,11 +535,25 @@ def _extract_json(text: str) -> dict | None:
     return None
 
 
-def _call_gemini(prompt: str) -> dict | None:
-    """Call Gemini and parse JSON response. Returns None on failure."""
+def _get_iv_model():
+    """Return model for Investment View: use investment_view_model if set, else default."""
+    settings = cfg()
+    iv_model = (settings["gemini"].get("investment_view_model") or "").strip()
+    if iv_model:
+        import google.generativeai as genai
+        import os
+        key = os.environ.get("GEMINI_API_KEY", "")
+        if key:
+            genai.configure(api_key=key)
+            return genai.GenerativeModel(iv_model)
+    return _get_model()
+
+
+def _call_gemini(prompt: str, for_investment_view: bool = True) -> dict | None:
+    """Call Gemini and parse JSON response. Returns None on failure. Uses investment_view_model when set and for_investment_view=True."""
     settings = cfg()
     try:
-        model = _get_model()
+        model = _get_iv_model() if for_investment_view else _get_model()
         resp = model.generate_content(
             prompt,
             generation_config={
@@ -563,7 +603,7 @@ def _summarize_with_evidence(
     evidence_brief, data_density = _build_evidence_brief(company_name, memo_fact_pack, articles)
     log.info("Evidence brief: %d chars, density=%s", len(evidence_brief), data_density)
 
-    prompt = _build_main_prompt(company_name, evidence_brief, data_density)
+    prompt = _build_main_prompt(company_name, evidence_brief, data_density, memo_fact_pack)
     out = _call_gemini(prompt)
     if not out:
         return _empty_summary("Gemini returned empty or unparseable response.")
@@ -610,7 +650,7 @@ def _summarize_headlines_only(company_name: str, headlines: list[str]) -> dict:
         "- No financial data, consensus, or beat/miss history available\n"
         "- Only headlines provided — treat all claims as LOW confidence"
     )
-    prompt = _build_main_prompt(company_name, evidence_brief, "sparse")
+    prompt = _build_main_prompt(company_name, evidence_brief, "sparse", None)
     out = _call_gemini(prompt)
     if not out:
         return _empty_summary("Gemini returned empty response.")

@@ -46,10 +46,12 @@ def _validate_ms_entity(
     company_ticker: str,
     ms_lineage: MSLineage | None,
     ms_availability: str,
+    company_name: str = "",
 ) -> bool:
     """
     Return True if MarketScreener data is valid for this company.
     If False, caller must suppress all MS sections and MS-derived consensus_summary.
+    Requires ticker match and, when source_company_name is present, name overlap to avoid wrong-entity contamination.
     """
     if not ms_lineage:
         return False
@@ -64,6 +66,17 @@ def _validate_ms_entity(
     # Reject homepage or interstitial (e.g. no /quote/stock/... path)
     if not final_url or final_url.rstrip("/").endswith("marketscreener.com") or "/quote/stock/" not in final_url:
         return False
+    # Stricter entity check: when MS returns a company name, require clear match to avoid wrong-entity data
+    src_name = (ms_lineage.source_company_name or "").strip()
+    if src_name and company_name:
+        cn = company_name.strip().lower()
+        sn = src_name.lower()
+        # Significant tokens (skip common words)
+        skip = {"the", "of", "and", "for", "in", "a", "an", "co", "inc", "ltd", "corp", "plc", "group", "company", "corporation", "limited", "holding", "holdings"}
+        cn_tokens = {w for w in cn.replace(",", " ").split() if len(w) > 1 and w not in skip}
+        sn_tokens = {w for w in sn.replace(",", " ").split() if len(w) > 1 and w not in skip}
+        if cn_tokens and sn_tokens and not (cn_tokens & sn_tokens):
+            return False
     return True
 
 
@@ -94,11 +107,12 @@ def _compute_memo(
     """
     out: dict = {}
 
-    # Company context (consumed by LLM evidence brief)
+    # Company context (consumed by LLM evidence brief and sector-specific prompts)
     out["company_name"] = getattr(company, "company_name", "")
     out["ticker"] = getattr(company, "ticker", "")
     out["is_bank"] = getattr(company, "is_bank", False)
     out["industry"] = getattr(company, "industry", "")
+    out["sector"] = getattr(company, "sector", "")
     out["currency"] = (getattr(company, "currency", None) or "").strip()
     out["country"] = getattr(company, "country", "")
 
@@ -513,6 +527,7 @@ def run(
             getattr(company, "ticker", "") or "",
             lineage,
             ms_avail,
+            company_name=getattr(company, "company_name", "") or "",
         )
         # Use MS data from this run when lineage matches but DB has stale "needs_review"
         # (e.g. slug was discovered via resolve_slug_from_search; ISIN validation failed earlier)

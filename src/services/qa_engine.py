@@ -345,7 +345,8 @@ def build_memo_data(payload, snapshots: SourceSnapshots) -> dict:
         "consecutive_revenue_beats": memo.get("consecutive_revenue_beats"),
     }
 
-    what_matters = getattr(c, "is_bank", False) and ["Loan / financing growth", "NIM / margin", "Asset quality", "Funding mix", "Capital return"] or ["Demand and orders", "Margin and pricing", "Backlog / utilization", "Guidance", "Key metrics"]
+    from src.services.generate_report import _sector_operating_kpis_and_what_matters
+    _, what_matters, _ = _sector_operating_kpis_and_what_matters(c)
 
     appendix_a = _normalize_appendix_a(payload, snapshots)
     appendix_b = _normalize_appendix_b(payload, snapshots)
@@ -581,10 +582,29 @@ def _ts_sec(ts) -> float | None:
     return None
 
 
+# Flag surprise % for review when abs(surprise) exceeds this (e.g. 50% or 100%)
+EXTREME_SURPRISE_PCT_THRESHOLD = 50.0
+
+
+def _check_extreme_surprise(memo_data: dict) -> None:
+    """Set recent_execution.extreme_surprise_flagged when any surprise % is very large (for QA review)."""
+    rec = memo_data.get("recent_execution") or {}
+    details = []
+    for key, label in [("revenue_surprise_history", "Revenue"), ("eps_surprise_history", "EPS"), ("ni_surprise_history", "Net income")]:
+        for e in rec.get(key) or []:
+            pct = e.get("surprise_pct")
+            if pct is not None and abs(float(pct)) > EXTREME_SURPRISE_PCT_THRESHOLD:
+                details.append({"metric": label, "period": e.get("period"), "surprise_pct": pct})
+    if details:
+        rec["extreme_surprise_flagged"] = True
+        rec["extreme_surprise_details"] = details[:10]
+
+
 def apply_qa_rules(memo_data: dict, snapshots: SourceSnapshots) -> None:
     _check_header_price_mismatch(memo_data, snapshots)
     _check_stale(memo_data, snapshots)
     _suppress_failed_formula(memo_data)
+    _check_extreme_surprise(memo_data)
 
 
 def _check_header_price_mismatch(memo_data: dict, snapshots: SourceSnapshots) -> None:

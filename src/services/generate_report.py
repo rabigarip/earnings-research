@@ -112,6 +112,57 @@ def _is_valid_recent_context_article(art) -> bool:
     return True
 
 
+def _sector_operating_kpis_and_what_matters(company) -> tuple[list[str], list[str], str]:
+    """
+    Return (operating_metrics_kpis[4], what_matters_bullets[5], fallback_para2_snippet)
+    so memo uses sector-appropriate language (oil & gas, telecom, banks, industrials, default).
+    """
+    sector = (getattr(company, "sector", None) or "").strip().lower()
+    industry = (getattr(company, "industry", None) or "").strip().lower()
+    ind = industry or sector
+    is_bank = getattr(company, "is_bank", False)
+
+    if is_bank:
+        kpis = ["Loans", "Deposits", "NIM", "Cost of Risk"]
+        matters = ["Loan / financing growth", "NIM / margin", "Asset quality", "Funding mix", "Capital return"]
+        p2 = "Focus on NIM, loan growth, and asset quality. Earnings quality—recurring vs one-offs—matters; weakness versus consensus or deteriorating asset quality would pressure the multiple."
+        return kpis, matters, p2
+
+    if "oil" in ind or "gas" in ind or "energy" in sector or "exploration" in ind or "petroleum" in ind:
+        kpis = ["Production volumes", "Realized oil/gas prices", "Lifting costs", "Capex / project ramp-up"]
+        matters = ["Production volumes", "Realized oil/gas prices", "Lifting costs", "Reserve replacement / field startup", "Capex and project ramp-up"]
+        p2 = "Focus on production volumes, realized prices, and lifting costs. Reserve replacement and field startup impact matter; capex and project ramp-up drive the story. Do not use bank or industrial backlog language."
+        return kpis, matters, p2
+
+    if "telecom" in ind or "communication" in sector:
+        kpis = ["Subscribers", "ARPU", "Churn", "Capex intensity"]
+        matters = ["Subscriber additions", "ARPU trend", "Churn", "Capex intensity", "India wireless competition" if "india" in (getattr(company, "country", "") or "").lower() else "Wireless competition", "Enterprise / data centre contribution"]
+        p2 = "Focus on subscribers, ARPU, churn, and capex intensity. Do not use bank language (e.g. asset quality). Enterprise and data centre contribution are key where relevant."
+        return kpis, matters[:5], p2
+
+    if "industrial" in sector or "capital good" in ind or "aerospace" in ind or "machinery" in ind:
+        kpis = ["Orders / backlog", "Utilization", "Pricing", "Guidance"]
+        matters = ["Demand and orders", "Backlog / utilization", "Margin and pricing", "Guidance", "Key metrics"]
+        p2 = "Focus on demand, orders, backlog, and utilization. Margin and pricing matter; guidance and key metrics drive the stock."
+        return kpis, matters, p2
+
+    if "internet" in ind or "e-commerce" in ind or "retail" in ind:
+        kpis = ["GMV", "Cloud revenue growth", "International commerce", "Customer management revenue"]
+        matters = ["GMV and engagement", "Margin and pricing", "Guidance", "Key metrics"]
+        return kpis, matters[:5], "Focus on sector operating metrics and headline results versus consensus. Guidance and key metrics drive the story."
+
+    if "chem" in ind or "material" in ind:
+        kpis = ["Volume", "Realized price", "Utilization", "Feedstock spread"]
+        matters = ["Volume and realized price", "Utilization", "Feedstock spread", "Guidance", "Key metrics"]
+        return kpis, matters[:5], "Focus on volume, realized price, utilization, and feedstock spread. Do not use bank language."
+
+    # Default: labeled rows for manual entry; avoid bank/industrial-specific jargon
+    kpis = ["Key metric 1", "Key metric 2", "Key metric 3", "Key metric 4"]
+    matters = ["Headline vs consensus", "Margin and pricing", "Guidance", "Key metrics"]
+    p2 = "This quarter, focus on sector operating metrics and headline results versus consensus. Earnings quality—whether a beat or miss comes from recurring operations or one-offs—matters. Do not use sector-inappropriate language (e.g. asset quality for non-banks, backlog for oil & gas)."
+    return kpis, matters[:5], p2
+
+
 def _add_recent_context_section(doc: Document, payload: ReportPayload) -> tuple[int, list]:
     """
     Add 'Recent Context' on page 1 only when we have valid articles (headline + publisher + URL).
@@ -419,18 +470,21 @@ def _build(payload: ReportPayload, path: Path, memo_data: dict | None = None, qa
                 beat_parts.append(f"EPS surprise {_fmt_pct(eps_surprise, signed=True)}")
             if beat_parts:
                 fallback_p1 += " " + "; ".join(beat_parts) + "."
-        if qoq_rev is not None or yoy_rev is not None:
-            fallback_p1 += f" Key preview: quarter-on-quarter {_fmt_pct(qoq_rev, signed=True) if qoq_rev is not None else '—'}, year-on-year {_fmt_pct(yoy_rev, signed=True) if yoy_rev is not None else '—'}."
+        # Only mention QoQ/YoY when comparison bases exist (no "—" with a %)
+        calendar_prior = memo.get("calendar_prior_quarter_released") or {}
+        calendar_same_ly = memo.get("calendar_same_q_prior_yr_released") or {}
+        has_prior = (calendar_prior.get("net_sales") is not None) or (memo.get("prior_quarter_actual_revenue") is not None)
+        has_same_ly = (calendar_same_ly.get("net_sales") is not None) or (memo.get("same_quarter_prior_year_revenue") is not None)
+        if (qoq_rev is not None and has_prior) or (yoy_rev is not None and has_same_ly):
+            q_part = _fmt_pct(qoq_rev, signed=True) if (qoq_rev is not None and has_prior) else "—"
+            y_part = _fmt_pct(yoy_rev, signed=True) if (yoy_rev is not None and has_same_ly) else "—"
+            fallback_p1 += f" Key preview: quarter-on-quarter {q_part}, year-on-year {y_part}."
         if spread is not None:
             fallback_p1 += " Expectations into the print look " + ("supportive" if spread > 0 else "balanced" if spread == 0 else "demanding") + "."
         else:
             fallback_p1 += " Expectations into the print look balanced."
-        # Para 2: what matters and earnings quality
-        fallback_p2 = (
-            "This quarter, focus on sector operating metrics and headline results versus consensus. "
-            "Earnings quality—whether a beat or miss comes from recurring operations or one-offs—matters as much as the headline number. "
-            "A result in line or ahead on revenue and EPS with stable margins would support the case; weakness versus consensus or deteriorating asset quality would pressure the multiple."
-        )
+        # Para 2: sector-specific (no asset quality for non-banks, no backlog for oil & gas, etc.)
+        _, _, fallback_p2 = _sector_operating_kpis_and_what_matters(c)
         # When Recent Context exists, Investment View must use at least one article (extracted_fact or snippet/headline)
         fallback_article_cite = None
         if has_valid_rc and news_items_list:
@@ -544,20 +598,22 @@ def _build(payload: ReportPayload, path: Path, memo_data: dict | None = None, qa
             cons_str = f"{cons_val:,.2f}"
         prev_a_val = calendar_prior.get(key)
         prev_a = _fmt_num(prev_a_val) if prev_a_val is not None else "—"
+        # Only show QoQ when prior-quarter base is present (never show "—" with a %)
         qoq = (
             memo.get("qoq_revenue_pct") if key == "net_sales"
             else memo.get("qoq_ni_pct") if key == "net_income"
             else memo.get("qoq_eps_pct") if key == "eps" else None
         )
-        qoq_str = _fmt_pct(qoq, signed=True) if qoq is not None else "—"
+        qoq_str = _fmt_pct(qoq, signed=True) if (qoq is not None and prev_a_val is not None) else "—"
         same_ly_val = calendar_same_ly.get(key)
         same_ly_str = _fmt_num(same_ly_val) if same_ly_val is not None else "—"
+        # Only show YoY when same-quarter-last-year base is present (never show "—" with e.g. -100% YoY)
         yoy_val = (
             memo.get("yoy_revenue_pct_table") if key == "net_sales"
             else memo.get("yoy_ni_pct_table") if key == "net_income"
             else memo.get("yoy_eps_pct_table") if key == "eps" else None
         )
-        yoy_str = _fmt_pct(yoy_val, signed=True) if yoy_val is not None else "—"
+        yoy_str = _fmt_pct(yoy_val, signed=True) if (yoy_val is not None and same_ly_val is not None) else "—"
         # Our (manual) column always em dash unless we add a separate source later
         preview_rows.append((label, "—", cons_str, prev_a, qoq_str, same_ly_str, yoy_str))
 
@@ -580,21 +636,9 @@ def _build(payload: ReportPayload, path: Path, memo_data: dict | None = None, qa
     p.paragraph_format.space_after = SPACE_TINY
 
     op_headers = ["KPI", f"{preview_short}E", f"{prev_q_short}A", f"{same_q_short}A", "Commentary"]
-    op_kpis = []
-    if c.is_bank:
-        op_kpis = ["Loans", "Deposits", "NIM", "Cost of Risk"]
-    else:
-        ind = (c.industry or "").lower()
-        if "internet" in ind or "e-commerce" in ind or "retail" in ind:
-            op_kpis = ["GMV", "Cloud revenue growth", "International commerce", "Customer management revenue"]
-        elif "chem" in ind or "material" in ind:
-            op_kpis = ["Volume", "Realized price", "Utilization", "Feedstock spread"]
-        elif "telecom" in ind:
-            op_kpis = ["Subscribers", "ARPU", "Churn", "Capex intensity"]
-        else:
-            op_kpis = ["", "", "", ""]
+    op_kpis, _, _ = _sector_operating_kpis_and_what_matters(c)
     if len(op_kpis) < 4:
-        op_kpis.extend([""] * (4 - len(op_kpis)))
+        op_kpis = list(op_kpis) + [""] * (4 - len(op_kpis))
     op_kpis = op_kpis[:4]
     tbl_op = doc.add_table(rows=1 + 4, cols=5)
     tbl_op.style = "Table Grid"
@@ -691,6 +735,13 @@ def _build(payload: ReportPayload, path: Path, memo_data: dict | None = None, qa
     else:
         p = doc.add_paragraph()
         _run(p, "Beat/miss history not available from quarterly results.", size_pt=SMALL_PT, color=GRAY)
+    # QA: flag when any surprise % is very large so it is reviewed rather than presented without context
+    if memo_data:
+        rec = memo_data.get("recent_execution") or {}
+        if rec.get("extreme_surprise_flagged"):
+            p = doc.add_paragraph()
+            p.paragraph_format.space_after = SPACE_TINY
+            _run(p, "Review: at least one surprise % is very large; verify before citing.", size_pt=SMALL_PT, color=GRAY)
 
     # ─── F. What Matters This Quarter (compact bullet block) ─────────────
     p = doc.add_paragraph()
@@ -698,11 +749,7 @@ def _build(payload: ReportPayload, path: Path, memo_data: dict | None = None, qa
     _run(p, "What Matters This Quarter", bold=True, size_pt=SECTION_PT, color=ACCENT)
     p.paragraph_format.space_after = SPACE_TINY
 
-    matters = (
-        ["Loan / financing growth", "NIM / margin", "Asset quality", "Funding mix", "Capital return"]
-        if c.is_bank
-        else ["Demand and orders", "Margin and pricing", "Backlog / utilization", "Guidance", "Key metrics"]
-    )
+    _, matters, _ = _sector_operating_kpis_and_what_matters(c)
     for m in matters[:5]:
         para = doc.add_paragraph(style="List Bullet")
         para.paragraph_format.space_after = SPACE_TINY

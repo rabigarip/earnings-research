@@ -147,8 +147,10 @@ allowed_for_sector_context = true
 date_confidence_policy = "from_source"
 
 [gemini]
-# Use 2.5-flash (2.0-flash no longer available to new users per API 404)
+# Default model: used for any LLM call when a dedicated model is not set (e.g. future summarization/classification)
 model = "gemini-2.5-flash"
+# Investment View: more capable model for the memo's two-paragraph IV (evidence-based, sector-specific)
+investment_view_model = "gemini-2.5-pro"
 max_tokens = 8192
 temperature = 0.2
 
