@@ -18,3 +18,19 @@ def cfg() -> dict:
 
 def root() -> Path:
     return ROOT
+
+
+def database_path() -> Path:
+    """Database file path. Use DATABASE_PATH env (e.g. /tmp/earnings-data/earnings.db on Render) if set."""
+    env_path = os.environ.get("DATABASE_PATH")
+    if env_path:
+        return Path(env_path)
+    return ROOT / cfg()["database"]["path"]
+
+
+def report_output_dir() -> Path:
+    """Report output directory. Use REPORT_OUTPUT_DIR env (e.g. /tmp/earnings-outputs on Render) if set."""
+    env_dir = os.environ.get("REPORT_OUTPUT_DIR")
+    if env_dir:
+        return Path(env_dir)
+    return ROOT / cfg()["report"]["output_dir"]

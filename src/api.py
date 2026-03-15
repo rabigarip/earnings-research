@@ -171,14 +171,14 @@ def get_report(run_id: str):
 def download_report(run_id: str):
     """Download the memo .docx file for this run. Returns 404 if file not found (e.g. after Render redeploy)."""
     from src.storage.db import load_run
-    from src.config import root, cfg
+    from src.config import root, cfg, report_output_dir
     run = load_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Report not found")
     memo_filename = (run.get("memo_path") or "").strip()
     if not memo_filename or ".." in memo_filename:
         raise HTTPException(status_code=404, detail="No memo file for this run")
-    out_dir = root() / cfg()["report"]["output_dir"]
+    out_dir = report_output_dir()
     file_path = out_dir / memo_filename
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="Memo file no longer available (may have been removed)")

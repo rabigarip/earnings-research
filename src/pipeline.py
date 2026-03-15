@@ -196,15 +196,22 @@ def _banner(ticker: str, run_id: str, t0: datetime) -> None:
 
 def _finish(run_id: str, ticker: str, t0: datetime,
             results: list[StepResult]) -> None:
+    from pathlib import Path
     t1 = datetime.now(timezone.utc)
     overall = _overall(results)
     failed = sum(1 for r in results if r.status == Status.FAILED)
     elapsed = (t1 - t0).total_seconds()
 
+    memo_path = None
+    for r in results:
+        if r.step_name == "generate_report" and r.status == Status.SUCCESS and r.data:
+            memo_path = Path(str(r.data)).name
+            break
+
     try:
         save_run(run_id, ticker, "preview",
                  t0.isoformat(), t1.isoformat(),
-                 overall, [r.to_log_dict() for r in results])
+                 overall, [r.to_log_dict() for r in results], memo_path=memo_path)
     except Exception as exc:
         logger.warning("Could not save run to DB: %s", exc)
 

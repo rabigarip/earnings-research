@@ -12,6 +12,11 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: "3.12"
+      # Writable paths (Render's project dir can be read-only; /tmp is writable)
+      - key: DATABASE_PATH
+        value: /tmp/earnings-data/earnings.db
+      - key: REPORT_OUTPUT_DIR
+        value: /tmp/earnings-outputs
       # Optional: restrict CORS to your frontend (comma-separated origins)
       # - key: CORS_ORIGINS
       #   value: https://your-app.onrender.com,https://your-custom-domain.com
@@ -21,4 +26,4 @@ services:
 
     # Render free tier has 30s request timeout; preview can take 30–90s with LLM.
     # Increase on paid plan or use skip_llm=true from frontend for faster demos.
-    # healthCheckPath: /health
+    healthCheckPath: /health

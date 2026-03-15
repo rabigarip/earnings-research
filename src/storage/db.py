@@ -18,7 +18,7 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from src.config import cfg, root
+from src.config import cfg, root, database_path
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +53,8 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     started_at      TEXT NOT NULL,
     finished_at     TEXT,
     overall_status  TEXT,
-    step_results    TEXT
+    step_results    TEXT,
+    memo_path       TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS financial_snapshots (
@@ -108,7 +109,7 @@ CREATE TABLE IF NOT EXISTS report_outputs (
 
 
 def _db_path() -> Path:
-    return root() / cfg()["database"]["path"]
+    return database_path()
 
 
 def get_conn() -> sqlite3.Connection:
@@ -125,9 +126,26 @@ def init_db() -> None:
     conn = get_conn()
     conn.executescript(_SCHEMA)
     _migrate_company_master_identifier_columns(conn)
+    _migrate_pipeline_runs_memo_path(conn)
     conn.commit()
     conn.close()
     log.info("Initialized → %s", _db_path())
+
+
+def _migrate_pipeline_runs_memo_path(conn: sqlite3.Connection) -> None:
+    """Add memo_path to pipeline_runs if missing (for existing DBs)."""
+    cur = conn.execute("PRAGMA table_info(pipeline_runs)")
+    names = {row[1] for row in cur.fetchall()}
+    if "memo_path" not in names:
+        conn.execute("ALTER TABLE pipeline_runs ADD COLUMN memo_path TEXT DEFAULT ''")
+
+
+def ensure_migrations() -> None:
+    """Run migrations on existing DB (e.g. add memo_path). Call when app starts if DB exists."""
+    conn = get_conn()
+    _migrate_pipeline_runs_memo_path(conn)
+    conn.commit()
+    conn.close()
 
 
 def _migrate_company_master_identifier_columns(conn: sqlite3.Connection) -> None:
@@ -327,13 +345,14 @@ def set_marketscreener_source_redirect(ticker: str) -> None:
 
 
 def save_run(run_id: str, ticker: str, mode: str, started_at: str,
-             finished_at: str, status: str, steps: list[dict]) -> None:
+             finished_at: str, status: str, steps: list[dict],
+             memo_path: str | None = None) -> None:
     conn = get_conn()
     conn.execute("""
         INSERT INTO pipeline_runs
-            (run_id, ticker, mode, started_at, finished_at, overall_status, step_results)
-        VALUES (?,?,?,?,?,?,?)
-    """, (run_id, ticker, mode, started_at, finished_at, status, json.dumps(steps)))
+            (run_id, ticker, mode, started_at, finished_at, overall_status, step_results, memo_path)
+        VALUES (?,?,?,?,?,?,?,?)
+    """, (run_id, ticker, mode, started_at, finished_at, status, json.dumps(steps), memo_path or ""))
     conn.commit()
     conn.close()
 
@@ -342,7 +361,7 @@ def list_runs() -> list[dict]:
     """List pipeline runs with company name and country from company_master."""
     conn = get_conn()
     rows = conn.execute("""
-        SELECT r.run_id, r.ticker, r.started_at, r.finished_at, r.overall_status, r.step_results,
+        SELECT r.run_id, r.ticker, r.started_at, r.finished_at, r.overall_status, r.step_results, r.memo_path,
                c.company_name, c.country
         FROM pipeline_runs r
         LEFT JOIN company_master c ON c.ticker = r.ticker
@@ -369,7 +388,7 @@ def load_run(run_id: str) -> dict | None:
     """Load one run by run_id with step_results parsed."""
     conn = get_conn()
     row = conn.execute("""
-        SELECT r.run_id, r.ticker, r.mode, r.started_at, r.finished_at, r.overall_status, r.step_results,
+        SELECT r.run_id, r.ticker, r.mode, r.started_at, r.finished_at, r.overall_status, r.step_results, r.memo_path,
                c.company_name, c.country
         FROM pipeline_runs r
         LEFT JOIN company_master c ON c.ticker = r.ticker

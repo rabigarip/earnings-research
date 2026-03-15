@@ -20,7 +20,7 @@ from docx.opc.constants import RELATIONSHIP_TYPE
 from docx.shared import Inches, Pt
 from docx.dml.color import RGBColor
 
-from src.config import cfg, root
+from src.config import cfg, root, report_output_dir
 from src.models.report_payload import ReportPayload
 from src.models.step_result import Status, StepResult, StepTimer
 from src.services.report_styling import (
@@ -971,7 +971,7 @@ def _build(payload: ReportPayload, path: Path, memo_data: dict | None = None, qa
 def run(payload: ReportPayload, memo_data: dict | None = None, qa_audit: dict | None = None) -> StepResult:
     with StepTimer() as t:
         try:
-            out_dir = root() / cfg()["report"]["output_dir"]
+            out_dir = report_output_dir()
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             fname = f"{payload.company.ticker}_preview_{ts}.docx"
             out_path = out_dir / fname
