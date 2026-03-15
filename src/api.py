@@ -187,11 +187,15 @@ def download_report(run_id: str):
     file_path = out_dir / memo_filename
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="Memo file no longer available (may have been removed)")
-    return FileResponse(
+    response = FileResponse(
         path=str(file_path),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=memo_filename,
     )
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 def _run_preview_and_response(ticker: str, skip_llm: bool = True) -> dict:

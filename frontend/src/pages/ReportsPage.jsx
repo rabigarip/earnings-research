@@ -141,7 +141,7 @@ export default function ReportsPage({ onSignOut }) {
           navigate(`/reports/${reportId}`);
           break;
         case "download":
-          window.open(`${API_BASE}/api/reports/${reportId}/download`, "_blank");
+          window.open(`${API_BASE}/api/reports/${reportId}/download?t=${Date.now()}`, "_blank");
           break;
         case "rerun": {
           const res = await fetch(`${API_BASE}/api/reports/${reportId}/rerun`, {
