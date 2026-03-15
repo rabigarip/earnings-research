@@ -114,8 +114,8 @@ def _is_valid_recent_context_article(art) -> bool:
 
 def _sector_operating_kpis_and_what_matters(company) -> tuple[list[str], list[str], str]:
     """
-    Return (operating_metrics_kpis[4], what_matters_bullets[5], fallback_para2_snippet)
-    so memo uses sector-appropriate language (oil & gas, telecom, banks, industrials, default).
+    Return (operating_metrics_kpis[4], what_matters_bullets[5], fallback_para2_snippet).
+    fallback_para2 is publishable analyst prose only (no "Focus on...", "Do not use..." instructions).
     """
     sector = (getattr(company, "sector", None) or "").strip().lower()
     industry = (getattr(company, "industry", None) or "").strip().lower()
@@ -125,41 +125,43 @@ def _sector_operating_kpis_and_what_matters(company) -> tuple[list[str], list[st
     if is_bank:
         kpis = ["Loans", "Deposits", "NIM", "Cost of Risk"]
         matters = ["Loan / financing growth", "NIM / margin", "Asset quality", "Funding mix", "Capital return"]
-        p2 = "Focus on NIM, loan growth, and asset quality. Earnings quality—recurring vs one-offs—matters; weakness versus consensus or deteriorating asset quality would pressure the multiple."
+        p2 = "For banks, the story usually turns on NIM, loan growth, and asset quality. Earnings quality—recurring versus one-offs—and any weakness versus consensus or deterioration in asset quality are key for the multiple."
         return kpis, matters, p2
 
     if "oil" in ind or "gas" in ind or "energy" in sector or "exploration" in ind or "petroleum" in ind:
         kpis = ["Production volumes", "Realized oil/gas prices", "Lifting costs", "Capex / project ramp-up"]
         matters = ["Production volumes", "Realized oil/gas prices", "Lifting costs", "Reserve replacement / field startup", "Capex and project ramp-up"]
-        p2 = "Focus on production volumes, realized prices, and lifting costs. Reserve replacement and field startup impact matter; capex and project ramp-up drive the story. Do not use bank or industrial backlog language."
+        p2 = "For oil and gas, the narrative typically turns on production volumes, realized prices, and lifting costs; reserve replacement and field startup impact also matter, and capex and project ramp-up often drive the story."
         return kpis, matters, p2
 
     if "telecom" in ind or "communication" in sector:
         kpis = ["Subscribers", "ARPU", "Churn", "Capex intensity"]
         matters = ["Subscriber additions", "ARPU trend", "Churn", "Capex intensity", "India wireless competition" if "india" in (getattr(company, "country", "") or "").lower() else "Wireless competition", "Enterprise / data centre contribution"]
-        p2 = "Focus on subscribers, ARPU, churn, and capex intensity. Do not use bank language (e.g. asset quality). Enterprise and data centre contribution are key where relevant."
+        p2 = "For telecoms, subscriber trends, ARPU, churn, and capex intensity are central; enterprise and data centre contribution matter where relevant."
         return kpis, matters[:5], p2
 
     if "industrial" in sector or "capital good" in ind or "aerospace" in ind or "machinery" in ind:
         kpis = ["Orders / backlog", "Utilization", "Pricing", "Guidance"]
         matters = ["Demand and orders", "Backlog / utilization", "Margin and pricing", "Guidance", "Key metrics"]
-        p2 = "Focus on demand, orders, backlog, and utilization. Margin and pricing matter; guidance and key metrics drive the stock."
+        p2 = "For industrials, demand, orders, backlog, and utilization drive the story; margin and pricing matter, and guidance and key metrics often move the stock."
         return kpis, matters, p2
 
     if "internet" in ind or "e-commerce" in ind or "retail" in ind:
         kpis = ["GMV", "Cloud revenue growth", "International commerce", "Customer management revenue"]
         matters = ["GMV and engagement", "Margin and pricing", "Guidance", "Key metrics"]
-        return kpis, matters[:5], "Focus on sector operating metrics and headline results versus consensus. Guidance and key metrics drive the story."
+        p2 = "Sector operating metrics and headline results versus consensus are key; guidance and main metrics typically drive the stock."
+        return kpis, matters[:5], p2
 
     if "chem" in ind or "material" in ind:
         kpis = ["Volume", "Realized price", "Utilization", "Feedstock spread"]
         matters = ["Volume and realized price", "Utilization", "Feedstock spread", "Guidance", "Key metrics"]
-        return kpis, matters[:5], "Focus on volume, realized price, utilization, and feedstock spread. Do not use bank language."
+        p2 = "Volume, realized price, utilization, and feedstock spread are the main levers; guidance and key metrics drive the story."
+        return kpis, matters[:5], p2
 
-    # Default: labeled rows for manual entry; avoid bank/industrial-specific jargon
+    # Default: labeled rows for manual entry
     kpis = ["Key metric 1", "Key metric 2", "Key metric 3", "Key metric 4"]
     matters = ["Headline vs consensus", "Margin and pricing", "Guidance", "Key metrics"]
-    p2 = "This quarter, focus on sector operating metrics and headline results versus consensus. Earnings quality—whether a beat or miss comes from recurring operations or one-offs—matters. Do not use sector-inappropriate language (e.g. asset quality for non-banks, backlog for oil & gas)."
+    p2 = "This quarter, sector operating metrics and headline results versus consensus matter most; earnings quality—whether a beat or miss is recurring or one-off—and guidance drive the narrative."
     return kpis, matters[:5], p2
 
 

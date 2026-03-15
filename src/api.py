@@ -247,8 +247,14 @@ def create_report(req: CreateReportRequest):
     ticker = (req.ticker or "").strip().upper()
     if not ticker:
         raise HTTPException(status_code=400, detail="ticker is required")
-    data = _run_preview_and_response(ticker, skip_llm=req.skip_llm)
-    return data
+    try:
+        data = _run_preview_and_response(ticker, skip_llm=req.skip_llm)
+        return data
+    except HTTPException:
+        raise
+    except Exception as e:
+        msg = str(e).strip() or repr(e)
+        raise HTTPException(status_code=500, detail=f"Report creation failed: {msg}")
 
 
 @app.post("/api/reports/{run_id}/rerun")
@@ -261,7 +267,13 @@ def rerun_report(run_id: str):
     ticker = run.get("ticker", "").strip().upper()
     if not ticker:
         raise HTTPException(status_code=400, detail="ticker not found for run")
-    return _run_preview_and_response(ticker, skip_llm=True)
+    try:
+        return _run_preview_and_response(ticker, skip_llm=True)
+    except HTTPException:
+        raise
+    except Exception as e:
+        msg = str(e).strip() or repr(e)
+        raise HTTPException(status_code=500, detail=f"Rerun failed: {msg}")
 
 
 @app.post("/api/preview", response_model=PreviewResponse)

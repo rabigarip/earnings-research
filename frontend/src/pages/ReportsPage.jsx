@@ -105,7 +105,11 @@ export default function ReportsPage({ onSignOut }) {
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || "Failed to create report");
+        const detail = errData.detail;
+        const msg = Array.isArray(detail)
+          ? detail.map((d) => d.msg ?? d).join(", ")
+          : detail || "Failed to create report";
+        throw new Error(msg);
       }
       const data = await res.json();
       if (data.payload && data.report?.id) setPayload(data.report.id, data.payload);
