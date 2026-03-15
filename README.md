@@ -1,6 +1,6 @@
 # Earnings Research — Backend API & Pipeline
 
-Backend for earnings preview: governed pipeline (Yahoo, MarketScreener, Zawya, Gemini) plus a **FastAPI web API** for the [earnings-preview](https://github.com) frontend and **Render** deployment.
+Backend for earnings preview: governed pipeline (Yahoo, MarketScreener, Zawya, Gemini) plus a **FastAPI web API** and **Render** deployment (one-site: API + static frontend).
 
 ---
 
@@ -104,6 +104,8 @@ earnings-research/
 │   ├── api.py                     # FastAPI app: /api/reports, /api/preview, etc.
 │   ├── config.py                  # TOML loader + path resolver
 │   ├── pipeline.py                # Orchestrator (steps 1–11)
+│   ├── constants/
+│   │   └── iv_quality.py          # Investment View: banned phrases, word bounds, guardrail
 │   ├── models/
 │   │   ├── step_result.py         # StepResult + StepTimer
 │   │   ├── company.py             # CompanyMaster
@@ -140,7 +142,7 @@ earnings-research/
 │   ├── diagnostics.py            # newsapi | sabic diagnostics
 │   └── diagnostics_sabic.py      # SABIC vs working (used by diagnostics sabic)
 ├── tests/                         # pytest tests/ -v
-├── docs/                          # DATA_SOURCE_AND_URL_REFERENCE, DEPLOY-RENDER
+├── docs/                          # DATA_SOURCE_AND_URL_REFERENCE, DEPLOY-RENDER, INVESTMENT_VIEW_FLOW
 ├── outputs/                       # Generated .docx (gitignored)
 ├── cache/                         # HTML cache (gitignored)
 ├── requirements.txt

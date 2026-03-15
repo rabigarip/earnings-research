@@ -229,39 +229,30 @@ def _build_evidence_brief(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Post-generation validation
+# Post-generation validation (banned phrases, reaction markers from shared constants)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-BANNED_PHRASES_IV = [
-    "investors will focus on key metrics",
-    "guidance will be closely watched",
-    "earnings quality matters",
-    "market participants will monitor",
-    "investors will monitor",
-    "stock reaction will hinge on",
-    "a strong quarter would support the case",
-    "investors will focus on",
-    "the market will closely watch",
-    "key metrics will be in focus",
-    "all eyes will be on",
-]
+from src.constants.iv_quality import (
+    BANNED_PHRASES_IV,
+    UNSUPPORTED_CONFIDENCE_WORDS,
+    REACTION_MARKERS,
+    IV_MIN_TOTAL_WORDS,
+    IV_MAX_TOTAL_WORDS,
+    IV_MIN_PARAGRAPH_WORDS,
+)
 
-UNSUPPORTED_CONFIDENCE_WORDS = [
-    "supportive", "encouraging", "robust", "stellar",
-    "impressive", "outstanding", "excellent", "remarkable",
-]
 
-REACTION_MARKERS = [
-    r"stock\s+(reaction|move|response|price)",
-    r"share\s+price",
-    r"market\s+(reaction|response)",
-    r"(drive|determine|shape)\s+(the\s+)?(stock|share|trading)",
-    r"sentiment",
-    r"re-?rat(e|ing)",
-    r"matter(s)?\s+for\s+the\s+stock",
-    r"(clean|weak|strong)er?[\s-]+than[\s-]+(feared|expected|hoped)",
-    r"(up|down)side\s+(risk|surprise|from\s+here)",
-]
+def _get_iv_word_bounds():
+    """Word count bounds for IV validation; override from config if present."""
+    try:
+        s = cfg().get("gemini", {})
+        return (
+            s.get("iv_min_total_words", IV_MIN_TOTAL_WORDS),
+            s.get("iv_max_total_words", IV_MAX_TOTAL_WORDS),
+            s.get("iv_min_paragraph_words", IV_MIN_PARAGRAPH_WORDS),
+        )
+    except Exception:
+        return IV_MIN_TOTAL_WORDS, IV_MAX_TOTAL_WORDS, IV_MIN_PARAGRAPH_WORDS
 
 
 def _validate_iv_output(
@@ -289,6 +280,7 @@ def _validate_iv_output(
         return False, ["output contains prompt leakage; must be analyst text only"]
 
     issues: list[str] = []
+    min_total, max_total, min_para = _get_iv_word_bounds()
 
     # 1. Banned generic phrases
     for phrase in BANNED_PHRASES_IV:
@@ -303,15 +295,15 @@ def _validate_iv_output(
                 issues.append(f"unsupported confidence word '{word}' without quantitative context")
                 break
 
-    # 3. Word count (target 120-180, tolerate 90-250); each paragraph must be substantive
+    # 3. Word count (configurable bounds); each paragraph must be substantive
     wc = len(combined.split())
     w1, w2 = len((p1 or "").split()), len((p2 or "").split())
-    if wc < 80:
-        issues.append(f"too short ({wc} words, need >=100)")
-    elif wc > 280:
-        issues.append(f"too long ({wc} words, need <=220)")
-    if (p1 and w1 < 25) or (p2 and w2 < 25):
-        issues.append("each paragraph must be at least ~25 words (substantive analyst text, not a label)")
+    if wc < min_total:
+        issues.append(f"too short ({wc} words, need >={min_total})")
+    elif wc > max_total:
+        issues.append(f"too long ({wc} words, need <={max_total})")
+    if (p1 and w1 < min_para) or (p2 and w2 < min_para):
+        issues.append(f"each paragraph must be at least ~{min_para} words (substantive analyst text, not a label)")
 
     # 4. Company-specific content (>=3 identifiable terms)
     specific = 0
@@ -573,14 +565,17 @@ def _call_gemini(prompt: str, for_investment_view: bool = True) -> dict | None:
         )
         text = (resp.text or "").strip()
         if not text:
+            log.warning("Gemini returned empty response")
             return None
         out = _extract_json(text)
         if out is None:
             log.warning("Gemini returned non-JSON response: %s…", text[:200])
         return out
+    except EnvironmentError:
+        raise
     except Exception as exc:
-        log.warning("Gemini call failed: %s", exc)
-        return None
+        log.warning("Gemini call failed: %s", exc, exc_info=True)
+        raise
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

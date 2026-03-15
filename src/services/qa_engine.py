@@ -807,40 +807,19 @@ def build_fact_pack(memo_data: dict, payload: Any) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Investment view guardrail
+# Investment view guardrail (uses shared IV quality constants)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-UNSUPPORTED_PATTERNS = [
-    r"\bvision\s+2030\b", r"\boil\s+price", r"\bmacro\s+environment",
-    r"\bmortgage\s+growth", r"\bsme\s+momentum", r"\bpremium\s+valuation",
-    r"\bdominant\s+franchise", r"\bdigital\s+leadership",
-    r"\bmanagement\s+confidence", r"\bstrategy\s+shift",
-    r"\bguidance\s+(?:raise|cut|maintain)", r"\boutlook\s+for\s+the\s+year",
-    r"\bcompetitive\s+position", r"\bmarket\s+share\s+gain",
-]
-
-BANNED_GENERIC_PHRASES = [
-    r"investors\s+will\s+focus\s+on\s+key\s+metrics",
-    r"guidance\s+will\s+be\s+closely\s+watched",
-    r"earnings\s+quality\s+matters",
-    r"market\s+participants\s+will\s+monitor",
-    r"investors\s+will\s+monitor",
-    r"stock\s+reaction\s+will\s+hinge\s+on",
-    r"a\s+strong\s+quarter\s+would\s+support\s+the\s+case",
-    r"all\s+eyes\s+will\s+be\s+on",
-    r"key\s+metrics\s+will\s+be\s+in\s+focus",
-    r"the\s+market\s+will\s+closely\s+watch",
-]
-
-_ALL_PATTERNS = UNSUPPORTED_PATTERNS + BANNED_GENERIC_PHRASES
-UNSUPPORTED_RE = re.compile("|".join(f"(?:{p})" for p in _ALL_PATTERNS), re.I)
+def _get_guardrail_re():
+    from src.constants.iv_quality import get_guardrail_combined_regex
+    return get_guardrail_combined_regex()
 
 
 def _classify_sentence(s: str) -> str:
     s_clean = (s or "").strip()
     if not s_clean:
         return "empty"
-    if UNSUPPORTED_RE.search(s_clean):
+    if _get_guardrail_re().search(s_clean):
         return "unsupported_claim"
     if re.search(r"\d+\.?\d*\s*%|\d+(?:\.\d+)?[xX]|\d+(?:\.\d+)?[bmBM]", s_clean):
         return "numerical_inference"

@@ -75,6 +75,12 @@ def run(news_items: list[NewsItem], company_name: str, memo_fact_pack: dict | No
                     })
             citation_placements = normalized_placements
 
+            p1 = raw.get("investment_view_paragraph_1", "") or ""
+            p2 = raw.get("investment_view_paragraph_2", "") or ""
+            # Apply guardrail once at source so payload and render both see clean IV
+            from src.services.qa_engine import guardrail_paragraphs
+            p1, p2 = guardrail_paragraphs(p1, p2)
+
             summary = NewsSummary(
                 themes=raw.get("themes", []),
                 overall_sentiment=raw.get("overall_sentiment", "neutral"),
@@ -82,8 +88,8 @@ def run(news_items: list[NewsItem], company_name: str, memo_fact_pack: dict | No
                 uncertainty_factors=raw.get("uncertainty_factors", []),
                 summary_text=raw.get("summary_text", ""),
                 investment_view_bullets=raw.get("investment_view_bullets", []),
-                investment_view_paragraph_1=raw.get("investment_view_paragraph_1", ""),
-                investment_view_paragraph_2=raw.get("investment_view_paragraph_2", ""),
+                investment_view_paragraph_1=p1,
+                investment_view_paragraph_2=p2,
                 referenced_articles=ref_articles,
                 citation_placements=citation_placements,
             )

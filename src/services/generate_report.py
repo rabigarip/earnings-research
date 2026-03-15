@@ -32,6 +32,10 @@ from src.services.report_styling import (
 
 STEP = "generate_report"
 
+# Minimum character length for IV paragraphs before using fallback (with Recent Context we accept shorter LLM output)
+MIN_IV_LEN_WITH_RECENT_CONTEXT = 20
+MIN_IV_LEN_DEFAULT = 40
+
 
 def _run(paragraph, text: str, bold: bool = False, size_pt: float = 8.5, color=None):
     r = paragraph.add_run(text)
@@ -378,7 +382,7 @@ def _build(payload: ReportPayload, path: Path, memo_data: dict | None = None, qa
             citation_placements = [{"paragraph": 1, "after_sentence": len(sentences_p1) - 1, "article_index": first_idx}]
             if qa_audit is not None:
                 qa_audit["investment_view_effective_ref_articles"] = ref_articles
-    min_len = 20 if has_valid_rc else 40  # When recent context exists, prefer LLM output over fallback
+    min_len = MIN_IV_LEN_WITH_RECENT_CONTEXT if has_valid_rc else MIN_IV_LEN_DEFAULT
     if p1 and p2 and len(p1) > min_len and len(p2) > min_len and not any(e in (p1 + p2).lower() for e in err_like):
         # Inline citations: article_index refers to payload.news_items (the selected list sent to Gemini)
         news_items_for_index = news_items_list

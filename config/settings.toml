@@ -153,6 +153,10 @@ model = "gemini-2.5-flash"
 investment_view_model = "gemini-2.5-pro"
 max_tokens = 8192
 temperature = 0.2
+# IV validation word bounds (optional; defaults in src/constants/iv_quality.py)
+iv_min_total_words = 80
+iv_max_total_words = 280
+iv_min_paragraph_words = 25
 
 [database]
 path = "data/earnings.db"
