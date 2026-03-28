@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS company_master (
     zawya_slug                  TEXT DEFAULT '',
     sector                      TEXT DEFAULT '',
     industry                    TEXT DEFAULT '',
+    peer_group                  TEXT DEFAULT '[]',
     is_bank                     INTEGER DEFAULT 0,
     notes                       TEXT DEFAULT '',
     created_at                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -105,6 +106,19 @@ CREATE TABLE IF NOT EXISTS report_outputs (
     file_path    TEXT NOT NULL,
     generated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS actuals (
+    ticker TEXT NOT NULL,
+    period TEXT NOT NULL,
+    revenue REAL,
+    net_income REAL,
+    eps REAL,
+    ebitda REAL,
+    ebitda_margin REAL,
+    reported_date TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (ticker, period)
+);
 """
 
 
@@ -127,6 +141,7 @@ def init_db() -> None:
     conn.executescript(_SCHEMA)
     _migrate_company_master_identifier_columns(conn)
     _migrate_pipeline_runs_memo_path(conn)
+    _migrate_actuals_table(conn)
     conn.commit()
     conn.close()
     log.info("Initialized → %s", _db_path())
@@ -144,8 +159,28 @@ def ensure_migrations() -> None:
     """Run migrations on existing DB (e.g. add memo_path). Call when app starts if DB exists."""
     conn = get_conn()
     _migrate_pipeline_runs_memo_path(conn)
+    _migrate_actuals_table(conn)
     conn.commit()
     conn.close()
+
+
+def _migrate_actuals_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS actuals (
+            ticker TEXT NOT NULL,
+            period TEXT NOT NULL,
+            revenue REAL,
+            net_income REAL,
+            eps REAL,
+            ebitda REAL,
+            ebitda_margin REAL,
+            reported_date TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (ticker, period)
+        )
+        """
+    )
 
 
 def _migrate_company_master_identifier_columns(conn: sqlite3.Connection) -> None:
@@ -158,6 +193,7 @@ def _migrate_company_master_identifier_columns(conn: sqlite3.Connection) -> None
         ("marketscreener_status", "TEXT DEFAULT ''"),
         ("marketscreener_rejection_reason", "TEXT DEFAULT ''"),
         ("last_verified", "TEXT DEFAULT ''"),
+        ("peer_group", "TEXT DEFAULT '[]'"),
     ]:
         if col not in names:
             conn.execute(f"ALTER TABLE company_master ADD COLUMN {col} {typ}")
@@ -186,8 +222,8 @@ def seed_companies() -> int:
                 (ticker, company_name, company_name_long, exchange, country,
                  currency, isin, marketscreener_id, marketscreener_company_url,
                  marketscreener_symbol, marketscreener_status, last_verified,
-                 zawya_slug, sector, industry, is_bank, notes)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 zawya_slug, sector, industry, peer_group, is_bank, notes)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(ticker) DO UPDATE SET
                 company_name=excluded.company_name,
                 company_name_long=excluded.company_name_long,
@@ -218,6 +254,7 @@ def seed_companies() -> int:
                 zawya_slug=excluded.zawya_slug,
                 sector=excluded.sector,
                 industry=excluded.industry,
+                peer_group=excluded.peer_group,
                 is_bank=excluded.is_bank,
                 notes=excluded.notes,
                 updated_at=CURRENT_TIMESTAMP
@@ -229,6 +266,7 @@ def seed_companies() -> int:
             ms_status, last_verified,
             c.get("zawya_slug", ""),
             c.get("sector", ""), c.get("industry", ""),
+            json.dumps(c.get("peer_group", []) if isinstance(c.get("peer_group", []), list) else []),
             c.get("is_bank", False), c.get("notes", ""),
         ))
         n += 1
@@ -244,7 +282,17 @@ def load_company(ticker: str) -> dict | None:
         "SELECT * FROM company_master WHERE ticker = ?", (ticker,)
     ).fetchone()
     conn.close()
-    return dict(row) if row else None
+    if not row:
+        return None
+    d = dict(row)
+    # Stored as JSON text in SQLite
+    try:
+        pg = d.get("peer_group")
+        if isinstance(pg, str):
+            d["peer_group"] = json.loads(pg) if pg else []
+    except Exception:
+        d["peer_group"] = []
+    return d
 
 
 def list_companies() -> list[dict]:
@@ -254,7 +302,11 @@ def list_companies() -> list[dict]:
         "SELECT ticker, company_name, exchange, country, currency FROM company_master ORDER BY ticker"
     ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        out.append(d)
+    return out
 
 
 def update_company_marketscreener(

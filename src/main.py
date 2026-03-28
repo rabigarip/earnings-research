@@ -45,11 +45,19 @@ def main() -> None:
     )
     ap.add_argument("--ticker",   type=str, help="Yahoo-format ticker")
     ap.add_argument("--mode",     type=str, default="preview",
-                    choices=["preview", "calendar"])
+                    choices=["preview", "calendar", "batch"])
     ap.add_argument("--skip-llm", action="store_true",
                     help="Skip Gemini summarization")
+    ap.add_argument("--tickers", type=str, default="",
+                    help="Comma-separated tickers for --mode batch (e.g. 2010.SR,1120.SR)")
+    ap.add_argument("--days", type=int, default=14,
+                    help="Days ahead for --mode calendar (best-effort; may be partial)")
     ap.add_argument("--init-db",  action="store_true",
                     help="Initialize DB + seed companies, then exit")
+    ap.add_argument("--store-actuals", type=str, default="",
+                    help="Store latest quarterly actuals for ticker (e.g. 2010.SR)")
+    ap.add_argument("--period", type=str, default="",
+                    help="Optional period label for --store-actuals (default: latest quarter label)")
     args = ap.parse_args()
 
     # ── DB init ───────────────────────────────────────────────
@@ -59,6 +67,41 @@ def main() -> None:
         init_db()
         n = seed_companies()
         print(f"\nDone. {n} companies seeded. DB at {_db_path()}")
+        sys.exit(0)
+
+    if args.store_actuals:
+        from src.providers.yahoo import fetch_financials
+        from src.storage.db import load_company
+        from src.services.store_actuals import upsert_actuals
+        ticker = args.store_actuals.strip().upper()
+        row = load_company(ticker)
+        if not row:
+            print(f"[store-actuals] ticker not in company_master: {ticker}")
+            sys.exit(1)
+        from src.models.company import CompanyMaster
+        company = CompanyMaster(**row)
+        fin = fetch_financials(ticker, company.currency, company.is_bank)
+        qs = fin.get("quarterly", []) or []
+        if not qs:
+            print(f"[store-actuals] no quarterly financials for {ticker}")
+            sys.exit(1)
+        latest = sorted(qs, key=lambda p: p.period_label)[-1]
+        period = (args.period or latest.period_label or "").strip()
+        if not period:
+            print("[store-actuals] period is required")
+            sys.exit(1)
+        ebitda_margin = (latest.ebitda / latest.revenue * 100) if (latest.ebitda is not None and latest.revenue) else None
+        upsert_actuals(
+            ticker=ticker,
+            period=period,
+            revenue=latest.revenue,
+            net_income=latest.net_income,
+            eps=latest.eps,
+            ebitda=latest.ebitda,
+            ebitda_margin=ebitda_margin,
+            reported_date=None,
+        )
+        print(f"[store-actuals] upserted {ticker} {period}")
         sys.exit(0)
 
     # Auto-init on first run
@@ -72,6 +115,18 @@ def main() -> None:
         if not args.ticker:
             ap.error("--ticker is required for preview mode")
         from src.pipeline import run_preview
+        # Keep outputs clean: remove older PPTX artifacts before generating the new report.
+        try:
+            from src.config import report_output_dir
+            out_dir = report_output_dir()
+            if out_dir.exists():
+                for p in out_dir.glob("*.pptx"):
+                    try:
+                        p.unlink()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         results = run_preview(args.ticker, skip_llm=args.skip_llm)
 
         from src.models.step_result import Status
@@ -79,9 +134,56 @@ def main() -> None:
         sys.exit(1 if any_fail else 0)
 
     elif args.mode == "calendar":
-        # TODO: list earnings dates for all seeded companies (yfinance calendar, sort, output JSON/table)
-        print("[calendar] Not yet implemented.")
+        # Best-effort: use Yahoo calendar and run previews only for tickers with an earnings date
+        # inside the next N days. Network issues may produce partial results.
+        from datetime import datetime, timedelta
+        import yfinance as yf
+        from src.storage.db import list_companies
+
+        cutoff = datetime.now() + timedelta(days=max(0, int(args.days)))
+        companies = list_companies()
+        tickers = [c.get("ticker") for c in companies if c.get("ticker")]
+
+        matches: list[str] = []
+        for t in tickers:
+            try:
+                cal = yf.Ticker(t).calendar
+                dates = None
+                if isinstance(cal, dict):
+                    dates = cal.get("Earnings Date")
+                if isinstance(dates, list) and dates:
+                    d0 = dates[0]
+                    if hasattr(d0, "to_pydatetime"):
+                        d0 = d0.to_pydatetime()
+                    if hasattr(d0, "date"):
+                        d0_dt = datetime.combine(d0.date(), datetime.min.time())
+                    else:
+                        d0_dt = d0 if isinstance(d0, datetime) else None
+                    if d0_dt and d0_dt <= cutoff:
+                        matches.append(t)
+            except Exception:
+                continue
+
+        print(f"[calendar] Tickers with earnings within {args.days} days: {len(matches)}")
+        from src.pipeline import run_preview
+        for t in matches:
+            run_preview(t, skip_llm=args.skip_llm)
+
         sys.exit(0)
+
+    elif args.mode == "batch":
+        tickers_raw = (args.tickers or "").strip()
+        if not tickers_raw:
+            ap.error("--tickers is required for --mode batch")
+        tickers = [t.strip().upper() for t in tickers_raw.split(",") if t.strip()]
+        from src.pipeline import run_preview
+        any_fail = False
+        for t in tickers:
+            results = run_preview(t, skip_llm=args.skip_llm)
+            from src.models.step_result import Status
+            if any(r.status == Status.FAILED for r in results):
+                any_fail = True
+        sys.exit(1 if any_fail else 0)
 
 
 if __name__ == "__main__":

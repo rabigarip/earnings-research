@@ -35,10 +35,24 @@ def validate_ticker(ticker: str) -> StepResult:
     with StepTimer() as t:
         info = _yahoo_validate(ticker)
     if info is None:
+        # Critical steps are only validate_ticker + resolve_mapping in pipeline.py.
+        # If Yahoo can not identify the ticker, we downgrade to PARTIAL *only when the ticker exists*
+        # in our local company mapping. This keeps smoke tests for truly invalid tickers (e.g. ZZZZ.FAKE)
+        # behaving as FAILED, while letting known tickers proceed for static payload isolation tests.
+        from src.storage.db import load_company
+        exists_locally = bool(load_company(ticker))
+        if not exists_locally:
+            return StepResult(
+                step_name="validate_ticker", status=Status.FAILED, source="yahoo",
+                message=f"Ticker '{ticker}' not found on Yahoo Finance",
+                error_detail="yfinance returned no name or quoteType",
+                elapsed_seconds=t.elapsed,
+            )
         return StepResult(
-            step_name="validate_ticker", status=Status.FAILED, source="yahoo",
-            message=f"Ticker '{ticker}' not found on Yahoo Finance",
+            step_name="validate_ticker", status=Status.PARTIAL, source="yahoo",
+            message=f"Yahoo identity lookup failed for {ticker} (continuing with local mapping)",
             error_detail="yfinance returned no name or quoteType",
+            data={"name": "", "exchange": "", "currency": "", "market_cap": None, "quote_type": ""},
             elapsed_seconds=t.elapsed,
         )
     return StepResult(
@@ -235,13 +249,41 @@ def _cross_check(yahoo: list[FinancialPeriod], consensus: list[FinancialPeriod])
     return warnings
 
 
-def reconcile(ticker: str, company: CompanyMaster,
-              quarterly: list[FinancialPeriod],
-              consensus: list[FinancialPeriod]) -> StepResult:
+def reconcile(
+    ticker: str,
+    company: CompanyMaster,
+    quarterly: list[FinancialPeriod],
+    consensus: list[FinancialPeriod],
+    quote=None,
+) -> StepResult:
     with StepTimer() as t:
         warnings: list[str] = []
         xcheck = _cross_check(quarterly, consensus)
         warnings.extend(xcheck)
+        # Fallback: if not enough quarterly points in this run, try persisted actuals.
+        if len(quarterly) < 2:
+            try:
+                from src.services.store_actuals import latest_actuals
+                cached = latest_actuals(ticker, limit=8)
+                q_from_cache: list[FinancialPeriod] = []
+                for r in reversed(cached):
+                    q_from_cache.append(
+                        FinancialPeriod(
+                            period_label=r.get("period") or "",
+                            period_type="quarterly",
+                            source="actuals_db",
+                            revenue=r.get("revenue"),
+                            ebitda=r.get("ebitda"),
+                            net_income=r.get("net_income"),
+                            eps=r.get("eps"),
+                            currency=company.currency,
+                        )
+                    )
+                if len(q_from_cache) >= 2:
+                    quarterly = q_from_cache
+                    warnings.append("Using persisted actuals fallback for growth calculations")
+            except Exception:
+                pass
         if len(quarterly) < 2:
             return StepResult(
                 step_name="reconcile", status=Status.PARTIAL, source="computed",
@@ -251,10 +293,64 @@ def reconcile(ticker: str, company: CompanyMaster,
             )
         rev_g = _growth_series(quarterly, "revenue")
         ni_g = _growth_series(quarterly, "net_income")
+        # Valuation core fields
+        pe_forward = None
+        ev_ebitda = None
+        pb_ratio = None
+        div_yield_pct = None
+        consensus_target = None
+        upside_pct = None
+        pe_vs_sector_pct = None
+        ev_ebitda_vs_sector_pct = None
+        if quote is not None:
+            pe_forward = getattr(quote, "forward_pe", None)
+            pb_ratio = None
+            dy = getattr(quote, "dividend_yield", None)
+            if isinstance(dy, (int, float)):
+                div_yield_pct = round(dy * 100, 1)
+        # Use consensus estimates to fill missing multiples
+        cons_eps = next((c.eps for c in consensus if c.eps is not None), None)
+        cons_ebitda = next((c.ebitda for c in consensus if c.ebitda is not None and c.ebitda > 0), None)
+        if pe_forward is None and quote is not None and cons_eps and cons_eps > 0 and getattr(quote, "price", None):
+            pe_forward = round(float(getattr(quote, "price")) / float(cons_eps), 1)
+        if quote is not None and getattr(quote, "enterprise_value", None) and cons_ebitda:
+            try:
+                ev_ebitda = round(float(getattr(quote, "enterprise_value")) / float(cons_ebitda), 1)
+            except Exception:
+                ev_ebitda = None
+        # Consensus target price is not carried in FinancialPeriod list; left for build payload / summary source.
+        consensus_target = None
+        if quote is not None and consensus_target and getattr(quote, "price", None):
+            try:
+                upside_pct = round((float(consensus_target) - float(getattr(quote, "price"))) / float(getattr(quote, "price")) * 100, 1)
+            except Exception:
+                upside_pct = None
+        # Sector-relative comparison using optional peer group
+        peer_group = getattr(company, "peer_group", None) or []
+        if peer_group:
+            try:
+                from src.services.fetch_peers import fetch_peer_multiples
+                peer = fetch_peer_multiples(peer_group)
+                pe_med = peer.get("pe_sector_median")
+                ev_med = peer.get("ev_ebitda_sector_median")
+                if pe_forward and pe_med:
+                    pe_vs_sector_pct = round(((pe_forward / pe_med) - 1) * 100, 1)
+                if ev_ebitda and ev_med:
+                    ev_ebitda_vs_sector_pct = round(((ev_ebitda / ev_med) - 1) * 100, 1)
+            except Exception:
+                pass
         derived = DerivedMetrics(
             ticker=ticker, is_bank=company.is_bank,
             quarterly_revenue_growth=rev_g, avg_4q_revenue_growth=_avg_last_n(rev_g, 4),
             quarterly_ni_growth=ni_g, avg_4q_ni_growth=_avg_last_n(ni_g, 4),
+            pe_forward=pe_forward,
+            ev_ebitda=ev_ebitda,
+            pb_ratio=pb_ratio,
+            div_yield_pct=div_yield_pct,
+            consensus_target_price=consensus_target,
+            upside_pct=upside_pct,
+            pe_vs_sector_pct=pe_vs_sector_pct,
+            ev_ebitda_vs_sector_pct=ev_ebitda_vs_sector_pct,
             warnings=warnings,
         )
         parts = []

@@ -392,7 +392,8 @@ def fetch_summary_page(base_company_url: str, cache_key_prefix: str | None = Non
     Per reference: Mean consensus, analyst count, last close, avg target, spread, high/low;
     P/E 2026/2027, EV/Sales, Yield; Net sales/Net income (annual consensus).
     """
-    url = base_company_url.rstrip("/") + "/"
+    url = (base_company_url or "").rstrip("/") + "/"
+    slug = (base_company_url or "").rstrip("/").split("/")[-1] or "SLUG"
     status = PageStepStatus(step="fetch_summary_page", message="")
     start = time.perf_counter() * 1000
 
@@ -401,9 +402,9 @@ def fetch_summary_page(base_company_url: str, cache_key_prefix: str | None = Non
         status.status = "failed"
         status.errors = errors
         status.elapsed_ms = (time.perf_counter() * 1000) - start
-        log.info("[MarketScreener] Fetching summary page (/%s/)... FAILED", slug or "SLUG")
+        log.info("[MarketScreener] Fetching summary page (/%s/)... FAILED", slug)
         return _empty_summary_payload(url, status), status
-    log.info("[MarketScreener] Fetching summary page (/%s/)... SUCCESS", slug or "SLUG")
+    log.info("[MarketScreener] Fetching summary page (/%s/)... SUCCESS", slug)
 
     payload: dict[str, Any] = {
         "source_page": url,

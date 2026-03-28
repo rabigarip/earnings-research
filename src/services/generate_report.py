@@ -1,49 +1,21 @@
-"""
-Service: generate_report
-
-Institutional earnings preview memo. Polished layout; no debug/API text in output.
-Structure: Title block → Summary strip → Investment View (2 paragraphs) → Key Preview
-→ Operating Metrics → Street Snapshot → Recent Execution → What Matters → Appendices A, B, D.
-Appendix C only if meaningful; Appendix E omitted from client-facing note.
-"""
-
+"""Earnings preview: PPTX output + sector IV helpers (imported by qa_engine)."""
 from __future__ import annotations
-import json
-import re
+import os
 from datetime import datetime
 from pathlib import Path
 
-from docx import Document
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
-from docx.opc.constants import RELATIONSHIP_TYPE
-from docx.shared import Inches, Pt
-from docx.dml.color import RGBColor
-
-from src.config import cfg, root, report_output_dir
+from src.config import cfg, report_output_dir
 from src.models.report_payload import ReportPayload
 from src.models.step_result import Status, StepResult, StepTimer
-from src.services.report_styling import (
-    ACCENT, BODY, GRAY, WHITE, HEADER_FILL,
-    SPACE_NONE, SPACE_TINY, SPACE_SMALL, SPACE_MED,
-    TITLE_PT, SECTION_PT, BODY_PT, SMALL_PT, SOURCE_PT,
-    apply_section_margins, set_cell_shading, style_table_header_row, set_compact_row_height,
-)
 
 STEP = "generate_report"
 
 # Minimum character length for IV paragraphs before using fallback (with Recent Context we accept shorter LLM output)
 MIN_IV_LEN_WITH_RECENT_CONTEXT = 20
 MIN_IV_LEN_DEFAULT = 40
+IV_STYLE_DEFAULT = "balanced"
+IV_STYLE_ALLOWED = {"balanced", "tactical", "conservative"}
 
-
-def _run(paragraph, text: str, bold: bool = False, size_pt: float = 8.5, color=None):
-    r = paragraph.add_run(text)
-    r.font.name = "Arial"
-    r.font.size = Pt(size_pt)
-    r.font.color.rgb = color or BODY
-    r.font.bold = bold
-    return r
 
 
 def _fmt_num(val, in_millions: bool = False) -> str:
@@ -87,19 +59,6 @@ def _recent_context_allowed_sources() -> set[str]:
         return {str(s).strip().lower() for s in sources if s}
     except Exception:
         return {"reuters", "zawya"}
-
-
-def _publisher_display_name(source: str) -> str:
-    """Display name for publisher; no provider-specific logic (config or title-case)."""
-    s = (source or "").strip().lower()
-    # Optional config map for display names; else title-case
-    try:
-        names = cfg().get("news", {}).get("recent_context_publisher_display") or {}
-        if isinstance(names, dict) and s in names:
-            return str(names[s])
-    except Exception:
-        pass
-    return (source or "").strip().title() or "—"
 
 
 def _is_valid_recent_context_article(art) -> bool:
@@ -190,988 +149,636 @@ def _sector_operating_kpis_and_what_matters(company) -> tuple[list[str], list[st
     return kpis, matters[:5], p2
 
 
-def _add_recent_context_section(doc: Document, payload: ReportPayload) -> tuple[int, list]:
+def _iv_fallback_style() -> str:
     """
-    Add 'Recent Context' on page 1 only when we have valid articles (headline + publisher + URL).
-    Render up to 5 bullets: headline (clickable) — Publisher, Date.
-    Returns (render_count, list of displayed article headlines) for QA.
+    Fallback IV style selector.
+    Priority: env IV_FALLBACK_STYLE -> config report.iv_fallback_style -> default balanced.
     """
-    items = getattr(payload, "news_items", None) or []
-    valid = [a for a in items if _is_valid_recent_context_article(a)][:5]
-    if not valid:
-        return 0, []
-
-    p_sec = doc.add_paragraph()
-    p_sec.paragraph_format.space_before = SPACE_SMALL
-    p_sec.paragraph_format.space_after = SPACE_TINY
-    _run(p_sec, "Recent Context", bold=True, size_pt=SECTION_PT, color=ACCENT)
-    displayed_headlines: list[str] = []
-    for art in valid:
-        headline = (getattr(art, "headline", None) or "").strip()
-        if not headline:
-            continue
-        headline_80 = headline[:80] + ("…" if len(headline) > 80 else "")
-        dt = getattr(art, "published_at", None)
-        date_str = ""
-        if dt and hasattr(dt, "strftime"):
-            date_str = dt.strftime("%Y-%m-%d")
-        source = (getattr(art, "source", None) or "").strip()
-        pub = _publisher_display_name(source)
-        url = (getattr(art, "url", None) or "").strip()
-        line = doc.add_paragraph(style="List Bullet")
-        line.paragraph_format.space_before = SPACE_NONE
-        line.paragraph_format.space_after = SPACE_TINY
-        # Clickable headline; then " — Publisher, Date" as plain or link
-        _add_hyperlink(line, headline_80, url, size_pt=BODY_PT, color=GRAY)
-        _run(line, f" — {pub}, {date_str}", size_pt=BODY_PT, color=GRAY)
-        displayed_headlines.append(headline)
-    return len(valid), displayed_headlines
+    style = (os.environ.get("IV_FALLBACK_STYLE") or "").strip().lower()
+    if not style:
+        try:
+            style = str(cfg().get("report", {}).get("iv_fallback_style", "")).strip().lower()
+        except Exception:
+            style = ""
+    if style not in IV_STYLE_ALLOWED:
+        style = IV_STYLE_DEFAULT
+    return style
 
 
-def _add_hyperlink(paragraph, text: str, url: str, size_pt: float = SOURCE_PT, color=GRAY):
-    """Append a hyperlink run to the paragraph (smaller font, gray, clickable)."""
-    if not url or not url.startswith("http"):
-        _run(paragraph, text, size_pt=size_pt, color=color)
-        return
-    part = paragraph.part
-    r_id = part.relate_to(url, RELATIONSHIP_TYPE.HYPERLINK, is_external=True)
-    hyperlink = OxmlElement("w:hyperlink")
-    hyperlink.set(qn("r:id"), r_id)
-    r = OxmlElement("w:r")
-    rPr = OxmlElement("w:rPr")
-    fonts = OxmlElement("w:rFonts")
-    fonts.set(qn("w:ascii"), "Arial")
-    fonts.set(qn("w:hAnsi"), "Arial")
-    rPr.append(fonts)
-    c = OxmlElement("w:color")
-    c.set(qn("w:val"), "5D6D7E")
-    rPr.append(c)
-    sz = OxmlElement("w:sz")
-    sz.set(qn("w:val"), str(int(size_pt * 2)))
-    rPr.append(sz)
-    szCs = OxmlElement("w:szCs")
-    szCs.set(qn("w:val"), str(int(size_pt * 2)))
-    rPr.append(szCs)
-    r.append(rPr)
-    t = OxmlElement("w:t")
-    t.set(qn("xml:space"), "preserve")
-    t.text = text
-    r.append(t)
-    hyperlink.append(r)
-    paragraph._p.append(hyperlink)
+def _build_analytical_iv_paragraph_1(
+    company_name: str,
+    preview_short: str,
+    rec: str,
+    an_str: str,
+    price: float | None,
+    spread: float | None,
+    rev_surprise: float | None,
+    eps_surprise: float | None,
+    memo: dict,
+    _fmt_pct,
+    _fmt_num,
+    style: str = IV_STYLE_DEFAULT,
+) -> str:
+    """
+    Build a single analytical paragraph for the Investment View fallback.
+    Interprets consensus, surprise history, and key preview rather than listing data points.
+    """
+    sentences = []
 
-
-def _split_sentences(paragraph_text: str) -> list[str]:
-    """Split into sentences (simple: on . ! ? followed by space or end)."""
-    if not paragraph_text or not paragraph_text.strip():
-        return []
-    return re.split(r"(?<=[.!?])\s+", paragraph_text.strip())
-
-
-def _build(payload: ReportPayload, path: Path, memo_data: dict | None = None, qa_audit: dict | None = None) -> None:
-    doc = Document()
-    c = payload.company
-    memo = payload.memo_computed or {}
-    # Section-level lineage: do not use MS-derived data when entity/ticker mismatch or contamination (better blank than wrong)
-    payload_entity_match = getattr(payload, "payload_entity_match", True)
-    payload_source_ticker = (getattr(payload, "payload_source_ticker", "") or "").strip()
-    current_ticker = (getattr(c, "ticker", "") or "").strip()
-    cross_contamination = getattr(payload, "cross_company_contamination_detected", False)
-    use_ms_for_render = payload_entity_match and (payload_source_ticker == current_ticker) and not cross_contamination
-    cs = (payload.consensus_summary or {}) if use_ms_for_render else {}
-    q = payload.quote
-    curr = (c.currency or "SAR").strip()
-    # When memo_data is present, use validated header/display values only (memo_data already blanks MS when suppressed)
-    if memo_data:
-        header = memo_data.get("header") or {}
-        preview_short = memo_data.get("preview_short") or memo.get("preview_quarter_short") or "1Q26"
-        exp_date = _field_display(header.get("expected_report_date"), "—")
-        mean_cons = _field_display(header.get("recommendation"), "—")
-        n_analysts = _field_display(header.get("analyst_count"), "—")
-        target = _field_display(header.get("average_target_price"))
-        spread = _field_display(header.get("upside_pct"))
-        price_val = _field_display(header.get("consensus_page_price")) or _field_display(header.get("quote_price"))
-        price_yahoo = price_val if isinstance(price_val, (int, float)) else None
-        price_ms = price_val if isinstance(price_val, (int, float)) else None
-        price = price_val
-        has_yahoo = price_yahoo is not None
-        has_ms = price_ms is not None
-        low = None
-        high = None
+    # Opening: frame the setup
+    if style == "tactical":
+        sentences.append(f"Into the {preview_short} print, {company_name} screens as a tactical setup.")
+    elif style == "conservative":
+        sentences.append(f"Into {preview_short}, {company_name} has a constructive but not low-risk setup.")
     else:
-        price_yahoo = (q and getattr(q, "price", None)) or None
-        price_ms = cs.get("last_close_price")
-        price = price_yahoo if price_yahoo is not None else price_ms
-        preview_short = memo.get("preview_quarter_short") or "1Q26"
-        exp_date = memo.get("next_earnings_date") or "—"
-        mean_cons = cs.get("consensus_rating") or "—"
-        n_analysts = cs.get("analyst_count") or "—"
-        target = cs.get("average_target_price")
-        low = cs.get("low_target_price")
-        high = cs.get("high_target_price")
-        spread = memo.get("spread_pct") or cs.get("upside_to_average_target_pct")
-        has_yahoo = price_yahoo is not None and isinstance(price_yahoo, (int, float))
-        has_ms = price_ms is not None and isinstance(price_ms, (int, float))
+        sentences.append(f"{company_name} reports {preview_short}.")
 
-    for section in doc.sections:
-        apply_section_margins(section)
-
-    style = doc.styles["Normal"]
-    style.font.name = "Arial"
-    style.font.size = Pt(BODY_PT)
-    style.font.color.rgb = BODY
-    style.paragraph_format.space_after = SPACE_TINY
-    style.paragraph_format.space_before = SPACE_NONE
-
-    curr = (c.currency or "SAR").strip()
-
-    # ─── 1. Title block ─────────────────────────────────────────────────
-    p = doc.add_paragraph()
-    p.paragraph_format.space_after = SPACE_TINY
-    _run(p, c.company_name, bold=True, size_pt=TITLE_PT, color=ACCENT)
-    _run(p, f"  ({c.ticker})  ·  ", size_pt=TITLE_PT, color=BODY)
-    _run(p, f"Earnings Preview — {preview_short}", size_pt=TITLE_PT, color=BODY)
-    p = doc.add_paragraph()
-    p.paragraph_format.space_after = SPACE_SMALL
-    _run(p, f"Expected report date: {exp_date}", size_pt=SMALL_PT, color=GRAY)
-    try:
-        app_version = cfg().get("general", {}).get("version", "0.1.0")
-        p_ver = doc.add_paragraph()
-        p_ver.paragraph_format.space_before = SPACE_NONE
-        p_ver.paragraph_format.space_after = SPACE_NONE
-        _run(p_ver, f"Generated with earnings-research v{app_version}", size_pt=8, color=GRAY)
-    except Exception:
-        pass
-
-    # ─── 2. Top summary strip (compact dashboard) ────────────────────────
-    strip_parts = [
-        exp_date if exp_date != "—" else "—",
-        mean_cons if mean_cons != "—" else "—",
-        f"{n_analysts} analysts" if n_analysts != "—" else "—",
-        f"{curr} {float(price_yahoo):,.2f}" if has_yahoo else (f"{curr} {float(price_ms):,.2f}" if has_ms else "—"),
-        f"{curr} {target:,.2f}" if target is not None and isinstance(target, (int, float)) else "—",
-        _fmt_pct(spread, signed=True) if spread is not None else "—",
-    ]
-    dash_count = sum(1 for x in strip_parts if x == "—")
-    strip_text = "  |  ".join(str(x) for x in strip_parts) if dash_count < len(strip_parts) else (
-        f"Expected report date: {exp_date}." if exp_date != "—" else "—"
-    )
-    if strip_text and strip_text != "—":
-        p = doc.add_paragraph()
-        p.paragraph_format.space_before = SPACE_NONE
-        p.paragraph_format.space_after = SPACE_SMALL
-        if dash_count == len(strip_parts):
-            _run(p, "Consensus and price data not available for this run.", size_pt=SMALL_PT, color=GRAY)
-        else:
-            _run(p, strip_text, size_pt=SMALL_PT, color=BODY)
-
-    # MarketScreener: explicit warning when data suppressed (entity mismatch, contamination, or redirect)
-    ms_avail = getattr(payload, "marketscreener_availability", "") or ""
-    if not use_ms_for_render or ms_avail == "source_redirect":
-        p = doc.add_paragraph()
-        p.paragraph_format.space_after = SPACE_TINY
-        if cross_contamination or getattr(payload, "reused_default_payload_detected", False):
-            _run(p, "MarketScreener data suppressed (cross-company contamination or reused payload detected). Header, Key Preview, and Appendices A–D show blanks. Better blank than wrong.", size_pt=SMALL_PT, color=GRAY)
-        elif not payload_entity_match or payload_source_ticker != current_ticker:
-            _run(p, "MarketScreener data suppressed (entity mismatch or missing current-company data). Header, Key Preview, and Appendices A–D show blanks.", size_pt=SMALL_PT, color=GRAY)
-        elif ms_avail == "source_redirect":
-            _run(p, "MarketScreener consensus and appendices unavailable (source redirect). Figures from other sources.", size_pt=SMALL_PT, color=GRAY)
-
-    # ─── 3. Investment View (2 substantial paragraphs; inline source links when available) ─
-    p = doc.add_paragraph()
-    _run(p, "Investment View", bold=True, size_pt=SECTION_PT, color=ACCENT)
-    p.paragraph_format.space_before = SPACE_NONE
-    p.paragraph_format.space_after = SPACE_TINY
-
-    ns = getattr(payload, "news_summary", None)
-    p1 = getattr(ns, "investment_view_paragraph_1", "") if ns else ""
-    p2 = getattr(ns, "investment_view_paragraph_2", "") if ns else ""
-    ref_articles = getattr(ns, "referenced_articles", None) or []
-    citation_placements = getattr(ns, "citation_placements", None) or []
-    if memo_data:
-        from src.services.qa_engine import guardrail_paragraphs
-        p1, p2 = guardrail_paragraphs(p1 or "", p2 or "")
-    err_like = ("failed", "error", "exception", "traceback", "api")
-    news_items_list = getattr(payload, "news_items", None) or []
-    has_valid_rc = bool([a for a in news_items_list if _is_valid_recent_context_article(a)])
-    effective_refs: list = []
-    effective_placements: list = []
-    final_iv_p1, final_iv_p2 = "", ""
-    # When Recent Context is rendered, Investment View must use at least one fact from a selected article (mandatory)
-    if has_valid_rc and news_items_list and (not ref_articles or not citation_placements):
-        first_article = next((a for a in news_items_list if _is_valid_recent_context_article(a)), None)
-        if first_article:
-            fact = (getattr(first_article, "extracted_fact", None) or getattr(first_article, "snippet", None) or getattr(first_article, "headline", None) or "").strip()
-            if len(fact) > 200:
-                fact = fact[:197] + "…"
-            pub = getattr(first_article, "source", None) or "Source"
-            dt = getattr(first_article, "published_at", None)
-            date_str = dt.strftime("%b %d") if dt and hasattr(dt, "strftime") else ""
-            cite_suffix = f" ({pub}, {date_str})" if date_str else f" ({pub})"
-            inject = f" Recent coverage noted: {fact}{cite_suffix}." if fact else f" Recent context is relevant ({pub}{', ' + date_str if date_str else ''})."
-            p1 = (p1 or "").rstrip()
-            if p1 and not p1.endswith("."):
-                p1 = p1 + "."
-            p1 = p1 + inject
-            first_idx = next(i for i, a in enumerate(news_items_list) if _is_valid_recent_context_article(a))
-            ref_articles = [first_article]
-            sentences_p1 = _split_sentences(p1)
-            citation_placements = [{"paragraph": 1, "after_sentence": len(sentences_p1) - 1, "article_index": first_idx}]
-            if qa_audit is not None:
-                qa_audit["investment_view_effective_ref_articles"] = ref_articles
-    min_len = MIN_IV_LEN_WITH_RECENT_CONTEXT if has_valid_rc else MIN_IV_LEN_DEFAULT
-    if p1 and p2 and len(p1) > min_len and len(p2) > min_len and not any(e in (p1 + p2).lower() for e in err_like):
-        # Inline citations: article_index refers to payload.news_items (the selected list sent to Gemini)
-        news_items_for_index = news_items_list
-
-        def _render_paragraph_with_citations(para_text: str, para_num: int):
-            para = doc.add_paragraph()
-            para.paragraph_format.space_after = SPACE_SMALL if para_num == 1 else SPACE_NONE
-            sentences = _split_sentences(para_text[:1200] + ("…" if len(para_text) > 1200 else ""))
-            placements_for_para = [x for x in citation_placements if x.get("paragraph") == para_num]
-            for i, sent in enumerate(sentences):
-                if i > 0:
-                    _run(para, " ", size_pt=BODY_PT)
-                _run(para, sent, size_pt=BODY_PT)
-                for pl in placements_for_para:
-                    if pl.get("after_sentence") == i:
-                        idx = pl.get("article_index", 0)
-                        art = news_items_for_index[idx] if 0 <= idx < len(news_items_for_index) else None
-                        if art:
-                            pub = getattr(art, "source", None) or "Source"
-                            dt = getattr(art, "published_at", None)
-                            label = f" ({pub}, {dt.strftime('%b %d')})" if dt and hasattr(dt, "strftime") else f" ({pub})"
-                            url = getattr(art, "url", None) or ""
-                            _run(para, " ", size_pt=BODY_PT)
-                            _add_hyperlink(para, label, url, size_pt=SMALL_PT, color=GRAY)
-                        break
-
-        if ref_articles and citation_placements and news_items_for_index:
-            _render_paragraph_with_citations(p1, 1)
-            _render_paragraph_with_citations(p2, 2)
-        else:
-            para1 = doc.add_paragraph()
-            para1.paragraph_format.space_after = SPACE_SMALL
-            _run(para1, p1[:1200] + ("…" if len(p1) > 1200 else ""), size_pt=BODY_PT)
-            para2 = doc.add_paragraph()
-            para2.paragraph_format.space_after = SPACE_NONE
-            _run(para2, p2[:1200] + ("…" if len(p2) > 1200 else ""), size_pt=BODY_PT)
-        effective_refs = ref_articles
-        effective_placements = citation_placements
-        final_iv_p1, final_iv_p2 = p1, p2
-
-        # Referenced Articles (when LLM cited specific articles)
-        if ref_articles:
-            p_ref = doc.add_paragraph()
-            p_ref.paragraph_format.space_before = SPACE_SMALL
-            p_ref.paragraph_format.space_after = SPACE_TINY
-            _run(p_ref, "Referenced Articles", bold=True, size_pt=SMALL_PT, color=ACCENT)
-            for art in ref_articles[:4]:
-                line = doc.add_paragraph()
-                line.paragraph_format.space_before = SPACE_NONE
-                line.paragraph_format.space_after = SPACE_TINY
-                headline = (getattr(art, "headline", None) or "")[:80] + ("…" if len(getattr(art, "headline", "") or "") > 80 else "")
-                dt = getattr(art, "published_at", None)
-                date_str = dt.strftime("%b %d") if dt and hasattr(dt, "strftime") else ""
-                pub = getattr(art, "source", None) or ""
-                label = f"{headline}  ({pub}, {date_str})" if date_str else f"{headline}  ({pub})"
-                url = getattr(art, "url", None) or ""
-                _add_hyperlink(line, label, url, size_pt=SMALL_PT, color=GRAY)
-    else:
-        # Fuller 2-paragraph fallback from memo only (no generic filler)
-        header = (memo_data or {}).get("header") or {}
-        rec = _field_display(header.get("recommendation"), "—")
-        n_an = _field_display(header.get("analyst_count"))
-        try:
-            n_an = int(n_an) if n_an not in (None, "—", "") else None
-        except (TypeError, ValueError):
-            n_an = None
-        an_str = f"{n_an} analysts" if isinstance(n_an, int) and n_an else ""
-        price = _field_display(header.get("average_target_price"))
-        try:
-            price = float(price) if price not in (None, "—", "") else None
-        except (TypeError, ValueError):
-            price = None
-        spread = _field_display(header.get("upside_pct"))
-        try:
-            spread = float(spread) if spread not in (None, "—", "") else None
-        except (TypeError, ValueError):
-            spread = None
-        rev_surprise = memo.get("avg_revenue_surprise_pct")
-        eps_surprise = memo.get("avg_eps_surprise_pct")
-        qoq_rev = memo.get("qoq_revenue_pct")
-        yoy_rev = memo.get("yoy_revenue_pct_table")
-        qoq_eps = memo.get("qoq_eps_pct")
-        yoy_eps = memo.get("yoy_eps_pct_table")
-        # Para 1: two polished paragraphs with natural sentence flow and spacing
-        rec_line = f"Consensus is {rec}"
+    # Street view and what underpins it
+    if rec and rec != "—":
+        line = f"The street has a {rec} rating"
         if an_str:
-            rec_line += f" ({an_str})"
-        rec_line += "."
+            line += f" ({an_str})"
         if price is not None:
-            rec_line += f" The average target is {_fmt_num(price)}"
+            line += f", with the average target at {_fmt_num(price)}"
             if spread is not None:
-                rec_line += f", implying upside of {_fmt_pct(spread, signed=True)}"
-            rec_line += "."
-        elif spread is not None:
-            rec_line += f" Implied upside is {_fmt_pct(spread, signed=True)}."
-        fallback_p1 = f"{c.company_name} reports {preview_short}. {rec_line}"
-        if rev_surprise is not None or eps_surprise is not None:
-            beat_parts = []
-            if rev_surprise is not None:
-                beat_parts.append(f"Revenue surprise versus consensus has averaged {_fmt_pct(rev_surprise, signed=True)}")
-            if eps_surprise is not None:
-                beat_parts.append(f"EPS surprise {_fmt_pct(eps_surprise, signed=True)}")
-            if beat_parts:
-                fallback_p1 += " " + "; ".join(beat_parts) + "."
-        # Only mention QoQ/YoY when comparison bases exist (no "—" with a %)
-        calendar_prior = memo.get("calendar_prior_quarter_released") or {}
-        calendar_same_ly = memo.get("calendar_same_q_prior_yr_released") or {}
-        has_prior = (calendar_prior.get("net_sales") is not None) or (memo.get("prior_quarter_actual_revenue") is not None)
-        has_same_ly = (calendar_same_ly.get("net_sales") is not None) or (memo.get("same_quarter_prior_year_revenue") is not None)
-        if (qoq_rev is not None and has_prior) or (yoy_rev is not None and has_same_ly):
-            q_part = _fmt_pct(qoq_rev, signed=True) if (qoq_rev is not None and has_prior) else "—"
-            y_part = _fmt_pct(yoy_rev, signed=True) if (yoy_rev is not None and has_same_ly) else "—"
-            fallback_p1 += f" Key preview: quarter-on-quarter {q_part}, year-on-year {y_part}."
-        if spread is not None:
-            fallback_p1 += " Expectations into the print look " + ("supportive" if spread > 0 else "balanced" if spread == 0 else "demanding") + "."
-        else:
-            fallback_p1 += " Expectations into the print look balanced."
-        # Para 2: sector-specific (no asset quality for non-banks, no backlog for oil & gas, etc.)
-        _, _, fallback_p2 = _sector_operating_kpis_and_what_matters(c)
-        # When Recent Context exists, Investment View must use at least one article (extracted_fact or snippet/headline)
-        fallback_article_cite = None
-        if has_valid_rc and news_items_list:
-            first_article = next((a for a in news_items_list if _is_valid_recent_context_article(a)), None)
-            if first_article:
-                fact = (getattr(first_article, "extracted_fact", None) or getattr(first_article, "snippet", None) or getattr(first_article, "headline", None) or "").strip()
-                if len(fact) > 200:
-                    fact = fact[:197] + "…"
-                if fact:
-                    fallback_p1 += f" Recent coverage noted: {fact}"
+                line += f", implying {_fmt_pct(spread, signed=True)} upside"
+        line += "."
+        sentences.append(line)
+        # Interpret surprise history
+        if rev_surprise is not None and eps_surprise is not None:
+            rev_beat = rev_surprise > 0
+            eps_beat = eps_surprise > 0
+            if rev_beat and not eps_beat:
+                if style == "tactical":
+                    sentences.append(
+                        f"Revenue has tended to beat (avg {_fmt_pct(rev_surprise, signed=True)}) while EPS has lagged ({_fmt_pct(eps_surprise, signed=True)}); "
+                        "the immediate trigger is whether top-line resilience converts into cleaner earnings."
+                    )
+                elif style == "conservative":
+                    sentences.append(
+                        f"Revenue has tended to beat consensus (avg {_fmt_pct(rev_surprise, signed=True)}), "
+                        f"while EPS has lagged ({_fmt_pct(eps_surprise, signed=True)}), so earnings conversion remains the main risk into the quarter."
+                    )
                 else:
-                    fallback_p1 += " Recent context is relevant."
-                pub = getattr(first_article, "source", None) or "Source"
-                dt = getattr(first_article, "published_at", None)
-                date_str = dt.strftime("%b %d") if dt and hasattr(dt, "strftime") else ""
-                fallback_article_cite = (first_article, date_str, pub)
-        effective_refs = [fallback_article_cite[0]] if fallback_article_cite else []
-        fallback_sents_p1 = _split_sentences(fallback_p1)
-        effective_placements = [{"paragraph": 1, "after_sentence": len(fallback_sents_p1) - 1, "article_index": 0}] if fallback_article_cite else []
-        final_iv_p1, final_iv_p2 = fallback_p1, fallback_p2
-        if qa_audit is not None and effective_refs:
-            qa_audit["investment_view_effective_ref_articles"] = effective_refs
-        para1 = doc.add_paragraph()
-        para1.paragraph_format.space_after = SPACE_SMALL
-        _run(para1, fallback_p1, size_pt=BODY_PT)
-        if fallback_article_cite:
-            art, date_str, pub = fallback_article_cite
-            label = f" ({pub}, {date_str})" if date_str else f" ({pub})"
-            url = getattr(art, "url", None) or ""
-            _run(para1, " ", size_pt=BODY_PT)
-            _add_hyperlink(para1, label, url, size_pt=SMALL_PT, color=GRAY)
-        para2 = doc.add_paragraph()
-        para2.paragraph_format.space_after = SPACE_NONE
-        _run(para2, fallback_p2, size_pt=BODY_PT)
+                    sentences.append(
+                        f"Revenue has tended to beat consensus (avg {_fmt_pct(rev_surprise, signed=True)}), "
+                        f"while EPS has lagged ({_fmt_pct(eps_surprise, signed=True)}); the story into the print hinges on whether top-line strength can translate into earnings delivery."
+                    )
+            elif not rev_beat and eps_beat:
+                sentences.append(
+                    f"EPS has run ahead of consensus (avg {_fmt_pct(eps_surprise, signed=True)}), though revenue has been softer ({_fmt_pct(rev_surprise, signed=True)}); the focus will be on sustainability of margins and guidance."
+                )
+            elif rev_beat and eps_beat:
+                sentences.append(
+                    f"Both revenue and EPS have tended to beat (revenue avg {_fmt_pct(rev_surprise, signed=True)}, EPS {_fmt_pct(eps_surprise, signed=True)}), which supports the constructive setup but raises the bar for this quarter."
+                )
+            else:
+                sentences.append(
+                    f"Versus consensus, revenue has averaged {_fmt_pct(rev_surprise, signed=True)} and EPS {_fmt_pct(eps_surprise, signed=True)}; the quarter will need to show improvement or a clear path to it for the rating to hold."
+                )
+        elif rev_surprise is not None:
+            sentences.append(
+                f"Revenue versus consensus has averaged {_fmt_pct(rev_surprise, signed=True)}; "
+                + ("that consistency supports the constructive view." if rev_surprise > 0 else "delivery this quarter will be important for confidence.")
+            )
+        elif eps_surprise is not None:
+            sentences.append(
+                f"EPS surprise has averaged {_fmt_pct(eps_surprise, signed=True)}; "
+                + ("earnings delivery has underpinned the rating." if eps_surprise > 0 else "the market will be looking for better earnings consistency.")
+            )
 
-    # Article-to-sentence traceability for QA: sentence, source_type, article_headline, status
-    if qa_audit is not None and (final_iv_p1 or final_iv_p2):
-        inv_sentences_list: list[dict] = []
-        for para_num, text in [(1, final_iv_p1), (2, final_iv_p2)]:
-            if not text:
-                continue
-            sents = _split_sentences(text[:1200] + ("…" if len(text) > 1200 else ""))
-            for i, sent in enumerate(sents):
-                source_type = "memo_fact"
-                article_headline = ""
-                for pl in effective_placements:
-                    if pl.get("paragraph") == para_num and pl.get("after_sentence") == i:
-                        idx = pl.get("article_index", 0)
-                        if effective_refs and 0 <= idx < len(effective_refs):
-                            source_type = "recent_context_fact"
-                            article_headline = (getattr(effective_refs[idx], "headline", None) or "")[:80]
-                        break
-                inv_sentences_list.append({
-                    "sentence": (sent[:500] + ("…" if len(sent) > 500 else "")),
-                    "source_type": source_type,
-                    "article_headline": article_headline,
-                    "status": "kept",
-                })
-        qa_audit["investment_view_sentences"] = inv_sentences_list
-        qa_audit["investment_view_effective_ref_articles"] = effective_refs
-
-    # ─── Recent Context (only when valid articles: headline + URL + Reuters/ZAWYA) ─
-    rc_render_count, rc_displayed_headlines = _add_recent_context_section(doc, payload)
-    if qa_audit is not None:
-        qa_audit["recent_context_render_count"] = rc_render_count
-        qa_audit["recent_context_displayed_headlines"] = rc_displayed_headlines
-
-    # ─── 4. Key Preview (fixed structure: 7 columns × 4 rows; em dash for missing data) ─
-    p = doc.add_paragraph()
-    _run(p, "Key Preview", bold=True, size_pt=SECTION_PT, color=ACCENT)
-    p.paragraph_format.space_before = SPACE_SMALL
-    p.paragraph_format.space_after = SPACE_TINY
-
-    calendar_next = memo.get("calendar_next_quarter") or {}
+    # Key preview: tougher comp / context for the quarter
     calendar_prior = memo.get("calendar_prior_quarter_released") or {}
     calendar_same_ly = memo.get("calendar_same_q_prior_yr_released") or {}
-    prev_q_short = memo.get("prior_quarter_short") or "4Q25"
-    same_q_short = memo.get("prior_year_same_quarter_short") or "1Q25"
+    has_prior = (calendar_prior.get("net_sales") is not None) or (memo.get("prior_quarter_actual_revenue") is not None)
+    has_same_ly = (calendar_same_ly.get("net_sales") is not None) or (memo.get("same_quarter_prior_year_revenue") is not None)
+    qoq_rev = memo.get("qoq_revenue_pct")
+    yoy_rev = memo.get("yoy_revenue_pct_table")
+    if (qoq_rev is not None and has_prior) or (yoy_rev is not None and has_same_ly):
+        q_part = _fmt_pct(qoq_rev, signed=True) if (qoq_rev is not None and has_prior) else None
+        y_part = _fmt_pct(yoy_rev, signed=True) if (yoy_rev is not None and has_same_ly) else None
+        if q_part is not None or y_part is not None:
+            bits = []
+            if q_part is not None:
+                bits.append(f"QoQ {q_part}")
+            if y_part is not None:
+                bits.append(f"YoY {y_part}")
+            preview_phrase = " and ".join(bits)
+            if style == "tactical":
+                sentences.append(
+                    f"Key preview points to {preview_phrase}; with tougher comps, an in-line outcome may be enough only if margin/cost delivery is clean."
+                )
+            elif style == "conservative":
+                sentences.append(
+                    f"Key preview points to {preview_phrase}—a tougher comparison that raises execution risk; "
+                    "the quarter needs a credible delivery path to preserve confidence."
+                )
+            else:
+                sentences.append(
+                    f"The key preview points to {preview_phrase}—a tougher comparison; "
+                    "the focus will be on whether the company can meet or beat the bar and sustain the narrative."
+                )
 
-    # Fixed 7 columns: do not remove columns when data is missing
-    base_cols = [
-        "Metric",
-        f"{preview_short}E (Our)",
-        "Consensus",
-        f"{prev_q_short}A",
-        "QoQ",
-        f"{same_q_short}A",
-        "YoY",
-    ]
-    ncol = 7
-
-    clean_labels = {
-        "net_sales": f"Revenue ({curr} m)",
-        "net_income": f"Net income ({curr} m)",
-        "eps": f"EPS ({curr})",
-        "ebit": f"EBIT ({curr} m)",
-        "ebitda": f"EBITDA ({curr} m)",
-    }
-    # Fixed 4 rows: Revenue, EBIT or EBITDA (as applicable), Net income, EPS — always render all four
-    if c.is_bank:
-        key_order = ["net_sales", "ebit", "net_income", "eps"]
-    else:
-        key_order = ["net_sales", "ebitda", "net_income", "eps"]
-
-    preview_rows = []
-    for key in key_order:
-        label = clean_labels.get(key, key.replace("_", " ").title())
-        cons_val = calendar_next.get(key)
-        cons_str = _fmt_num(cons_val) if cons_val is not None else "—"
-        if key == "eps" and isinstance(cons_val, (int, float)):
-            cons_str = f"{cons_val:,.2f}"
-        prev_a_val = calendar_prior.get(key)
-        prev_a = _fmt_num(prev_a_val) if prev_a_val is not None else "—"
-        # Only show QoQ when prior-quarter base is present (never show "—" with a %)
-        qoq = (
-            memo.get("qoq_revenue_pct") if key == "net_sales"
-            else memo.get("qoq_ni_pct") if key == "net_income"
-            else memo.get("qoq_eps_pct") if key == "eps" else None
-        )
-        qoq_str = _fmt_pct(qoq, signed=True) if (qoq is not None and prev_a_val is not None) else "—"
-        same_ly_val = calendar_same_ly.get(key)
-        same_ly_str = _fmt_num(same_ly_val) if same_ly_val is not None else "—"
-        # Only show YoY when same-quarter-last-year base is present (never show "—" with e.g. -100% YoY)
-        yoy_val = (
-            memo.get("yoy_revenue_pct_table") if key == "net_sales"
-            else memo.get("yoy_ni_pct_table") if key == "net_income"
-            else memo.get("yoy_eps_pct_table") if key == "eps" else None
-        )
-        yoy_str = _fmt_pct(yoy_val, signed=True) if (yoy_val is not None and same_ly_val is not None) else "—"
-        # Our (manual) column always em dash unless we add a separate source later
-        preview_rows.append((label, "—", cons_str, prev_a, qoq_str, same_ly_str, yoy_str))
-
-    # Always 1 header + 4 data rows × 7 columns — proper horizontal header row with shading and bold
-    tbl = doc.add_table(rows=1 + 4, cols=ncol)
-    tbl.style = "Table Grid"
-    style_table_header_row(tbl.rows[0], base_cols, _run)
-    for r in tbl.rows:
-        set_compact_row_height(r, 14)
-    for ri, row_data in enumerate(preview_rows):
-        row_cells = tbl.rows[ri + 1].cells
-        for ci, val in enumerate(row_data):
-            row_cells[ci].paragraphs[0].clear()
-            _run(row_cells[ci].paragraphs[0], val, size_pt=SOURCE_PT, color=GRAY if val == "—" else BODY)
-
-    # ─── 5. Operating Metrics (Sector-Specific) — always render, 4 rows ───
-    p = doc.add_paragraph()
-    p.paragraph_format.space_before = SPACE_SMALL
-    _run(p, "Operating Metrics (Sector-Specific)", bold=True, size_pt=SECTION_PT, color=ACCENT)
-    p.paragraph_format.space_after = SPACE_TINY
-
-    op_headers = ["KPI", f"{preview_short}E", f"{prev_q_short}A", f"{same_q_short}A", "Commentary"]
-    op_kpis, _, _ = _sector_operating_kpis_and_what_matters(c)
-    if len(op_kpis) < 4:
-        op_kpis = list(op_kpis) + [""] * (4 - len(op_kpis))
-    op_kpis = op_kpis[:4]
-    tbl_op = doc.add_table(rows=1 + 4, cols=5)
-    tbl_op.style = "Table Grid"
-    style_table_header_row(tbl_op.rows[0], op_headers, _run)
-    set_cell_shading(tbl_op.rows[0].cells[0], HEADER_FILL)
-    for i in range(1, 5):
-        set_cell_shading(tbl_op.rows[0].cells[i], HEADER_FILL)
-    for ri, kpi in enumerate(op_kpis):
-        row_cells = tbl_op.rows[ri + 1].cells
-        row_cells[0].paragraphs[0].clear()
-        _run(row_cells[0].paragraphs[0], kpi if kpi else "", size_pt=SOURCE_PT, color=BODY if kpi else GRAY)
-        for ci in range(1, 5):
-            row_cells[ci].paragraphs[0].clear()
-            _run(row_cells[ci].paragraphs[0], "", size_pt=SOURCE_PT, color=GRAY)
-        set_compact_row_height(tbl_op.rows[ri + 1], 14)
-
-    # ─── 6. Street Snapshot (P/E only if labeled and reconciled per QA) ───
-    p = doc.add_paragraph()
-    p.paragraph_format.space_before = SPACE_SMALL
-    _run(p, "Street Snapshot", bold=True, size_pt=SECTION_PT, color=ACCENT)
-    p.paragraph_format.space_after = SPACE_TINY
-    snap = [f"Consensus: {mean_cons}", f"{n_analysts} analysts"]
-    if target is not None and isinstance(target, (int, float)):
-        snap.append(f"Target: {curr} {target:,.2f}")
+    # Expectations into the print
     if spread is not None:
-        snap.append(f"Upside: {_fmt_pct(spread, signed=True)}")
-    show_pe = False
-    pe_label = ""
-    pe_val = None
-    if memo_data:
-        street = memo_data.get("street_snapshot") or {}
-        pe_f = street.get("pe")
-        if isinstance(pe_f, dict) and pe_f.get("status") in ("pass", "stale") and (pe_f.get("label") or "").strip():
-            pe_val = _field_display(pe_f)
-            pe_label = (pe_f.get("label") or "").strip()
-            show_pe = pe_val is not None and isinstance(pe_val, (int, float))
-    if not show_pe and not memo_data:
-        vm = payload.ms_valuation_multiples
-        if vm and (vm.get("pe") or []) and (vm.get("pe") or [])[0] is not None:
-            pe_val = (vm.get("pe") or [])[0]
-            pe_label = "P/E"
-            show_pe = True
-    if show_pe and pe_val is not None:
-        snap.append(f"{pe_label}: {pe_val:.1f}x" if pe_label else f"P/E: {pe_val:.1f}x")
-    p = doc.add_paragraph()
-    _run(p, "  ·  ".join(snap), size_pt=SMALL_PT, color=GRAY)
+        if spread > 0:
+            if style == "tactical":
+                sentences.append("Expectations look supportive; an in-line or better print likely keeps near-term positioning constructive.")
+            elif style == "conservative":
+                sentences.append("Expectations look supportive, but the reaction still depends on earnings quality and guidance credibility.")
+            else:
+                sentences.append("Expectations into the print look supportive; an in-line or better outcome would likely be well received.")
+        elif spread < 0:
+            sentences.append("Expectations look demanding; the stock may need a clear beat or raise to re-rate.")
+        else:
+            sentences.append("Expectations into the print look balanced.")
+    else:
+        sentences.append("Expectations into the print look balanced.")
 
-    # ─── E. Recent Execution (compact callout box) ──────────────────────
-    p = doc.add_paragraph()
-    p.paragraph_format.space_before = SPACE_SMALL
-    _run(p, "Recent Execution", bold=True, size_pt=SECTION_PT, color=ACCENT)
-    p.paragraph_format.space_after = SPACE_TINY
+    return " ".join(sentences)
 
-    surprise_list = memo.get("revenue_surprise_history")
-    eps_surprise = memo.get("eps_surprise_history")
-    ni_surprise = memo.get("ni_surprise_history")
-    avg_rev = memo.get("avg_revenue_surprise_pct")
-    avg_eps = memo.get("avg_eps_surprise_pct")
-    avg_ni = memo.get("avg_ni_surprise_pct")
-    consec = memo.get("consecutive_revenue_beats")
 
-    def _beat_line(entries, avg_pct, label):
-        if not entries:
-            return None
-        total = len(entries)
-        beat_count = len([e for e in entries if (e.get("surprise_pct") or 0) >= 0])
-        s = f"{label} beat in {beat_count}/{total} visible quarters"
-        if avg_pct is not None:
-            s += f", avg. {_fmt_pct(avg_pct, signed=True)}"
+
+def _iv_text_and_watch(payload: ReportPayload, memo_data: dict | None, iv_style: str) -> tuple[str, list[str]]:
+    """LLM IV if long enough; else analytical + sector p2 + optional recent-coverage snippet."""
+    c, memo = payload.company, payload.memo_computed or {}
+    sections = (memo_data or {}).get("pptx_sections") or {}
+    if isinstance(sections, dict):
+        thesis = (sections.get("investment_thesis") or "").strip()
+        wtw = sections.get("what_to_watch") if isinstance(sections.get("what_to_watch"), list) else []
+        wtw = [str(x).strip() for x in (wtw or []) if str(x).strip()]
+        if thesis:
+            return thesis, (wtw[:4] if wtw else _sector_operating_kpis_and_what_matters(c)[1])
+    ns = getattr(payload, "news_summary", None)
+    min_len = MIN_IV_LEN_WITH_RECENT_CONTEXT if (ns and getattr(ns, "referenced_articles", None)) else MIN_IV_LEN_DEFAULT
+    p1 = (getattr(ns, "investment_view_paragraph_1", "") or "").strip() if ns else ""
+    p2 = (getattr(ns, "investment_view_paragraph_2", "") or "").strip() if ns else ""
+    _, matters, p2_fb = _sector_operating_kpis_and_what_matters(c)
+    if len(p1) >= min_len and len(p2) >= min_len:
+        return f"{p1} {p2}".strip(), matters
+    header = (memo_data or {}).get("header") or {}
+    rec = _field_display(header.get("recommendation"), "—")
+    n_an = _field_display(header.get("analyst_count"))
+    try:
+        n_an = int(n_an) if n_an not in (None, "—", "") else None
+    except (TypeError, ValueError):
+        n_an = None
+    an_str = f"{n_an} analysts" if isinstance(n_an, int) and n_an else ""
+    price = _field_display(header.get("average_target_price"))
+    try:
+        price = float(price) if price not in (None, "—", "") else None
+    except (TypeError, ValueError):
+        price = None
+    spread = _field_display(header.get("upside_pct"))
+    try:
+        spread = float(spread) if spread not in (None, "—", "") else None
+    except (TypeError, ValueError):
+        spread = None
+    preview_short = (memo_data or {}).get("preview_short") or memo.get("preview_quarter_short") or "1Q26"
+    company_name = getattr(c, "company_name", None) or _company_attr(c, "company_name", "")
+    fb1 = _build_analytical_iv_paragraph_1(
+        company_name=company_name,
+        preview_short=preview_short,
+        rec=rec,
+        an_str=an_str,
+        price=price,
+        spread=spread,
+        rev_surprise=memo.get("avg_revenue_surprise_pct"),
+        eps_surprise=memo.get("avg_eps_surprise_pct"),
+        memo=memo,
+        _fmt_pct=_fmt_pct,
+        _fmt_num=_fmt_num,
+        style=iv_style,
+    )
+    art = next((a for a in (getattr(payload, "news_items", None) or []) if _is_valid_recent_context_article(a)), None)
+    if art:
+        fact = (getattr(art, "extracted_fact", None) or getattr(art, "snippet", None) or getattr(art, "headline", None) or "").strip()
+        if len(fact) > 200:
+            fact = fact[:197] + "…"
+        if fact:
+            fb1 += f" Recent coverage: {fact}"
+    # Expand fallback IV so exec summary is more comprehensive even if Gemini fails.
+    focus = ""
+    try:
+        focus_bits = [m for m in (matters or []) if m][:4]
+        if focus_bits:
+            focus = " Key focus areas include " + ", ".join(focus_bits) + "."
+    except Exception:
+        focus = ""
+    return f"{fb1} {p2_fb}{focus}".strip(), matters
+
+
+def _write_preview_pptx(
+    payload: ReportPayload,
+    path: Path,
+    memo_data: dict | None,
+    iv_text: str,
+    watch: list[str],
+    quality_flags: list[str] | None = None,
+) -> None:
+    from pptx import Presentation
+    from pptx.dml.color import RGBColor
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.text import PP_ALIGN
+    from pptx.util import Inches, Pt
+
+    def pn(v, bil=False):
+        if v is None:
+            return "—"
+        try:
+            x = float(v)
+            if bil and x >= 1e9:
+                return f"${x/1e9:.1f}B"
+            if x >= 1e6:
+                return f"{x:,.0f}"
+            return f"{x:,.2f}" if x != int(x) else f"{int(x):,}"
+        except (TypeError, ValueError):
+            return str(v)
+
+    def pp(v, signed=False):
+        if v is None:
+            return "—"
+        try:
+            x = float(v)
+            return f"{x:+.1f}%" if signed else f"{x}%"
+        except (TypeError, ValueError):
+            return str(v)
+
+    def rat(rec):
+        if rec is None or str(rec).strip() in ("", "—"):
+            return "—"
+        s = str(rec).strip().upper()
+        if any(k in s for k in ("BUY", "OUTPERFORM", "OVERWEIGHT", "STRONG BUY")):
+            return "OVERWEIGHT"
+        if any(k in s for k in ("SELL", "UNDERPERFORM", "UNDERWEIGHT")):
+            return "UNDERWEIGHT"
+        if any(k in s for k in ("HOLD", "NEUTRAL", "EQUAL")):
+            return "NEUTRAL"
+        return s[:20]
+
+    def rdate(exp_date):
+        if exp_date is None or str(exp_date).strip() in ("", "—"):
+            return "—"
+        s = str(exp_date).strip()
+        if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+            try:
+                y, m, d = int(s[:4]), int(s[5:7]), int(s[8:10])
+                mo = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+                if 1 <= m <= 12:
+                    return f"{d} {mo[m-1]} {y}"
+            except Exception:
+                pass
         return s
 
-    beat_lines = []
-    if surprise_list:
-        line = _beat_line(surprise_list, avg_rev, "Revenue")
-        if line:
-            if consec is not None:
-                line += f" ({consec} consecutive)"
-            beat_lines.append(line)
-    if eps_surprise:
-        line = _beat_line(eps_surprise, avg_eps, "EPS")
-        if line:
-            beat_lines.append(line)
-    if ni_surprise:
-        line = _beat_line(ni_surprise, avg_ni, "Net income")
-        if line:
-            beat_lines.append(line)
+    def qlab(ps):
+        raw = (ps or "1Q26").replace(" ", "").strip().upper()
+        qn = next((c for c in raw if c in "1234"), "1")
+        yr = next(("20" + y for y in ("25", "26", "27", "24") if y in raw), "2026")
+        return f"Q{qn} {yr}"
 
-    if beat_lines:
-        for line in beat_lines[:5]:
-            para = doc.add_paragraph(style="List Bullet")
-            para.paragraph_format.space_after = SPACE_TINY
-            para.paragraph_format.space_before = SPACE_NONE
-            _run(para, line, size_pt=BODY_PT)
-    else:
-        p = doc.add_paragraph()
-        _run(p, "Beat/miss history not available from quarterly results.", size_pt=SMALL_PT, color=GRAY)
-    # QA: flag when any surprise % is very large so it is reviewed rather than presented without context
-    if memo_data:
-        rec = memo_data.get("recent_execution") or {}
-        if rec.get("extreme_surprise_flagged"):
-            p = doc.add_paragraph()
-            p.paragraph_format.space_after = SPACE_TINY
-            _run(p, "Review: at least one surprise % is very large; verify before citing.", size_pt=SMALL_PT, color=GRAY)
+    def tx(
+        sl,
+        x,
+        y,
+        w,
+        h,
+        t,
+        *,
+        sz=14,
+        bold=False,
+        rgb=RGBColor(0, 0, 0),
+        al=PP_ALIGN.LEFT,
+        word_wrap: bool = True,
+        line_spacing: float | None = None,
+    ):
+        b = sl.shapes.add_textbox(x, y, w, h)
+        tf = b.text_frame
+        tf.clear()
+        tf.word_wrap = word_wrap
+        # Keep generous but not wasteful padding so short bullet lists fit.
+        tf.margin_left = Pt(2)
+        tf.margin_right = Pt(2)
+        tf.margin_top = Pt(2)
+        tf.margin_bottom = Pt(2)
+        text = "" if t is None else str(t)
+        lines = text.split("\n") if text else [""]
 
-    # ─── F. What Matters This Quarter (compact bullet block) ─────────────
-    p = doc.add_paragraph()
-    p.paragraph_format.space_before = SPACE_SMALL
-    _run(p, "What Matters This Quarter", bold=True, size_pt=SECTION_PT, color=ACCENT)
-    p.paragraph_format.space_after = SPACE_TINY
+        def _style_paragraph(p):
+            p.alignment = al
+            if line_spacing is not None:
+                try:
+                    p.line_spacing = line_spacing
+                except Exception:
+                    pass
+            try:
+                p.space_after = Pt(0)
+                p.space_before = Pt(0)
+            except Exception:
+                pass
 
-    _, matters, _ = _sector_operating_kpis_and_what_matters(c)
-    for m in matters[:5]:
-        para = doc.add_paragraph(style="List Bullet")
-        para.paragraph_format.space_after = SPACE_TINY
-        para.paragraph_format.space_before = SPACE_NONE
-        _run(para, m, size_pt=BODY_PT)
+        p = tf.paragraphs[0]
+        p.text = lines[0]
+        _style_paragraph(p)
+        r = p.runs[0]
+        r.font.name = "Arial"
+        r.font.size = Pt(sz)
+        r.font.bold = bold
+        r.font.color.rgb = rgb
 
-    # End of page 1 — no full valuation table, no management guidance table here
+        for ln in lines[1:]:
+            pp = tf.add_paragraph()
+            pp.text = ln
+            _style_paragraph(pp)
+            rr = pp.runs[0]
+            rr.font.name = "Arial"
+            rr.font.size = Pt(sz)
+            rr.font.bold = bold
+            rr.font.color.rgb = rgb
 
-    # ═══════════════════════════════════════════════════════════════════
-    # APPENDIX (starts on new page so it is not split)
-    # ═══════════════════════════════════════════════════════════════════
-
-    appendix_sections = getattr(payload, "appendix_sections", None) or ["annual_forecasts", "quarterly_detail", "eps_dividend", "valuation", "audit"]
-    appendix_suppressed_due_to_entity = not use_ms_for_render and (cross_contamination or not payload_entity_match or getattr(payload, "reused_default_payload_detected", False))
-
-    doc.add_paragraph()
-    p = doc.add_paragraph()
-    p.paragraph_format.page_break_before = True
-    _run(p, "Appendix", bold=True, size_pt=SECTION_PT, color=ACCENT)
-    p.paragraph_format.space_after = SPACE_TINY
-    if appendix_suppressed_due_to_entity:
-        p = doc.add_paragraph()
-        _run(p, "Appendices A–D suppressed (entity mismatch or contamination). No MarketScreener-derived figures shown.", size_pt=SMALL_PT, color=GRAY)
-        p.paragraph_format.space_after = SPACE_SMALL
-    else:
-        p.paragraph_format.space_after = SPACE_SMALL
-
-    # Appendix A — Annual Financial Forecasts
-    if "annual_forecasts" in appendix_sections:
-        p = doc.add_paragraph()
-        _run(p, "Appendix A — Annual Financial Forecasts", bold=True, size_pt=SECTION_PT, color=ACCENT)
-        p.paragraph_format.space_after = SPACE_TINY
-
-        ann = (payload.ms_annual_forecasts or {}).get("annual", {})
-        ed = (payload.ms_eps_dividend_forecasts or {})
-        ann_p = ann.get("periods", [])
-        ann_sales = ann.get("net_sales", [])
-        ann_ni = ann.get("net_income", [])
-        ed_p = ed.get("periods", [])
-        ed_eps = ed.get("eps", [])
-        ed_dps = ed.get("dividend_per_share", [])
-
-        if ann_p or ed_p:
-            def _idx(m, yr):
-                ys = str(yr)
-                y2 = ys[2:]  # e.g. "25"
-                for k, i in m.items():
-                    if ys in k:
-                        return i
-                    if y2 in k and ("FY" in k.upper() or "y" in k.lower() or len(k) <= 4):
-                        return i
-                return None
-            ann_map = {str(x).strip(): i for i, x in enumerate(ann_p)}
-            ed_map = {str(x).strip(): i for i, x in enumerate(ed_p)}
-            i24 = _idx(ann_map, 2024)
-            i25 = _idx(ann_map, 2025)
-            i26 = _idx(ann_map, 2026)
-            i27 = _idx(ann_map, 2027)
-            e24 = _idx(ed_map, 2024)
-            e25 = _idx(ed_map, 2025)
-            e26 = _idx(ed_map, 2026)
-            e27 = _idx(ed_map, 2027)
-            if i25 is None and ann_map:
-                n = len(ann_p)
-                i24, i25, i26, i27 = (n - 4 if n >= 4 else 0), (n - 3 if n >= 3 else 0), (n - 2 if n >= 2 else 0), (n - 1)
-            if e25 is None and ed_map and len(ed_p) >= 4:
-                n = len(ed_p)
-                e24, e25, e26, e27 = (n - 4 if n >= 4 else 0), (n - 3 if n >= 3 else 0), (n - 2 if n >= 2 else 0), (n - 1)
-
-            def _ann_val(arr, idx):
-                if arr and idx is not None and 0 <= idx < len(arr) and arr[idx] is not None:
-                    return arr[idx] / 1e3
-                return None
-
-            def _ed_val(arr, idx):
-                if arr and idx is not None and 0 <= idx < len(arr) and arr[idx] is not None:
-                    return arr[idx]
-                return None
-
-            def _fmt_eps(v):
-                if v is None:
-                    return "—"
-                if isinstance(v, (int, float)):
-                    return f"{round(float(v), 2):,.2f}"
-                return str(v)
-
-            tbl_a = doc.add_table(rows=1, cols=6)
-            tbl_a.style = "Table Grid"
-            for i, h in enumerate(["Metric", "FY24A", "FY25E", "Chg", "FY26E", "FY27E"]):
-                tbl_a.rows[0].cells[i].paragraphs[0].clear()
-                set_cell_shading(tbl_a.rows[0].cells[i], "1A5276")
-                _run(tbl_a.rows[0].cells[i].paragraphs[0], h, bold=True, size_pt=SOURCE_PT, color=RGBColor(0xFF, 0xFF, 0xFF))
-            for row_name, get_vals, fmt in [
-                (f"Net sales ({curr} bn)", lambda: (_ann_val(ann_sales, i24), _ann_val(ann_sales, i25), _ann_val(ann_sales, i26), _ann_val(ann_sales, i27)), _fmt_num),
-                (f"Net income ({curr} bn)", lambda: (_ann_val(ann_ni, i24), _ann_val(ann_ni, i25), _ann_val(ann_ni, i26), _ann_val(ann_ni, i27)), _fmt_num),
-                (f"EPS ({curr})", lambda: (_ed_val(ed_eps, e24), _ed_val(ed_eps, e25), _ed_val(ed_eps, e26), _ed_val(ed_eps, e27)), _fmt_eps),
-                (f"Dividend / share ({curr})", lambda: (_ed_val(ed_dps, e24), _ed_val(ed_dps, e25), _ed_val(ed_dps, e26), _ed_val(ed_dps, e27)), _fmt_num),
-            ]:
-                v24, v25, v26, v27 = get_vals()
-                chg = round((v25 - v24) / v24 * 100, 1) if v24 and v25 and v24 != 0 else None
-                r = tbl_a.add_row().cells
-                r[0].paragraphs[0].clear()
-                _run(r[0].paragraphs[0], row_name, size_pt=SOURCE_PT)
-                for j, v in enumerate([v24, v25, chg, v26, v27]):
-                    r[j + 1].paragraphs[0].clear()
-                    if j == 2:
-                        _run(r[j + 1].paragraphs[0], _fmt_pct(chg, signed=True) if chg is not None else "—", size_pt=SOURCE_PT)
-                    else:
-                        _run(r[j + 1].paragraphs[0], fmt(v) if v is not None else "—", size_pt=SOURCE_PT)
+    def rect(sl, x, y, w, h, fill, line=None, lw=1.0):
+        sh = sl.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, y, w, h)
+        sh.fill.solid()
+        sh.fill.fore_color.rgb = fill
+        if line is None:
+            sh.line.fill.background()
         else:
-            p = doc.add_paragraph()
-            _run(p, "No annual consensus data available.", size_pt=SOURCE_PT, color=GRAY)
-        doc.add_paragraph()
+            sh.line.color.rgb = line
+            sh.line.width = Pt(lw)
+        return sh
 
-    # Appendix B — Quarterly Results Detail (Actual + Surprise only; no forecast columns)
-    if "quarterly_detail" in appendix_sections:
-        qr = (payload.ms_calendar_events or {}).get("quarterly_results", {}) or {}
-        qr_quarters = qr.get("quarters", [])
-        qr_rows = qr.get("rows", [])
-        if qr_quarters and qr_rows:
-            p = doc.add_paragraph()
-            _run(p, "Appendix B — Quarterly Results Detail", bold=True, size_pt=SECTION_PT, color=ACCENT)
-            p.paragraph_format.space_after = SPACE_TINY
-            # Columns: Quarter + for each metric (Revenue, Net income, EPS): A, Surprise only
-            key_to_labels = {"net_sales": ("Revenue A", "Rev Surprise"), "net_income": ("Net income A", "NI Surprise"), "eps": ("EPS A", "EPS Surprise")}
-            metric_cols = [(mk, key_to_labels[mk]) for mk in ["net_sales", "net_income", "eps"] if any(r.get("metric_key") == mk for r in qr_rows)]
-            headers = ["Quarter"] + [lab for _, (la, ls) in metric_cols for lab in (la, ls)]
-            ncols = len(headers)
-            tbl_b = doc.add_table(rows=1 + len(qr_quarters), cols=ncols)
-            tbl_b.style = "Table Grid"
-            for i, h in enumerate(headers):
-                tbl_b.rows[0].cells[i].paragraphs[0].clear()
-                set_cell_shading(tbl_b.rows[0].cells[i], "1A5276")
-                _run(tbl_b.rows[0].cells[i].paragraphs[0], h, bold=True, size_pt=SOURCE_PT, color=RGBColor(0xFF, 0xFF, 0xFF))
-            def _cell_val(rows_list, key, idx, which):
-                r = next((x for x in rows_list if x.get("metric_key") == key), None)
-                if not r:
-                    return None
-                by_q = r.get("by_quarter", [])
-                if idx >= len(by_q):
-                    return None
-                c = by_q[idx]
-                if which == "A":
-                    return c.get("released")
-                if which == "S":
-                    return c.get("spread_pct")
-                return None
-            for qi, q_label in enumerate(qr_quarters):
-                row_cells = tbl_b.rows[qi + 1].cells
-                row_cells[0].paragraphs[0].clear()
-                _run(row_cells[0].paragraphs[0], str(q_label), size_pt=SOURCE_PT)
-                ci = 1
-                for mk, (la, ls) in metric_cols:
-                    for which in ("A", "S"):
-                        v = _cell_val(qr_rows, mk, qi, which)
-                        row_cells[ci].paragraphs[0].clear()
-                        if v is None:
-                            _run(row_cells[ci].paragraphs[0], "—", size_pt=SOURCE_PT, color=GRAY)
-                        elif which == "S" and isinstance(v, (int, float)):
-                            _run(row_cells[ci].paragraphs[0], _fmt_pct(v, signed=True), size_pt=SOURCE_PT)
-                        elif isinstance(v, (int, float)):
-                            _run(row_cells[ci].paragraphs[0], _fmt_num(v), size_pt=SOURCE_PT)
-                        else:
-                            _run(row_cells[ci].paragraphs[0], str(v), size_pt=SOURCE_PT)
-                        ci += 1
-            _run(doc.add_paragraph(), "Source: MarketScreener /calendar/ Quarterly results.", size_pt=SOURCE_PT, color=GRAY)
-        else:
-            p = doc.add_paragraph()
-            _run(p, "Appendix B — Quarterly Results Detail", bold=True, size_pt=SECTION_PT, color=ACCENT)
-            _run(doc.add_paragraph(), "No quarterly results table available.", size_pt=SOURCE_PT, color=GRAY)
-        doc.add_paragraph()
+    c, q, memo = payload.company, payload.quote, payload.memo_computed or {}
+    header, cs, vm = (memo_data or {}).get("header") or {}, payload.consensus_summary or {}, payload.ms_valuation_multiples or {}
+    name = getattr(c, "company_name", None) or _company_attr(c, "company_name", "")
+    tk = getattr(c, "ticker", None) or _company_attr(c, "ticker", "")
+    sec = f"{_company_attr(c, 'sector', '')} / {_company_attr(c, 'industry', '')}".strip(" /") or "—"
+    curr = (getattr(c, "currency", None) or "SAR").strip()
+    display_ccy = (cfg().get("report", {}).get("display_currency", curr) or curr).strip().upper()
+    pshort = (memo_data or {}).get("preview_short") or memo.get("preview_quarter_short") or "1Q26"
+    q_label = qlab(pshort)
+    ed = header.get("expected_report_date") or {}
+    ev = ed.get("display_value") if isinstance(ed, dict) else ed
+    exp = rdate(ev) if ev else (memo.get("next_earnings_date") or "—")
+    rr = header.get("recommendation") or {}
+    rec = (rr.get("display_value") if isinstance(rr, dict) else rr) or (cs.get("consensus_rating") or "—")
+    tr = header.get("average_target_price") or {}
+    tgt = (tr.get("display_value") if isinstance(tr, dict) else tr)
+    tgt = tgt if tgt is not None else cs.get("average_target_price")
+    sr = header.get("upside_pct") or {}
+    spr = (sr.get("display_value") if isinstance(sr, dict) else sr)
+    spr = spr if spr is not None else memo.get("spread_pct") or cs.get("upside_to_average_target_pct")
+    mcap = q.market_cap if q else None
+    if display_ccy and display_ccy != curr:
+        try:
+            from src.utils.currency import convert
+            tgt = convert(tgt if isinstance(tgt, (int, float)) else None, curr, display_ccy) if tgt is not None else tgt
+            mcap = convert(mcap if isinstance(mcap, (int, float)) else None, curr, display_ccy) if mcap is not None else mcap
+            curr = display_ccy
+        except Exception:
+            pass
+    ts = pn(tgt)
+    if curr and ts != "—" and not ts.startswith("$"):
+        ts = f"{curr} {ts}"
+    ms = pn(mcap, bil=True)
+    if ms != "—" and not ms.startswith("$"):
+        ms = f"{curr} {ms}"
+    cp, cn = memo.get("calendar_prior_quarter_released") or {}, memo.get("calendar_next_quarter") or {}
+    rows = [
+        ("Revenue ($M)", cp.get("net_sales"), cn.get("net_sales") or cn.get("revenue"), memo.get("yoy_revenue_pct_table")),
+        ("EBITDA ($M)", cp.get("ebitda"), cn.get("ebitda"), memo.get("yoy_ebitda_pct_table")),
+        ("Net Income ($M)", cp.get("net_income"), cn.get("net_income"), memo.get("yoy_ni_pct_table")),
+        ("EPS ($)", cp.get("eps"), cn.get("eps"), memo.get("yoy_eps_pct_table")),
+        ("FCF ($M)", cp.get("fcf"), cn.get("fcf"), None),
+    ]
+    pv = vm.get("periods") or []
+    i26 = next((i for i, p in enumerate(pv) if "2026" in str(p)), len(pv) - 1 if pv else -1)
 
-    # Appendix C — Annual EPS / Dividend / Yield (only if meaningful content)
-    ed = (payload.ms_eps_dividend_forecasts or {})
-    ed_p = ed.get("periods", [])
-    ed_eps = ed.get("eps", []) or []
-    ed_dps = ed.get("dividend_per_share", []) or []
-    has_eps = any(v is not None for v in ed_eps)
-    has_dps = any(v is not None for v in ed_dps)
-    if "eps_dividend" in appendix_sections and (ed_p and (has_eps or has_dps)):
-        p = doc.add_paragraph()
-        _run(p, "Appendix C — Annual EPS / Dividend / Yield", bold=True, size_pt=SECTION_PT, color=ACCENT)
-        p.paragraph_format.space_after = SPACE_TINY
-        # Compact table: Period | EPS | DPS (or similar)
-        headers = ["Period"] + (["EPS"] if has_eps else []) + (["DPS"] if has_dps else [])
-        if len(headers) > 1:
-            n_per = len(ed_p)
-            tbl_c = doc.add_table(rows=1 + n_per, cols=len(headers))
-            tbl_c.style = "Table Grid"
-            for i, h in enumerate(headers):
-                tbl_c.rows[0].cells[i].paragraphs[0].clear()
-                set_cell_shading(tbl_c.rows[0].cells[i], HEADER_FILL)
-                _run(tbl_c.rows[0].cells[i].paragraphs[0], h, bold=True, size_pt=SOURCE_PT, color=ACCENT)
-            for qi, period in enumerate(ed_p):
-                set_compact_row_height(tbl_c.rows[qi + 1], 14)
-                tbl_c.rows[qi + 1].cells[0].paragraphs[0].clear()
-                _run(tbl_c.rows[qi + 1].cells[0].paragraphs[0], str(period), size_pt=SOURCE_PT)
-                ci = 1
-                if has_eps:
-                    v = ed_eps[qi] if qi < len(ed_eps) else None
-                    tbl_c.rows[qi + 1].cells[ci].paragraphs[0].clear()
-                    _run(tbl_c.rows[qi + 1].cells[ci].paragraphs[0], _fmt_num(v) if v is not None else "—", size_pt=SOURCE_PT)
-                    ci += 1
-                if has_dps:
-                    v = ed_dps[qi] if qi < len(ed_dps) else None
-                    tbl_c.rows[qi + 1].cells[ci].paragraphs[0].clear()
-                    _run(tbl_c.rows[qi + 1].cells[ci].paragraphs[0], _fmt_num(v) if v is not None else "—", size_pt=SOURCE_PT)
-        _run(doc.add_paragraph(), "Source: MarketScreener /valuation-dividend/.", size_pt=SOURCE_PT, color=GRAY)
-        doc.add_paragraph()
+    def pick(arr):
+        if not arr:
+            return None
+        if 0 <= i26 < len(arr) and arr[i26] is not None:
+            return arr[i26]
+        for v in reversed(arr):
+            if v is not None:
+                return v
+        return None
 
-    # Appendix D — Valuation Multiples (full table here, not on page 1)
-    if "valuation" in appendix_sections:
-        p = doc.add_paragraph()
-        _run(p, "Appendix D — Valuation Multiples", bold=True, size_pt=SECTION_PT, color=ACCENT)
-        p.paragraph_format.space_after = SPACE_TINY
+    pe, evv, pb, dy = pick(vm.get("pe") or []), pick(vm.get("ev_ebitda") or []) or pick(vm.get("ev_ebit") or []), pick(vm.get("pbr") or []), pick(vm.get("yield_pct") or [])
+    drv = getattr(payload, "derived", None)
+    pe_vs = getattr(drv, "pe_vs_sector_pct", None) if drv is not None else None
+    ev_vs = getattr(drv, "ev_ebitda_vs_sector_pct", None) if drv is not None else None
+    sections = (memo_data or {}).get("pptx_sections") or {}
+    wl = (sections.get("what_to_watch") if isinstance(sections, dict) else None) or watch or [
+        "Guidance revision and forward outlook commentary",
+        "Segment-level performance and geographic mix",
+        "Macro factors: FX, commodity pricing, regulatory",
+        "Capital allocation: buybacks, dividends, M&A",
+    ]
+    rv, ev_eps = cn.get("net_sales") or cn.get("revenue"), cn.get("eps")
+    rc, ec = memo.get("yoy_revenue_pct_table") or memo.get("qoq_revenue_pct"), memo.get("yoy_eps_pct_table") or memo.get("qoq_eps_pct")
+    em = cn.get("ebitda_margin") or cp.get("ebitda_margin")
+    DARK, GOLD, LIGHT, MUTED, GREEN, WHITE, BLACK = (
+        RGBColor(0x0D, 0x11, 0x17), RGBColor(0xC9, 0xA2, 0x27), RGBColor(0xE6, 0xED, 0xF3),
+        RGBColor(0x8B, 0x94, 0x9E), RGBColor(0x3F, 0xB9, 0x50), RGBColor(0xFF, 0xFF, 0xFF), RGBColor(0x1F, 0x23, 0x28),
+    )
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Inches(13.33), Inches(7.5)
+    blank = prs.slide_layouts[6]
+    s1 = prs.slides.add_slide(blank)
+    rect(s1, 0, 0, prs.slide_width, prs.slide_height, DARK)
+    tx(s1, Inches(0.8), Inches(0.55), Inches(6), Inches(0.4), "EARNINGS PREVIEW NOTE", sz=11, bold=True, rgb=GOLD)
+    rect(s1, Inches(0.8), Inches(0.95), Inches(2.2), Inches(0.05), GOLD)
+    tx(s1, Inches(0.8), Inches(1.55), Inches(11.6), Inches(0.9), name or "—", sz=44, bold=True, rgb=LIGHT)
+    tx(s1, Inches(0.8), Inches(2.55), Inches(8), Inches(0.6), f"{q_label} Earnings Preview", sz=22, rgb=LIGHT)
+    my = 3.55
+    for i, (lb, vl) in enumerate([("Sector:", sec), ("Ticker:", tk), ("Market Cap:", ms), ("Report Date:", exp)]):
+        tx(s1, Inches(0.8), Inches(my + i * 0.35), Inches(2.0), Inches(0.3), lb, sz=12, rgb=MUTED)
+        tx(s1, Inches(2.2), Inches(my + i * 0.35), Inches(7.5), Inches(0.3), str(vl), sz=12, bold=True, rgb=LIGHT)
+    sx, sy, sw, sh = Inches(0.8), Inches(5.45), Inches(11.0), Inches(1.05)
+    rect(s1, sx, sy, sw, sh, RGBColor(0x10, 0x17, 0x22), GOLD)
+    cw = sw / 3
+    for j, (lb, vl, col) in enumerate([("RATING", rat(rec), LIGHT), ("TARGET PRICE", ts, LIGHT), ("UPSIDE", pp(spr, True) if spr is not None else "—", GREEN)]):
+        x = sx + cw * j
+        tx(s1, x + Inches(0.25), sy + Inches(0.15), cw - Inches(0.3), Inches(0.25), lb, sz=10, bold=True, rgb=MUTED)
+        tx(s1, x + Inches(0.25), sy + Inches(0.45), cw - Inches(0.3), Inches(0.45), str(vl), sz=24, bold=True, rgb=col)
+        if j in (0, 1):
+            rect(s1, x + cw - Inches(0.02), sy + Inches(0.15), Inches(0.02), sh - Inches(0.3), RGBColor(0x30, 0x36, 0x3D))
+    tx(s1, Inches(0), Inches(7.15), prs.slide_width, Inches(0.3), "CONFIDENTIAL | For Institutional Clients Only", sz=10, rgb=MUTED, al=PP_ALIGN.CENTER)
 
-        vm = payload.ms_valuation_multiples
-        if vm and vm.get("periods"):
-            periods_v = vm.get("periods", [])
-            pe = vm.get("pe", []) or []
-            pbr = vm.get("pbr", []) or []
-            yld = vm.get("yield_pct", []) or []
-            ev_ebit = vm.get("ev_ebit", []) or []
+    s2 = prs.slides.add_slide(blank)
+    rect(s2, 0, 0, prs.slide_width, prs.slide_height, WHITE)
+    tx(s2, Inches(0.8), Inches(0.45), Inches(12), Inches(0.35), f"{name} | {q_label}", sz=14, bold=True, rgb=BLACK)
+    tx(s2, Inches(0.8), Inches(0.95), Inches(6), Inches(0.6), "Executive Summary", sz=30, bold=True, rgb=BLACK)
+    rect(s2, Inches(0.8), Inches(1.55), Inches(2.4), Inches(0.08), GOLD)
+    rect(s2, Inches(0.8), Inches(1.85), Inches(11.8), Inches(1.35), RGBColor(0xFA, 0xF8, 0xF3), RGBColor(0xDB, 0xE0, 0xE6))
+    rect(s2, Inches(0.8), Inches(1.85), Inches(0.08), Inches(1.35), GOLD)
+    iv_len = len((iv_text or "").strip())
+    # Slide 2: tighter line-height for longer LLM theses.
+    # Font scales down as text gets longer to reduce vertical overflow.
+    iv_sz = 14 if iv_len <= 520 else (13 if iv_len <= 720 else (12 if iv_len <= 900 else 11))
+    tx(
+        s2,
+        Inches(1.0),
+        Inches(2.05),
+        Inches(11.4),
+        Inches(1.05),
+        iv_text or "—",
+        sz=iv_sz,
+        rgb=BLACK,
+        line_spacing=0.85,
+    )
+    tx(s2, Inches(0.8), Inches(3.35), Inches(4), Inches(0.35), "Key Expectations", sz=16, bold=True, rgb=BLACK)
+    cy, ch, cw2, g = Inches(3.75), Inches(1.05), Inches(3.75), Inches(0.3)
+    cards = [("Revenue", pn(rv), pp(rc, True) if rc is not None else "—"), ("EPS", pn(ev_eps), pp(ec, True) if ec is not None else "—"), ("EBITDA Margin", pp(em) if em is not None else "—", "—")]
+    for i, (lb, va, chg) in enumerate(cards):
+        x = Inches(0.8) + i * (cw2 + g)
+        rect(s2, x, cy, cw2, ch, WHITE, RGBColor(0xDB, 0xE0, 0xE6))
+        tx(s2, x + Inches(0.25), cy + Inches(0.15), cw2 - Inches(0.5), Inches(0.25), lb, sz=12, rgb=MUTED)
+        tx(s2, x + Inches(0.25), cy + Inches(0.42), cw2 - Inches(0.5), Inches(0.35), va, sz=22, bold=True, rgb=BLACK)
+        tx(s2, x + Inches(0.25), cy + Inches(0.78), cw2 - Inches(0.5), Inches(0.25), chg, sz=12, bold=True, rgb=GREEN)
+    tx(s2, Inches(0.8), Inches(4.95), Inches(4), Inches(0.35), "What to Watch", sz=16, bold=True, rgb=BLACK)
+    wx, wy = Inches(0.8), Inches(5.35)
+    for i, item in enumerate(wl[:4]):
+        cx = wx + (Inches(5.9) if i % 2 else Inches(0))
+        cyy = wy + (Inches(0.55) if i >= 2 else Inches(0))
+        circ = s2.shapes.add_shape(MSO_SHAPE.OVAL, cx, cyy, Inches(0.32), Inches(0.32))
+        circ.fill.solid()
+        circ.fill.fore_color.rgb = RGBColor(0xF0, 0xE6, 0xD3)
+        circ.line.fill.background()
+        tx(s2, cx, cyy + Inches(0.01), Inches(0.32), Inches(0.32), str(i + 1), sz=12, bold=True, rgb=BLACK, al=PP_ALIGN.CENTER)
+        tx(s2, cx + Inches(0.42), cyy - Inches(0.02), Inches(5.3), Inches(0.4), item, sz=13, rgb=BLACK)
+    tx(s2, Inches(0.8), Inches(6.35), Inches(4.5), Inches(0.35), "Catalysts & Risks", sz=16, bold=True, rgb=BLACK)
+    bx, by, bw3, bh3 = Inches(0.8), Inches(6.7), Inches(5.8), Inches(0.7)
+    rx = Inches(6.8)
+    rect(s2, bx, by, bw3, bh3, RGBColor(0xF0, 0xF9, 0xF0), RGBColor(0xDB, 0xE0, 0xE6))
+    rect(s2, bx, by, Inches(0.08), bh3, RGBColor(0x1A, 0x7F, 0x37))
+    # Bullets are rendered as separate paragraphs (one per bullet) and word wrapping is disabled.
+    # The LLM is instructed to keep each bullet short enough to fit horizontally.
+    tx(s2, bx + Inches(0.18), by + Inches(0.06), bw3 - Inches(0.3), Inches(0.22), "CATALYSTS", sz=10, bold=True, rgb=RGBColor(0x1A, 0x7F, 0x37))
 
-            def _v_idx(yr):
-                for i, p in enumerate(periods_v):
-                    if str(yr) in str(p):
-                        return i
-                return None
+    c_list = (sections.get("catalysts") if isinstance(sections, dict) else None) or []
+    catalysts = [str(x).strip() for x in c_list if str(x).strip()][:3] if isinstance(c_list, list) else []
+    if not catalysts:
+        catalysts = ["Product / volume upside", "Cost or mix tailwind", "Positive policy / regulatory development"]
+    tx(
+        s2,
+        bx + Inches(0.18),
+        by + Inches(0.26),
+        bw3 - Inches(0.3),
+        Inches(0.44),
+        "↑ " + "\n↑ ".join(catalysts),
+        sz=8,
+        rgb=BLACK,
+        word_wrap=False,
+        line_spacing=0.85,
+    )
+    rect(s2, rx, by, bw3, bh3, RGBColor(0xFE, 0xF0, 0xF0), RGBColor(0xDB, 0xE0, 0xE6))
+    rect(s2, rx, by, Inches(0.08), bh3, RGBColor(0xCF, 0x22, 0x22))
+    r_list = (sections.get("risks") if isinstance(sections, dict) else None) or []
+    risks = [str(x).strip() for x in r_list if str(x).strip()][:3] if isinstance(r_list, list) else []
+    if not risks:
+        uf = (memo_data or {}).get("uncertainty_factors") or []
+        risks = [str(x).strip() for x in uf if str(x).strip()][:3] if isinstance(uf, list) else []
+    if not risks:
+        risks = ["Macro / demand downside", "Pricing / competition pressure", "Execution or guidance risk"]
 
-            v25, v26, v27 = _v_idx(2025), _v_idx(2026), _v_idx(2027)
-            if v25 is None and periods_v:
-                n = len(periods_v)
-                v25, v26, v27 = (n - 3 if n >= 3 else 0), (n - 2 if n >= 2 else 0), (n - 1)
+    tx(s2, rx + Inches(0.18), by + Inches(0.06), bw3 - Inches(0.3), Inches(0.22), "KEY RISKS", sz=10, bold=True, rgb=RGBColor(0xCF, 0x22, 0x22))
+    tx(
+        s2,
+        rx + Inches(0.18),
+        by + Inches(0.26),
+        bw3 - Inches(0.3),
+        Inches(0.44),
+        "↓ " + "\n↓ ".join(risks),
+        sz=8,
+        rgb=BLACK,
+        word_wrap=False,
+        line_spacing=0.85,
+    )
 
-            def _cell(arr, idx):
-                if arr and idx is not None and 0 <= idx < len(arr) and arr[idx] is not None:
-                    return arr[idx]
-                return None
-
-            tbl_d = doc.add_table(rows=1, cols=4)
-            tbl_d.style = "Table Grid"
-            for i, h in enumerate(["Multiple", "FY25E", "FY26E", "FY27E"]):
-                tbl_d.rows[0].cells[i].paragraphs[0].clear()
-                set_cell_shading(tbl_d.rows[0].cells[i], "1A5276")
-                _run(tbl_d.rows[0].cells[i].paragraphs[0], h, bold=True, size_pt=SOURCE_PT, color=RGBColor(0xFF, 0xFF, 0xFF))
-            for row_name, arr in [("P/E", pe), ("P/B", pbr), ("Div. Yield", yld), ("EV/EBIT", ev_ebit)]:
-                r = tbl_d.add_row().cells
-                r[0].paragraphs[0].clear()
-                _run(r[0].paragraphs[0], row_name, size_pt=SOURCE_PT)
-                for j, idx in enumerate([v25, v26, v27]):
-                    v = _cell(arr, idx)
-                    r[j + 1].paragraphs[0].clear()
-                    if v is None:
-                        _run(r[j + 1].paragraphs[0], "—", size_pt=SOURCE_PT)
-                    else:
-                        _run(r[j + 1].paragraphs[0], f"{v:.1f}x" if "Yield" not in row_name else f"{v}%", size_pt=SOURCE_PT)
-        else:
-            _run(doc.add_paragraph(), "Valuation multiples not available.", size_pt=SOURCE_PT, color=GRAY)
-        doc.add_paragraph()
-
-    # Appendix E omitted from client-facing memo (internal/audit only).
-
-    # Footer
-    p = doc.add_paragraph()
-    p.paragraph_format.space_before = SPACE_SMALL
-    _run(p, "This memo is for informational purposes only and does not constitute investment advice.", size_pt=SOURCE_PT, color=GRAY)
-
+    s3 = prs.slides.add_slide(blank)
+    rect(s3, 0, 0, prs.slide_width, prs.slide_height, WHITE)
+    tx(s3, Inches(0.8), Inches(0.65), Inches(8), Inches(0.6), "Financial Snapshot", sz=32, bold=True, rgb=BLACK)
+    rect(s3, Inches(0.8), Inches(1.25), Inches(2.7), Inches(0.08), GOLD)
+    tbx, tby = Inches(0.8), Inches(1.6)
+    cws = [Inches(4.0), Inches(2.3), Inches(2.3), Inches(2.0)]
+    rh = Inches(0.45)
+    hdrs = ["Metric", "Q prior A", "Q current E", "YoY %"]
+    x = tbx
+    for j, h in enumerate(hdrs):
+        rect(s3, x, tby, cws[j], rh, BLACK, RGBColor(0xDB, 0xE0, 0xE6))
+        tx(s3, x + Inches(0.15), tby + Inches(0.08), cws[j] - Inches(0.3), rh, h, sz=12, bold=True, rgb=WHITE)
+        x += cws[j]
+    for i, (lb, pa, ce, yy) in enumerate(rows):
+        y = tby + rh * (i + 1)
+        x = tbx
+        vals = [lb, pn(pa), pn(ce), pp(yy, True) if yy is not None else "—"]
+        for j, v in enumerate(vals):
+            fl = RGBColor(0xFA, 0xF8, 0xF3) if j == 2 else WHITE
+            rect(s3, x, y, cws[j], rh, fl, RGBColor(0xDB, 0xE0, 0xE6))
+            tx(s3, x + Inches(0.15), y + Inches(0.08), cws[j] - Inches(0.3), rh, str(v), sz=12, bold=(j == 0), rgb=BLACK)
+            x += cws[j]
+    tx(s3, Inches(0.8), Inches(4.6), Inches(7), Inches(0.5), "Valuation Summary", sz=26, bold=True, rgb=BLACK)
+    rect(s3, Inches(0.8), Inches(5.05), Inches(2.5), Inches(0.06), GOLD)
+    boxes = [
+        ("P/E (FY26E)", f"{pe:.1f}x" if pe is not None else "—", pe_vs),
+        ("EV/EBITDA", f"{evv:.1f}x" if evv is not None else "—", ev_vs),
+        ("P/B", f"{pb:.1f}x" if pb is not None else "—", None),
+        ("Div. Yield", f"{dy:.1f}%" if dy is not None else "—", None),
+    ]
+    bxx, byy = Inches(0.8), Inches(5.25)
+    bww, bhh = Inches(5.8), Inches(0.9)
+    for i, (lbl, val, vs) in enumerate(boxes):
+        x = bxx + (Inches(6.1) if i % 2 else Inches(0))
+        y = byy + (Inches(1.05) if i >= 2 else Inches(0))
+        rect(s3, x, y, bww, bhh, WHITE, RGBColor(0xDB, 0xE0, 0xE6))
+        rect(s3, x, y, Inches(0.08), bhh, GOLD)
+        tx(s3, x + Inches(0.2), y + Inches(0.12), bww - Inches(0.3), Inches(0.25), lbl, sz=12, rgb=MUTED)
+        tx(s3, x + Inches(0.2), y + Inches(0.38), bww - Inches(0.3), Inches(0.35), val, sz=24, bold=True, rgb=GOLD)
+        vs_text = "vs. — sector avg" if vs is None else f"vs. {vs:+.0f}% sector avg"
+        tx(s3, x + Inches(2.8), y + Inches(0.45), bww - Inches(2.9), Inches(0.3), vs_text, sz=11, rgb=MUTED)
+    tx(s3, Inches(0.8), Inches(7.15), Inches(12), Inches(0.3), f"Source: Consensus and estimates as of {datetime.now().strftime('%d %b %Y')}", sz=10, rgb=MUTED)
+    if quality_flags:
+        tx(
+            s3,
+            Inches(0.8),
+            Inches(7.35),
+            Inches(12),
+            Inches(0.3),
+            "Data Quality: " + "; ".join(quality_flags[:4]),
+            sz=10,
+            rgb=MUTED,
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
-    doc.save(str(path))
+    prs.save(str(path))
 
 
 def run(payload: ReportPayload, memo_data: dict | None = None, qa_audit: dict | None = None) -> StepResult:
     with StepTimer() as t:
         try:
+            iv_style = _iv_fallback_style()
+            ticker = payload.company.ticker
             out_dir = report_output_dir()
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            fname = f"{payload.company.ticker}_preview_{ts}.docx"
-            out_path = out_dir / fname
-            _build(payload, out_path, memo_data=memo_data, qa_audit=qa_audit)
-            if qa_audit and memo_data:
-                news_items = getattr(payload, "news_items", None) or []
-                ns = getattr(payload, "news_summary", None)
-                valid_articles = [a for a in news_items if _is_valid_recent_context_article(a)]
-                # Use effective refs (injected or fallback when IV must cite an article) so QA counts correctly
-                refs = qa_audit.get("investment_view_effective_ref_articles") or (getattr(ns, "referenced_articles", None) or [] if ns else [])
-                placements = getattr(ns, "citation_placements", None) or [] if ns else []
-
-                qa_audit["recent_context_query_log"] = getattr(payload, "recent_context_query_log", None) or []
-                qa_audit["recent_context_candidate_count"] = getattr(payload, "recent_context_candidate_count", 0) or 0
-                qa_audit["recent_context_valid_count"] = getattr(payload, "recent_context_valid_count", 0) or len(valid_articles)
-                qa_audit["recent_context_rejected_reasons"] = getattr(payload, "recent_context_rejected_reasons", None) or []
-                qa_audit["candidate_valid_basic"] = getattr(payload, "candidate_valid_basic", False)
-                qa_audit["candidate_has_date_before_enrichment"] = getattr(payload, "candidate_has_date_before_enrichment", 0)
-                qa_audit["candidate_has_extracted_fact"] = getattr(payload, "candidate_has_extracted_fact", 0)
-                qa_audit["final_article_valid_count"] = getattr(payload, "final_article_valid_count", 0)
-                qa_audit["date_parse_attempted"] = getattr(payload, "date_parse_attempted", 0)
-                qa_audit["date_parse_source"] = getattr(payload, "date_parse_source", None) or []
-                qa_audit["date_parse_success"] = getattr(payload, "date_parse_success", 0)
-                qa_audit["candidates_rejected_for_missing_date"] = getattr(payload, "candidates_rejected_for_missing_date", 0)
-                qa_audit["candidates_recovered_after_article_fetch"] = getattr(payload, "candidates_recovered_after_article_fetch", 0)
-                qa_audit["recent_context_enrichment_log"] = getattr(payload, "recent_context_enrichment_log", None) or []
-                qa_audit["rejected_candidates_top_10"] = getattr(payload, "rejected_candidates_top_10", None) or []
-                qa_audit["recent_context_articles_qa"] = getattr(payload, "recent_context_articles_qa", None) or []
-                qa_audit["recent_context_retrieved"] = len(valid_articles) > 0
-                qa_audit["recent_context_has_valid_articles"] = len(valid_articles) > 0
-                qa_audit["recent_context_article_count"] = len(valid_articles)
-                qa_audit["recent_context_render_count"] = qa_audit.get("recent_context_render_count", 0)
-                qa_audit["recent_context_rendered"] = qa_audit["recent_context_render_count"] > 0
-                qa_audit["investment_view_used_article_count"] = len(refs)
-                qa_audit["investment_view_used_article_headlines"] = [getattr(a, "headline", "") for a in refs]
-                qa_audit["recent_context_used_headlines"] = qa_audit["investment_view_used_article_headlines"]
-                qa_audit["investment_view_uses_recent_context"] = len(refs) > 0 or len(placements) > 0
-
-                fail_reason = None
-                cand = qa_audit.get("recent_context_candidate_count", 0)
-                valid = qa_audit.get("recent_context_valid_count", 0)
-                rc_render = qa_audit.get("recent_context_render_count", 0)
-                iv_used = qa_audit.get("investment_view_used_article_count", 0)
-                if cand == 0:
-                    qa_audit["recent_context_failure_stage"] = "retrieval"
-                elif valid == 0:
-                    qa_audit["recent_context_failure_stage"] = "validation"
-                elif valid > 0 and rc_render == 0:
-                    qa_audit["recent_context_failure_stage"] = "render"
-                    fail_reason = "Valid articles had metadata but none rendered (headline+URL+Reuters/ZAWYA required)."
-                elif valid > 0 and iv_used == 0:
-                    qa_audit["recent_context_failure_stage"] = "iv_citation"
-                    fail_reason = (fail_reason or "") + " Investment View did not cite any recent-context article."
-                else:
-                    qa_audit["recent_context_failure_stage"] = ""
-                if not fail_reason and valid > 0 and rc_render == 0:
-                    fail_reason = "Valid articles had metadata but none rendered."
-                if valid > 0 and iv_used == 0 and (fail_reason or "").find("Investment View") == -1:
-                    fail_reason = (fail_reason or "") + " Investment View did not cite any recent-context article."
-                qa_audit["recent_context_render_failed_reason"] = fail_reason
-                if fail_reason:
-                    qa_audit.setdefault("warnings", []).append(f"QA FAIL: {fail_reason}")
-                # Internal QA output: primary format is .docx for human review
-                qa_docx_path = out_path.parent / (out_path.stem + "_QA.docx")
-                p1 = getattr(ns, "investment_view_paragraph_1", "") if ns else ""
-                p2 = getattr(ns, "investment_view_paragraph_2", "") if ns else ""
-                inv_sentences = []
-                if p1 or p2:
-                    from src.services.qa_engine import classify_sentences_for_qa
-                    inv_sentences = classify_sentences_for_qa(p1 or "", p2 or "")
-                from src.services.qa_audit_docx import write_qa_audit_docx
-                write_qa_audit_docx(
-                    qa_audit, memo_data,
-                    path=qa_docx_path,
-                    inv_sentences=inv_sentences if inv_sentences else None,
-                    ticker=payload.company.ticker,
-                    duplicate_screening_log=getattr(payload, "duplicate_screening_log", None) or [],
-                )
-                # Optional JSON for debugging (config: report.qa_audit_json)
-                if cfg().get("report", {}).get("qa_audit_json", False):
-                    qa_json_path = out_path.with_suffix(".qa.json")
-                    out_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(qa_json_path, "w", encoding="utf-8") as f:
-                        json.dump(qa_audit, f, indent=2, default=str)
-            return StepResult(
-                step_name=STEP, status=Status.SUCCESS, source="python-docx",
-                message=f"Report saved → {out_path}",
-                data=str(out_path), elapsed_seconds=t.elapsed,
-            )
+            # Keep outputs clean: delete prior artifacts for this ticker.
+            for old in out_dir.glob(f"{ticker}_preview_*.pptx"):
+                try:
+                    old.unlink()
+                except Exception:
+                    pass
+            out_path = out_dir / f"{ticker}_preview_{iv_style}.pptx"
+            iv_text, watch = _iv_text_and_watch(payload, memo_data, iv_style)
+            quality_flags: list[str] = []
+            if qa_audit:
+                if not qa_audit.get("payload_entity_match", True):
+                    quality_flags.append("MS entity mismatch suppressed")
+                if qa_audit.get("ms_section_suppressed_due_to_missing_current_data"):
+                    quality_flags.append("MS suppressed: missing current data")
+                if qa_audit.get("ms_section_suppressed_due_to_entity_mismatch"):
+                    quality_flags.append("MS suppressed: entity mismatch")
+                if qa_audit.get("ms_section_suppressed_due_to_contamination"):
+                    quality_flags.append("MS suppressed: contamination")
+                if qa_audit.get("reused_default_payload_detected"):
+                    quality_flags.append("Default payload reused")
+            _write_preview_pptx(payload, out_path, memo_data, iv_text, watch, quality_flags or None)
+            return StepResult(step_name=STEP, status=Status.SUCCESS, source="pptx", message=f"Report saved → {out_path}", data=str(out_path), elapsed_seconds=t.elapsed)
         except Exception as exc:
-            return StepResult(
-                step_name=STEP, status=Status.FAILED, source="python-docx",
-                message="Report generation failed",
-                error_detail=str(exc), elapsed_seconds=t.elapsed,
-            )
+            return StepResult(step_name=STEP, status=Status.FAILED, source="pptx", message="Report generation failed", error_detail=str(exc), elapsed_seconds=t.elapsed)

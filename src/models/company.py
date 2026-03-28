@@ -20,5 +20,6 @@ class CompanyMaster(BaseModel):
     zawya_slug:                    str  = ""
     sector:                        str  = ""
     industry:                      str  = ""
+    peer_group:                    list[str] = []  # Optional peer tickers for sector-relative comps
     is_bank:                       bool = False
     notes:                         str  = ""

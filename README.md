@@ -30,6 +30,8 @@ uvicorn src.api:app --reload --port 8000
 
 **Tests:** `pytest tests/ -v`
 
+**Local quality testing:** See **`docs/LOCAL-TESTING.md`** for cleaning cache/outputs, running sector tickers, and checking Investment View fallback quality. Quick clean: `./scripts/clean_local.sh` then `python -m src.main --init-db`.
+
 ---
 
 ## Deploy to Render (one site = API + UI at one URL)

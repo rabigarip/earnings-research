@@ -11,6 +11,10 @@ class QuoteSnapshot(BaseModel):
     change_pct: float | None = None
     volume:     int   | None = None
     market_cap: float | None = None
+    enterprise_value: float | None = None
+    forward_pe: float | None = None
+    trailing_pe: float | None = None
+    dividend_yield: float | None = None  # decimal (e.g. 0.045)
     currency:   str          = "SAR"
     source:     str          = "yahoo"
 
@@ -38,4 +42,12 @@ class DerivedMetrics(BaseModel):
     avg_4q_revenue_growth:     float | None = None
     quarterly_ni_growth:       list[dict] = []
     avg_4q_ni_growth:          float | None = None
+    pe_forward:                float | None = None
+    ev_ebitda:                 float | None = None
+    pb_ratio:                  float | None = None
+    div_yield_pct:             float | None = None
+    consensus_target_price:    float | None = None
+    upside_pct:                float | None = None
+    pe_vs_sector_pct:          float | None = None
+    ev_ebitda_vs_sector_pct:   float | None = None
     warnings:                  list[str]  = []

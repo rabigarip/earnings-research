@@ -86,6 +86,10 @@ def fetch_quote(ticker: str) -> QuoteSnapshot | None:
                 change_pct=pct,
                 volume=info.get("volume") or info.get("regularMarketVolume"),
                 market_cap=info.get("marketCap"),
+                enterprise_value=info.get("enterpriseValue"),
+                forward_pe=info.get("forwardPE"),
+                trailing_pe=info.get("trailingPE"),
+                dividend_yield=info.get("dividendYield"),
                 currency=info.get("currency", "SAR"),
             )
         except Exception:

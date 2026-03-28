@@ -1,7 +1,7 @@
 """Pipeline orchestrator for earnings preview mode.
 
 Steps 1-2 are CRITICAL (halt on failure). Steps 3+ are RESILIENT (log and continue).
-Outputs: one memo .docx + one QA .docx per ticker.
+Outputs: one earnings preview .pptx per ticker.
 """
 
 from __future__ import annotations
@@ -58,6 +58,24 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> list[StepResult]:
     _collect(r, results)
     quarterly = r.data.get("quarterly", []) if r.data else []
     annual    = r.data.get("annual", [])    if r.data else []
+    # Persist latest quarterly actual as fallback history for future runs.
+    try:
+        if quarterly:
+            from src.services.store_actuals import upsert_actuals
+            latest_q = sorted(quarterly, key=lambda p: p.period_label)[-1]
+            ebitda_margin = (latest_q.ebitda / latest_q.revenue * 100) if (latest_q.ebitda is not None and latest_q.revenue) else None
+            upsert_actuals(
+                ticker=ticker,
+                period=latest_q.period_label,
+                revenue=latest_q.revenue,
+                net_income=latest_q.net_income,
+                eps=latest_q.eps,
+                ebitda=latest_q.ebitda,
+                ebitda_margin=ebitda_margin,
+                reported_date=None,
+            )
+    except Exception:
+        pass
 
     # ── 5. Fetch consensus ────────────────────────────────────
     r = fetch_consensus(ticker, company)
@@ -76,35 +94,21 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> list[StepResult]:
     news_items = news_data.get("items") or (r.data if isinstance(r.data, list) else [])
 
     # ── 7. Reconcile + derived metrics ────────────────────────
-    r = reconcile(ticker, company, quarterly, consensus)
+    r = reconcile(ticker, company, quarterly, consensus, quote=quote)
     _collect(r, results)
     derived = r.data if r.status != Status.FAILED else None
 
     # ── 8. Summarize news (LLM) ──────────────────────────────
-    memo_fact_pack = None
-    if not skip_llm:
-        try:
-            memo_fact_pack = get_memo_computed_for_preview(
-                company=company, quote=quote, quarterly=quarterly,
-                consensus=consensus,
-                consensus_summary=ms_blocks.get("consensus_summary"),
-                ms_annual_forecasts=ms_blocks.get("ms_annual_forecasts"),
-                ms_quarterly_forecasts=ms_blocks.get("ms_quarterly_forecasts"),
-                ms_eps_dividend_forecasts=ms_blocks.get("ms_eps_dividend_forecasts"),
-                ms_calendar_events=ms_blocks.get("ms_calendar_events"),
-                derived=derived,
-            )
-        except Exception:
-            pass
-    if skip_llm:
-        r = StepResult(
-            step_name="summarize_news", status=Status.SKIPPED,
-            source="gemini", message="Skipped (--skip-llm)",
-        )
-    else:
-        r = summarize_news.run(news_items, company.company_name, memo_fact_pack=memo_fact_pack)
+    # Deferred: LLM should be the last thing produced before rendering.
+    # We do the slide text via `draft_pptx_sections` after QA instead.
+    r = StepResult(
+        step_name="summarize_news",
+        status=Status.SKIPPED,
+        source="gemini",
+        message="Deferred to end (PPTX uses draft_pptx_sections)",
+    )
     _collect(r, results)
-    summary = r.data
+    summary = None
 
     # ── 9. Build report payload ───────────────────────────────
     r = build_report_payload.run(
@@ -163,7 +167,32 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> list[StepResult]:
         memo_data = r.data.get("memo_data")
         qa_audit = r.data.get("qa_audit")
 
-    # ── 11. Generate report (.docx + QA .docx) ───────────────
+    # ── 11. Draft slide text (LLM LAST) ─────────────────────
+    if not skip_llm and memo_data:
+        try:
+            from src.services.draft_pptx_sections import run as draft_sections
+            headlines = []
+            for n in (getattr(payload, "news_items", None) or [])[:8]:
+                h = (getattr(n, "headline", None) or "").strip()
+                if h:
+                    headlines.append(h)
+            sector = f"{getattr(payload.company, 'sector', '')} / {getattr(payload.company, 'industry', '')}".strip(" /")
+            quarter = (memo_data.get("preview_short") or getattr(payload, "memo_computed", {}).get("preview_quarter_short") or "").strip()
+            rr = draft_sections(
+                company_name=getattr(payload.company, "company_name", "") or "",
+                ticker=getattr(payload.company, "ticker", "") or "",
+                sector=sector,
+                quarter=quarter,
+                memo_data=memo_data,
+                news_headlines=headlines,
+            )
+            _collect(rr, results)
+            if rr.status in (Status.SUCCESS, Status.PARTIAL) and isinstance(rr.data, dict):
+                memo_data["pptx_sections"] = rr.data
+        except Exception:
+            pass
+
+    # ── 12. Generate report (.pptx) ──────────────────────────
     r = generate_report.run(payload, memo_data=memo_data, qa_audit=qa_audit)
     _collect(r, results)
 

@@ -31,6 +31,9 @@ cache/
 .DS_Store
 Thumbs.db
 
+# Archives (local review bundles)
+*.zip
+
 # Frontend (build output in static/ is committed for one-site Render deploy)
 frontend/node_modules/
 frontend/dist/

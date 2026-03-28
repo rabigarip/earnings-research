@@ -8,7 +8,7 @@ Endpoints:
   GET  /api/reports         — List pipeline runs (for earnings-preview frontend)
   POST /api/reports         — Create run (run preview), returns report row + payload
   GET  /api/reports/:id     — Get one run (steps, no payload)
-  GET  /api/reports/:id/download — Download memo .docx file
+  GET  /api/reports/:id/download — Download preview .pptx file
   POST /api/reports/:id/rerun — Rerun preview for that ticker
   POST /api/preview         — Run earnings preview; returns step results + report payload
 """
@@ -80,6 +80,11 @@ class PreviewResponse(BaseModel):
     overall: str  # success | partial
     steps: list[dict]
     payload: dict | None = None  # Full report payload when build_report_payload succeeded
+
+
+class BatchPreviewRequest(BaseModel):
+    tickers: list[str] = Field(..., description="List of Yahoo-format tickers (e.g. ['2010.SR','1120.SR'])")
+    skip_llm: bool = Field(True, description="Skip Gemini summarization for faster batch runs")
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────
@@ -174,7 +179,7 @@ def get_report(run_id: str):
 
 @app.get("/api/reports/{run_id}/download")
 def download_report(run_id: str):
-    """Download the memo .docx file for this run. Returns 404 if file not found (e.g. after Render redeploy)."""
+    """Download the earnings preview file for this run (.pptx). Returns 404 if file not found (e.g. after Render redeploy)."""
     from src.storage.db import load_run
     from src.config import root, cfg, report_output_dir
     run = load_run(run_id)
@@ -182,16 +187,17 @@ def download_report(run_id: str):
         raise HTTPException(status_code=404, detail="Report not found")
     memo_filename = (run.get("memo_path") or "").strip()
     if not memo_filename or ".." in memo_filename:
-        raise HTTPException(status_code=404, detail="No memo file for this run")
+        raise HTTPException(status_code=404, detail="No report file for this run")
     out_dir = report_output_dir()
     file_path = out_dir / memo_filename
     if not file_path.is_file():
-        raise HTTPException(status_code=404, detail="Memo file no longer available (may have been removed)")
-    response = FileResponse(
-        path=str(file_path),
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=memo_filename,
+        raise HTTPException(status_code=404, detail="Report file no longer available (may have been removed)")
+    media = (
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        if memo_filename.lower().endswith(".pptx")
+        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
+    response = FileResponse(path=str(file_path), media_type=media, filename=memo_filename)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
@@ -326,6 +332,19 @@ def run_preview_api(req: PreviewRequest):
 
     steps = [r.to_log_dict() for r in results]
     return PreviewResponse(run_id=run_id, overall=overall, steps=steps, payload=payload)
+
+
+@app.post("/api/batch")
+def batch_preview_api(req: BatchPreviewRequest):
+    """Run previews for multiple tickers (PPTX output per ticker)."""
+    tickers = [t.strip().upper() for t in (req.tickers or []) if (t or "").strip()]
+    if not tickers:
+        raise HTTPException(status_code=400, detail="tickers is required")
+
+    results = []
+    for t in tickers:
+        results.append(_run_preview_and_response(t, skip_llm=req.skip_llm))
+    return {"results": results}
 
 
 # ─── One site: serve frontend from static/ when present ─────────────────────
