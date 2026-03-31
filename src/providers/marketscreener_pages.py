@@ -357,14 +357,8 @@ def resolve_slug_from_search(ticker: str) -> str | None:
     if soup is None:
         return None
     results = _extract_search_result_slugs(soup)
-    # Be conservative: only accept a result when the displayed text includes the query
-    # (prevents cross-company contamination when the first result is unrelated).
-    qnorm = (search_q or "").strip().lower()
-    if results and qnorm:
-        for slug, text in results:
-            tnorm = (text or "").strip().lower()
-            if qnorm in tnorm:
-                return slug
+    if results:
+        return results[0][0]
     return None
 
 
@@ -384,17 +378,9 @@ def resolve_marketscreener_by_isin(isin: str) -> tuple[str, str] | None:
         return None
     results = _extract_search_result_slugs(soup)
     if results:
-        isin_up = isin.upper()
-        for slug, _text in results[:8]:
-            base = f"https://www.marketscreener.com/quote/stock/{slug}/"
-            # Validate ISIN is actually present on the candidate company page.
-            # This avoids taking the first search hit when MarketScreener returns a different issuer.
-            page, _errs = _fetch_page(base, f"verify_isin_{re.sub(r'[^a-zA-Z0-9]', '_', isin_up)[:40]}_{slug}")
-            if page is None:
-                continue
-            hay = page.get_text(" ", strip=True).upper()
-            if isin_up in hay:
-                return (slug, base)
+        slug = results[0][0]
+        base = f"https://www.marketscreener.com/quote/stock/{slug}/"
+        return (slug, base)
     return None
 
 
