@@ -468,6 +468,36 @@ def fetch_summary_page(base_company_url: str, cache_key_prefix: str | None = Non
                 if "low" in c.lower() and "target" in c.lower() and i + 1 < len(cells):
                     payload["low_target_price"] = _coerce_numeric_or_none(cells[i + 1].replace(",", "."))
 
+    # Regex fallback for pages where the consensus box isn't in a simple <table>.
+    # This keeps the summary page useful even when MarketScreener changes layout.
+    try:
+        if payload["consensus_rating"] is None:
+            m = re.search(r"Mean consensus\s+([A-Za-z]+)", text)
+            if m:
+                payload["consensus_rating"] = m.group(1).strip().upper()
+        if payload["analyst_count"] is None:
+            m = re.search(r"Number of Analysts\s+(\d+)", text)
+            if m:
+                payload["analyst_count"] = int(m.group(1))
+        if payload["last_close_price"] is None:
+            m = re.search(r"Last Close Price\s+([\d,.]+)\s*([A-Z]{3})?", text)
+            if m:
+                payload["last_close_price"] = float(m.group(1).replace(",", ""))
+                if m.lastindex and m.lastindex >= 2 and m.group(2):
+                    payload["price_currency"] = payload["price_currency"] or m.group(2)
+        if payload["average_target_price"] is None:
+            m = re.search(r"Average target price\s+([\d,.]+)\s*([A-Z]{3})?", text)
+            if m:
+                payload["average_target_price"] = float(m.group(1).replace(",", ""))
+                if m.lastindex and m.lastindex >= 2 and m.group(2):
+                    payload["price_currency"] = payload["price_currency"] or m.group(2)
+        if payload["spread_pct"] is None:
+            m = re.search(r"Spread / Average Target\s+([+-]?[\d,.]+)\s*%", text)
+            if m:
+                payload["spread_pct"] = float(m.group(1).replace(",", ""))
+    except Exception:
+        pass
+
     # Valuation snapshot: P/E ratio 2026 *, 15.2x; Yield 2026 *, 3.44%
     if "P/E ratio 2026" in text or "15.2x" in text:
         # Try row-based: label in first cell, value in next
