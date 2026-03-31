@@ -530,9 +530,15 @@ def _write_preview_pptx(
     if display_ccy and display_ccy != curr:
         try:
             from src.utils.currency import convert
-            tgt = convert(tgt if isinstance(tgt, (int, float)) else None, curr, display_ccy) if tgt is not None else tgt
-            mcap = convert(mcap if isinstance(mcap, (int, float)) else None, curr, display_ccy) if mcap is not None else mcap
-            curr = display_ccy
+            tgt_conv = convert(tgt if isinstance(tgt, (int, float)) else None, curr, display_ccy) if tgt is not None else None
+            mcap_conv = convert(mcap if isinstance(mcap, (int, float)) else None, curr, display_ccy) if mcap is not None else None
+            # Only switch display currency when conversion succeeds (no invented FX fallbacks).
+            if tgt_conv is not None or mcap_conv is not None:
+                if tgt_conv is not None:
+                    tgt = tgt_conv
+                if mcap_conv is not None:
+                    mcap = mcap_conv
+                curr = display_ccy
         except Exception:
             pass
     ts = pn(tgt)

@@ -1,4 +1,8 @@
-"""Currency conversion utility (Yahoo FX with deterministic fallback)."""
+"""Currency conversion utility (Yahoo FX only).
+
+Governance: do not invent FX rates. If Yahoo FX is unavailable, return None
+and let callers decide how to display / warn.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +11,8 @@ import yfinance as yf
 
 
 @lru_cache(maxsize=32)
-def get_fx_rate(from_ccy: str, to_ccy: str) -> float:
-    """Get FX rate; return 1.0 for same currency."""
+def get_fx_rate(from_ccy: str, to_ccy: str) -> float | None:
+    """Get FX rate; return 1.0 for same currency; None when unavailable."""
     f = (from_ccy or "").strip().upper()
     t = (to_ccy or "").strip().upper()
     if not f or not t or f == t:
@@ -21,8 +25,7 @@ def get_fx_rate(from_ccy: str, to_ccy: str) -> float:
             return float(rate)
     except Exception:
         pass
-    fallback = {"SARUSD": 0.2667, "USDSAR": 3.75}
-    return float(fallback.get(f"{f}{t}", 1.0))
+    return None
 
 
 def convert(amount: float | None, from_ccy: str, to_ccy: str) -> float | None:
@@ -30,7 +33,10 @@ def convert(amount: float | None, from_ccy: str, to_ccy: str) -> float | None:
     if amount is None:
         return None
     try:
-        return float(amount) * get_fx_rate(from_ccy, to_ccy)
+        rate = get_fx_rate(from_ccy, to_ccy)
+        if rate is None:
+            return None
+        return float(amount) * float(rate)
     except Exception:
         return None
 
