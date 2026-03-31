@@ -5,6 +5,7 @@ Outputs: one earnings preview .pptx per ticker.
 """
 
 from __future__ import annotations
+import os
 import logging
 import uuid
 from copy import deepcopy
@@ -168,7 +169,9 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> list[StepResult]:
         qa_audit = r.data.get("qa_audit")
 
     # ── 11. Draft slide text (LLM LAST) ─────────────────────
-    if not skip_llm and memo_data:
+    # We draft PPTX sections (thesis / watch / catalysts / risks) via Gemini when an API key is present.
+    # `skip_llm` primarily affects slower, upstream summarization; drafting is small and makes slides higher quality.
+    if memo_data and os.environ.get("GEMINI_API_KEY"):
         try:
             from src.services.draft_pptx_sections import run as draft_sections
             headlines = []
