@@ -51,6 +51,22 @@ def run(ticker: str, company: CompanyMaster) -> StepResult:
                 slug = get_effective_marketscreener_slug(updated)
         if not slug:
             slug = ms.resolve_slug_from_search(ticker)
+            # Guardrail: validate weak search fallback before scraping multiple pages.
+            if slug:
+                try:
+                    from src.services.entity_resolution import validate_candidate_page
+                    from src.storage.db import reject_marketscreener_candidate as _reject
+                    vr = validate_candidate_page(
+                        company.model_dump(),
+                        slug,
+                        _base_url(slug).rstrip("/") + "/",
+                        cache_name=f"validate_search_pages_{ticker.replace('.', '_')}",
+                    )
+                    if not vr.valid:
+                        _reject(ticker, reason=vr.rejection_reason or "search_candidate_validation_failed", status="needs_review")
+                        slug = ""
+                except Exception:
+                    pass
             if not slug:
                 return StepResult(
                     step_name=STEP,

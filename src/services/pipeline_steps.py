@@ -123,6 +123,21 @@ def fetch_consensus(ticker: str, company: CompanyMaster) -> StepResult:
                 slug = get_effective_marketscreener_slug(updated)
         if not slug:
             slug = _ms_resolve_slug_from_search(ticker) or ""
+            # Guardrail: when using the weak search fallback, validate the candidate page
+            # against our expected entity before scraping numbers.
+            if slug:
+                try:
+                    from src.services.entity_resolution import validate_candidate_page
+                    from src.storage.db import reject_marketscreener_candidate as _reject
+                    candidate_url = f"https://www.marketscreener.com/quote/stock/{slug}/"
+                    vr = validate_candidate_page(company_dict, slug, candidate_url, cache_name=f"validate_search_{ticker.replace('.', '_')}")
+                    if not vr.valid:
+                        _reject(ticker, reason=vr.rejection_reason or "search_candidate_validation_failed", status="needs_review")
+                        slug = ""
+                except Exception:
+                    # If validation fails unexpectedly, proceed with slug but downstream
+                    # fingerprinting and QA can still suppress MS sections.
+                    pass
         ms, diagnostic = _ms_consensus(
             slug, company.currency, company.is_bank,
             ticker=ticker,
