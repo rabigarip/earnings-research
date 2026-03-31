@@ -221,3 +221,50 @@ def fetch_analyst_estimates(ticker: str, currency: str) -> list[FinancialPeriod]
         return out
     except Exception:
         return []
+
+
+# ── Earnings date (calendar) ────────────────────────────────────────────────
+
+def fetch_next_earnings_date(ticker: str) -> str | None:
+    """
+    Best-effort next earnings date from Yahoo (yfinance).
+    Returns ISO date string 'YYYY-MM-DD' when available, else None.
+    """
+    try:
+        yt = yf.Ticker(ticker)
+        cal = getattr(yt, "calendar", None)
+        # yfinance typically returns a DataFrame with index like 'Earnings Date'
+        if cal is not None and hasattr(cal, "empty") and not cal.empty:
+            try:
+                # Row may be 'Earnings Date' or 'Earnings Date' (case varies)
+                for key in ["Earnings Date", "Earnings date", "EarningsDate", "Earnings"]:
+                    if key in cal.index:
+                        v = cal.loc[key]
+                        # v can be a scalar, Series, or list-like of timestamps
+                        if hasattr(v, "tolist"):
+                            xs = [x for x in v.tolist() if x is not None]
+                        else:
+                            xs = [v] if v is not None else []
+                        for x in xs:
+                            # pandas Timestamp / datetime-like
+                            dt = getattr(x, "to_pydatetime", None)() if hasattr(x, "to_pydatetime") else x
+                            if hasattr(dt, "date"):
+                                return dt.date().isoformat()
+            except Exception:
+                pass
+        # Fallback: yfinance sometimes exposes earnings_dates dataframe
+        ed = getattr(yt, "earnings_dates", None)
+        if ed is not None and hasattr(ed, "empty") and not ed.empty:
+            # pick the first upcoming row
+            try:
+                idx = ed.index
+                if len(idx) > 0:
+                    dt = idx[0]
+                    dt = getattr(dt, "to_pydatetime", None)() if hasattr(dt, "to_pydatetime") else dt
+                    if hasattr(dt, "date"):
+                        return dt.date().isoformat()
+            except Exception:
+                pass
+    except Exception:
+        return None
+    return None

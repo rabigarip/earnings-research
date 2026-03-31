@@ -98,6 +98,7 @@ def _compute_memo(
     ms_quarterly_forecasts: dict | None,
     ms_eps_dividend_forecasts: dict | None,
     ms_calendar_events: dict | None,
+    yahoo_earnings_date: str | None = None,
     derived,
 ) -> dict:
     """
@@ -132,6 +133,9 @@ def _compute_memo(
         out["next_earnings_date"] = ms_calendar_events.get("next_expected_earnings_date")
         out["next_earnings_label"] = ms_calendar_events.get("next_expected_earnings_label")
         out["next_earnings_time"] = ms_calendar_events.get("next_expected_earnings_time")
+    # Yahoo fallback if MarketScreener calendar is blocked/unavailable.
+    if not out.get("next_earnings_date") and yahoo_earnings_date:
+        out["next_earnings_date"] = yahoo_earnings_date
 
     # Implied upside / spread (Source: /consensus/)
     if consensus_summary and consensus_summary.get("upside_to_average_target_pct") is not None:
@@ -459,6 +463,7 @@ def get_memo_computed_for_preview(
         ms_quarterly_forecasts=ms_quarterly_forecasts,
         ms_eps_dividend_forecasts=ms_eps_dividend_forecasts,
         ms_calendar_events=ms_calendar_events,
+        yahoo_earnings_date=None,
         derived=derived,
     )
 
@@ -504,6 +509,7 @@ def run(
     recent_context_articles_qa: list[dict] = (),
     cross_company_contamination_detected: bool = False,
     identical_to_previous_ticker_payload: bool = False,
+    yahoo_earnings_date: str | None = None,
 ) -> StepResult:
     with StepTimer() as t:
         warnings: list[str] = []
@@ -637,6 +643,7 @@ def run(
             ms_quarterly_forecasts=ms_quarterly_forecasts,
             ms_eps_dividend_forecasts=ms_eps_dividend_forecasts,
             ms_calendar_events=ms_calendar_events,
+            yahoo_earnings_date=yahoo_earnings_date,
             derived=derived,
         )
 

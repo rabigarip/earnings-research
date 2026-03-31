@@ -18,7 +18,7 @@ from src.services import (
 )
 from src.services.pipeline_steps import (
     validate_ticker, fetch_quote, fetch_financials,
-    fetch_consensus, fetch_news, reconcile, qa_validate,
+    fetch_consensus, fetch_news, fetch_earnings_date, reconcile, qa_validate,
 )
 from src.services.build_report_payload import get_memo_computed_for_preview
 from src.services.ms_payload_fingerprint import save_fingerprint as save_ms_fingerprint
@@ -88,6 +88,18 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> list[StepResult]:
     _collect(r, results)
     ms_blocks = deepcopy(r.data) if isinstance(r.data, dict) else {}
 
+    # ── 5c. Yahoo earnings date fallback (helps when MS /calendar/ blocked) ──
+    r = fetch_earnings_date(ticker)
+    _collect(r, results)
+    yahoo_earnings_date = None
+    try:
+        yahoo_earnings_date = (r.data or {}).get("next_earnings_date") if isinstance(r.data, dict) else None
+    except Exception:
+        yahoo_earnings_date = None
+    if yahoo_earnings_date and (not (ms_blocks.get("ms_calendar_events") or {}).get("next_expected_earnings_date")):
+        # Store as memo-only hint; do not pretend this is MarketScreener data.
+        ms_blocks["yahoo_earnings_date"] = yahoo_earnings_date
+
     # ── 6. Fetch news ─────────────────────────────────────────
     r = fetch_news(ticker, company)
     _collect(r, results)
@@ -126,6 +138,8 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> list[StepResult]:
         ms_calendar_events=ms_blocks.get("ms_calendar_events"),
         ms_quarterly_results_table=ms_blocks.get("ms_quarterly_results_table"),
         derived=derived, news_items=news_items, news_summary=summary,
+        # Memo-only fallback (Yahoo calendar)
+        yahoo_earnings_date=ms_blocks.get("yahoo_earnings_date"),
         duplicate_screening_log=news_data.get("duplicate_screening_log") or [],
         step_log=[s.to_log_dict() for s in results],
         recent_context_query_log=news_data.get("recent_context_query_log") or [],

@@ -19,6 +19,7 @@ from src.providers.yahoo import (
     fetch_quote as _yahoo_quote,
     fetch_financials as _yahoo_fin,
     fetch_analyst_estimates as _yahoo_est,
+    fetch_next_earnings_date as _yahoo_earnings_date,
 )
 from src.providers.marketscreener import fetch_consensus as _ms_consensus
 from src.providers.marketscreener_pages import resolve_slug_from_search as _ms_resolve_slug_from_search
@@ -220,6 +221,33 @@ def fetch_news(ticker: str, company: CompanyMaster) -> StepResult:
             },
             elapsed_seconds=t.elapsed,
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 5b. fetch_earnings_date (Yahoo calendar fallback)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def fetch_earnings_date(ticker: str) -> StepResult:
+    """Best-effort next earnings date from Yahoo calendar."""
+    with StepTimer() as t:
+        d = _yahoo_earnings_date(ticker)
+    if not d:
+        return StepResult(
+            step_name="fetch_earnings_date",
+            status=Status.PARTIAL,
+            source="yahoo",
+            message="No earnings date from Yahoo calendar",
+            data=None,
+            elapsed_seconds=t.elapsed,
+        )
+    return StepResult(
+        step_name="fetch_earnings_date",
+        status=Status.SUCCESS,
+        source="yahoo",
+        message=f"Earnings date (Yahoo): {d}",
+        data={"next_earnings_date": d},
+        elapsed_seconds=t.elapsed,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
