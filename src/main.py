@@ -115,18 +115,8 @@ def main() -> None:
         if not args.ticker:
             ap.error("--ticker is required for preview mode")
         from src.pipeline import run_preview
-        # Keep outputs clean: remove older PPTX artifacts before generating the new report.
-        try:
-            from src.config import report_output_dir
-            out_dir = report_output_dir()
-            if out_dir.exists():
-                for p in out_dir.glob("*.pptx"):
-                    try:
-                        p.unlink()
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        # Do not delete outputs here. Each run writes a unique run_id-based filename,
+        # and deleting can break downloads for recent runs.
         results = run_preview(args.ticker, skip_llm=args.skip_llm)
 
         from src.models.step_result import Status
