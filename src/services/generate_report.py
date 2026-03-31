@@ -763,14 +763,12 @@ def run(payload: ReportPayload, memo_data: dict | None = None, qa_audit: dict | 
         try:
             iv_style = _iv_fallback_style()
             ticker = payload.company.ticker
+            run_id = (getattr(payload, "run_id", "") or "").strip()
             out_dir = report_output_dir()
-            # Keep outputs clean: delete prior artifacts for this ticker.
-            for old in out_dir.glob(f"{ticker}_preview_*.pptx"):
-                try:
-                    old.unlink()
-                except Exception:
-                    pass
-            out_path = out_dir / f"{ticker}_preview_{iv_style}.pptx"
+            # IMPORTANT: do not overwrite previous runs. Otherwise a later partial run
+            # can overwrite a good report for the same ticker, making downloads look "empty".
+            suffix = f"{ticker}_{run_id}_preview_{iv_style}.pptx" if run_id else f"{ticker}_preview_{iv_style}.pptx"
+            out_path = out_dir / suffix
             iv_text, watch = _iv_text_and_watch(payload, memo_data, iv_style)
             quality_flags: list[str] = []
             if qa_audit:
