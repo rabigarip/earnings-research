@@ -204,13 +204,32 @@ def download_report(run_id: str):
     return response
 
 
-def _run_preview_and_response(ticker: str, skip_llm: bool = True) -> dict:
+def _readiness_error_detail(results: list) -> dict | None:
+    """If report_readiness failed, return a structured error for HTTP 422."""
+    from src.models.step_result import Status
+
+    for r in results:
+        if r.step_name == "report_readiness" and r.status == Status.FAILED:
+            d = r.data if isinstance(r.data, dict) else {}
+            return {
+                "error": "report_not_ready",
+                "summary": d.get("summary") or (r.error_detail or "") or r.message,
+                "reasons": d.get("reasons", []),
+                "step_failures": d.get("step_failures", []),
+            }
+    return None
+
+
+def _run_preview_and_response(ticker: str, skip_llm: bool = True, *, raise_on_readiness: bool = True) -> dict:
     """Run pipeline and return frontend-shaped response: report row + payload + steps."""
     from src.pipeline import run_preview
     from src.models.step_result import Status
     from src.storage.db import load_company, load_run
 
     results = run_preview(ticker, skip_llm=skip_llm)
+    err = _readiness_error_detail(results)
+    if err and raise_on_readiness:
+        raise HTTPException(status_code=422, detail=err)
     statuses = {r.status for r in results}
     overall = "partial" if (Status.FAILED in statuses or Status.PARTIAL in statuses) else "success"
     run_id = ""
@@ -248,7 +267,10 @@ def _run_preview_and_response(ticker: str, skip_llm: bool = True) -> dict:
     }
     if run:
         row["created"] = run.get("started_at") or row["created"]
-    return {"report": row, "payload": payload, "steps": steps}
+    out: dict = {"report": row, "payload": payload, "steps": steps}
+    if not raise_on_readiness:
+        out["readiness_error"] = err
+    return out
 
 
 class CreateReportRequest(BaseModel):
@@ -301,6 +323,9 @@ def run_preview_api(req: PreviewRequest):
         raise HTTPException(status_code=400, detail="ticker is required")
 
     results = run_preview(ticker, skip_llm=req.skip_llm)
+    err = _readiness_error_detail(results)
+    if err:
+        raise HTTPException(status_code=422, detail=err)
 
     # Overall status
     statuses = {r.status for r in results}
@@ -343,7 +368,7 @@ def batch_preview_api(req: BatchPreviewRequest):
 
     results = []
     for t in tickers:
-        results.append(_run_preview_and_response(t, skip_llm=req.skip_llm))
+        results.append(_run_preview_and_response(t, skip_llm=req.skip_llm, raise_on_readiness=False))
     return {"results": results}
 
 

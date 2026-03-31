@@ -22,6 +22,7 @@ from src.services.pipeline_steps import (
 )
 from src.services.build_report_payload import get_memo_computed_for_preview
 from src.services.ms_payload_fingerprint import save_fingerprint as save_ms_fingerprint
+from src.services.report_readiness import run_readiness_check
 from src.storage.db import save_run
 
 logger = logging.getLogger(__name__)
@@ -181,6 +182,13 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> list[StepResult]:
     if r.status == Status.SUCCESS and isinstance(r.data, dict):
         memo_data = r.data.get("memo_data")
         qa_audit = r.data.get("qa_audit")
+
+    # ── 10b. Report readiness (fail loud before PPTX) ─────────
+    r = run_readiness_check(payload, results)
+    _collect(r, results)
+    if r.status == Status.FAILED:
+        _finish(run_id, ticker, t0, results)
+        return results
 
     # ── 11. Draft slide text (LLM LAST) ─────────────────────
     # We draft PPTX sections (thesis / watch / catalysts / risks) via Gemini when an API key is present.

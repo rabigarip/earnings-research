@@ -103,6 +103,16 @@ def validate_candidate_page(
     title = _page_title(result.soup)
     combined = f"{title} {text}"
 
+    # Strong match: ISIN appears on the quote page (slug often omits English tokens for Asian listings).
+    if isin and _has_isin_on_page(combined, isin):
+        if country == "sa" or "saudi" in country or "tadawul" in exchange:
+            if not any(m in combined for m in SAUDI_COUNTRY_MARKERS):
+                return ValidationResult(
+                    valid=False, confidence=0.0,
+                    rejection_reason="expected_saudi_tadawul_not_found_on_page",
+                )
+        return ValidationResult(valid=True, confidence=0.88, rejection_reason="")
+
     if country == "sa" or "saudi" in country or "tadawul" in exchange:
         if not any(m in combined for m in SAUDI_COUNTRY_MARKERS):
             return ValidationResult(valid=False, confidence=0.0, rejection_reason="expected_saudi_tadawul_not_found_on_page")
