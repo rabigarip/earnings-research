@@ -48,11 +48,11 @@ def test_sabic_re_resolution_rejects_wrong_entity_amd(db_with_sabic):
     When SABIC re-resolution returns AMD (wrong entity), validation must reject it
     and the cached SABIC mapping must remain unchanged.
     """
-    # 1. Resolve by ISIN returns wrong entity (AMD) - simulate MS search returning wrong first result
-    def mock_resolve_by_isin(isin: str):
+    # 1. ISIN search lists wrong entity first (AMD) — same as first row in MS results table
+    def mock_list_candidates(isin: str, max_results: int = 8):
         if isin and isin.strip():
-            return (AMD_SLUG, AMD_URL)
-        return None
+            return [(AMD_SLUG, AMD_URL)]
+        return []
 
     # 2. Fetch returns a page that looks like a stock page but has no SABIC/Saudi content
     def mock_fetch_with_diagnostics(url: str, cache_name: str):
@@ -74,8 +74,13 @@ def test_sabic_re_resolution_rejects_wrong_entity_amd(db_with_sabic):
             from_cache=False,
         )
 
-    with patch("src.services.entity_resolution.resolve_marketscreener_by_isin", side_effect=mock_resolve_by_isin), \
-         patch("src.services.entity_resolution._fetch_page_with_diagnostics", side_effect=mock_fetch_with_diagnostics):
+    with patch(
+        "src.services.entity_resolution.list_marketscreener_candidates_for_isin",
+        side_effect=mock_list_candidates,
+    ), patch(
+        "src.services.entity_resolution._fetch_page_with_diagnostics",
+        side_effect=mock_fetch_with_diagnostics,
+    ):
         invalidate_marketscreener_cache(SABIC_TICKER)
         ensure_marketscreener_cached(SABIC_TICKER, company=None)
 
@@ -99,10 +104,10 @@ def test_sabic_validation_rejects_implausible_slug_even_with_fake_saudi_page(db_
     """
     For Saudi entities, slug plausibility is checked: AMD-* must be rejected.
     """
-    def mock_resolve_by_isin(isin: str):
+    def mock_list_candidates(isin: str, max_results: int = 8):
         if isin and isin.strip():
-            return (AMD_SLUG, AMD_URL)
-        return None
+            return [(AMD_SLUG, AMD_URL)]
+        return []
 
     # Page that mentions Saudi (so name/country could pass) but slug is still AMD
     def mock_fetch_with_diagnostics(url: str, cache_name: str):
@@ -116,8 +121,13 @@ def test_sabic_validation_rejects_implausible_slug_even_with_fake_saudi_page(db_
             from_cache=False,
         )
 
-    with patch("src.services.entity_resolution.resolve_marketscreener_by_isin", side_effect=mock_resolve_by_isin), \
-         patch("src.services.entity_resolution._fetch_page_with_diagnostics", side_effect=mock_fetch_with_diagnostics):
+    with patch(
+        "src.services.entity_resolution.list_marketscreener_candidates_for_isin",
+        side_effect=mock_list_candidates,
+    ), patch(
+        "src.services.entity_resolution._fetch_page_with_diagnostics",
+        side_effect=mock_fetch_with_diagnostics,
+    ):
         invalidate_marketscreener_cache(SABIC_TICKER)
         ensure_marketscreener_cached(SABIC_TICKER, company=None)
 

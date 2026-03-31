@@ -38,12 +38,17 @@ except ImportError:
 
 
 def _ensure_db() -> None:
+    """Create DB if missing, run migrations, then always merge company_master.json (Render + local).
+
+    Without re-seed, production SQLite keeps stale rows when git adds marketscreener_id slugs.
+    seed_companies uses ON CONFLICT DO UPDATE — safe on every process start (~500 upserts).
+    """
     from src.storage.db import init_db, seed_companies, ensure_migrations, _db_path
     if not _db_path().exists():
         init_db()
-        seed_companies()
     else:
         ensure_migrations()
+    seed_companies()
 
 
 @asynccontextmanager
@@ -254,6 +259,26 @@ def _run_preview_and_response(ticker: str, skip_llm: bool = True, *, raise_on_re
                 break
 
     steps = [r.to_log_dict() for r in results]
+
+    # Do not return 200 if the client expects a file: generate_report failed → download would 404.
+    if raise_on_readiness:
+        gen = next((s for s in steps if s.get("step_name") == "generate_report"), None)
+        if gen and gen.get("status") == "failed":
+            reasons = []
+            if gen.get("error_detail"):
+                reasons.append(str(gen["error_detail"]))
+            if gen.get("message") and gen.get("message") not in reasons:
+                reasons.append(str(gen["message"]))
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "pptx_generation_failed",
+                    "summary": gen.get("message") or "PPTX file was not created",
+                    "reasons": reasons or ["Report generation step failed"],
+                    "step_failures": [],
+                },
+            )
+
     run = load_run(run_id) if run_id else None
     company = load_company(ticker) if ticker else None
     row = _run_to_report_row(run) if run else {

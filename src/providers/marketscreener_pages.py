@@ -362,26 +362,46 @@ def resolve_slug_from_search(ticker: str) -> str | None:
     return None
 
 
+def list_marketscreener_candidates_for_isin(
+    isin: str, *, max_results: int = 8,
+) -> list[tuple[str, str]]:
+    """
+    All distinct equity slugs from an ISIN search (first hit may be wrong entity).
+    Returns [(slug, company_base_url), ...].
+    """
+    isin = (isin or "").strip()
+    if not isin:
+        return []
+    url = f"https://www.marketscreener.com/search/?q={isin}"
+    cache_slug = "search_isin_" + re.sub(r"[^a-zA-Z0-9]", "_", isin)[:50]
+    soup, errors = _fetch_page(url, cache_slug)
+    if soup is None:
+        return []
+    raw = _extract_search_result_slugs(soup)
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+    for slug, _text in raw:
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        base = f"https://www.marketscreener.com/quote/stock/{slug}/"
+        out.append((slug, base))
+        if len(out) >= max_results:
+            break
+    return out
+
+
 def resolve_marketscreener_by_isin(isin: str) -> tuple[str, str] | None:
     """
     Resolve MarketScreener company URL by exact ISIN (primary lookup).
     GET search/?q={ISIN}, parse first result from search results table.
     Returns (slug, full_company_url) or None.
     """
-    isin = (isin or "").strip()
-    if not isin:
+    cands = list_marketscreener_candidates_for_isin(isin, max_results=1)
+    if not cands:
         return None
-    url = f"https://www.marketscreener.com/search/?q={isin}"
-    cache_slug = "search_isin_" + re.sub(r"[^a-zA-Z0-9]", "_", isin)[:50]
-    soup, errors = _fetch_page(url, cache_slug)
-    if soup is None:
-        return None
-    results = _extract_search_result_slugs(soup)
-    if results:
-        slug = results[0][0]
-        base = f"https://www.marketscreener.com/quote/stock/{slug}/"
-        return (slug, base)
-    return None
+    slug, base = cands[0]
+    return (slug, base)
 
 
 # ─── Summary page (/{SLUG}/) — consensus box + valuation snapshot ───────────

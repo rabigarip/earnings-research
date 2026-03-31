@@ -1,12 +1,16 @@
 # Render Blueprint — deploy as Web Service
 # Docs: https://render.com/docs/blueprint-spec
+#
+# Startup merges data/company_master.json into SQLite every boot (curated MS slugs, etc.).
+# Frontend: render_build.sh runs "npm run build" only if npm exists; otherwise commit static/.
+# Same-origin UI: build frontend with VITE_API_BASE_URL empty, or set in dashboard for split domains.
 services:
   - type: web
     name: earnings-research-api
     runtime: python
     region: oregon
 
-    buildCommand: pip install -r requirements.txt
+    buildCommand: chmod +x scripts/render_build.sh && bash scripts/render_build.sh
     startCommand: uvicorn src.api:app --host 0.0.0.0 --port $PORT
 
     envVars:
@@ -17,6 +21,9 @@ services:
         value: /tmp/earnings-data/earnings.db
       - key: REPORT_OUTPUT_DIR
         value: /tmp/earnings-outputs
+      # Allow previews when Yahoo has a quote but financials/MS are thin (maximize ticker coverage)
+      - key: REPORT_READINESS_MODE
+        value: permissive
       # Optional: restrict CORS to your frontend (comma-separated origins)
       # - key: CORS_ORIGINS
       #   value: https://your-app.onrender.com,https://your-custom-domain.com

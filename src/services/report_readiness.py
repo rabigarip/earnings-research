@@ -14,6 +14,25 @@ if TYPE_CHECKING:
 
 STEP = "report_readiness"
 
+
+def _readiness_permissive() -> bool:
+    """When True, skip data-sparsity checks so Yahoo-only (or thin MS) previews can complete."""
+    import os
+
+    env = (os.environ.get("REPORT_READINESS_MODE") or "").strip().lower()
+    if env == "permissive":
+        return True
+    if env == "strict":
+        return False
+    try:
+        from src.config import cfg
+
+        m = (cfg().get("report", {}) or {}).get("readiness_mode", "strict")
+        return (m or "strict").strip().lower() == "permissive"
+    except Exception:
+        return False
+
+
 # If any of these steps failed, the run cannot produce a trustworthy preview.
 _BLOCKING_STEPS = frozenset(
     {
@@ -102,24 +121,29 @@ def run_readiness_check(payload: ReportPayload, step_results: list[StepResult]) 
             }
         )
 
-    fq_failed = any(r.step_name == "fetch_quote" and r.status == Status.FAILED for r in step_results)
+    fq_failed = any(
+        r.step_name == "fetch_quote" and r.status == Status.FAILED for r in step_results
+    )
     if not fq_failed and not _has_quote(payload):
         reasons.append(
             "No usable Yahoo quote (price or market cap). Cover slide and sizing cannot be shown reliably."
         )
 
-    fin_failed = any(r.step_name == "fetch_financials" and r.status == Status.FAILED for r in step_results)
-    if not _has_yahoo_financials(payload) and not _has_ms_forecast_data(payload):
-        if fin_failed:
-            reasons.append(
-                "Yahoo Finance financials failed (no periods) and MarketScreener did not yield usable "
-                "consensus/forecast/valuation tables — the preview would be mostly empty."
-            )
-        else:
-            reasons.append(
-                "No quarterly/annual actuals and no MarketScreener consensus/forecast blocks — "
-                "executive summary and key tables would have no numbers."
-            )
+    if not _readiness_permissive():
+        fin_failed = any(
+            r.step_name == "fetch_financials" and r.status == Status.FAILED for r in step_results
+        )
+        if not _has_yahoo_financials(payload) and not _has_ms_forecast_data(payload):
+            if fin_failed:
+                reasons.append(
+                    "Yahoo Finance financials failed (no periods) and MarketScreener did not yield usable "
+                    "consensus/forecast/valuation tables — the preview would be mostly empty."
+                )
+            else:
+                reasons.append(
+                    "No quarterly/annual actuals and no MarketScreener consensus/forecast blocks — "
+                    "executive summary and key tables would have no numbers."
+                )
 
     with StepTimer() as t:
         if not reasons:

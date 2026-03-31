@@ -163,5 +163,8 @@ path = "data/earnings.db"
 
 [report]
 output_dir = "outputs"
+# readiness_mode: strict = block thin Yahoo+MS decks; permissive = only hard pipeline failures (mapping, quote, build, QA).
+# Override on deploy: REPORT_READINESS_MODE=permissive
+readiness_mode = "strict"
 # Set to true to also write QA audit as JSON (for debugging). Primary review format is QA .docx.
 qa_audit_json = false

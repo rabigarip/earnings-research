@@ -9,6 +9,69 @@ function extractFilename(contentDisposition, fallback) {
   return decodeURIComponent(m[1].replace(/"/g, "").trim());
 }
 
+/** Turn any JSON error leaf into display text (never rely on implicit object stringification). */
+function toErrorText(value) {
+  if (value == null || value === "") return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map(toErrorText).filter(Boolean).join("; ");
+  }
+  if (typeof value === "object") {
+    if (typeof value.msg === "string") return value.msg;
+    if (typeof value.message === "string") return value.message;
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+/** FastAPI may return detail as string, object (e.g. 422 report_not_ready), or validation array. */
+function formatApiErrorDetail(detail) {
+  if (detail == null || detail === "") return "";
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((d) => toErrorText(typeof d === "string" ? d : d?.msg ?? d?.message ?? d))
+      .filter(Boolean)
+      .join("; ");
+  }
+  if (typeof detail === "object") {
+    const parts = [];
+    const sum = toErrorText(detail.summary);
+    if (sum) parts.push(sum);
+    if (Array.isArray(detail.reasons) && detail.reasons.length) {
+      for (const r of detail.reasons) {
+        const t = toErrorText(r);
+        if (t) parts.push(t);
+      }
+    }
+    if (parts.length) return parts.join(" ");
+    if (typeof detail.error === "string" && detail.error.trim()) {
+      return detail.error.trim();
+    }
+    const m = toErrorText(detail.message);
+    if (m) return m;
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return "Request failed";
+    }
+  }
+  return String(detail);
+}
+
+function errorToUserMessage(e) {
+  if (e == null) return "Unexpected error";
+  if (typeof e === "string") return e;
+  if (e instanceof Error && typeof e.message === "string") return e.message;
+  if (typeof e === "object" && typeof e.message === "string") return e.message;
+  return toErrorText(e);
+}
+
 export default function App() {
   const [ticker, setTicker] = useState("2222.SR");
   const [skipLlm, setSkipLlm] = useState(false);
@@ -84,7 +147,10 @@ export default function App() {
       });
       if (!createRes.ok) {
         const err = await createRes.json().catch(() => ({}));
-        throw new Error(err?.detail || "Failed to generate report");
+        const msg = toErrorText(
+          formatApiErrorDetail(err?.detail) || "Failed to generate report",
+        );
+        throw new Error(msg);
       }
 
       const created = await createRes.json();
@@ -97,7 +163,10 @@ export default function App() {
       const dlRes = await fetch(`${API_BASE}/api/reports/${runId}/download?t=${Date.now()}`);
       if (!dlRes.ok) {
         const err = await dlRes.json().catch(() => ({}));
-        throw new Error(err?.detail || "Failed to download report");
+        const msg = toErrorText(
+          formatApiErrorDetail(err?.detail) || "Failed to download report",
+        );
+        throw new Error(msg);
       }
 
       const blob = await dlRes.blob();
@@ -115,7 +184,7 @@ export default function App() {
       URL.revokeObjectURL(url);
       setStatus(`Done. Downloaded ${filename}`);
     } catch (e) {
-      setError(e?.message || "Unexpected error");
+      setError(errorToUserMessage(e));
       setStatus("");
     } finally {
       setLoading(false);

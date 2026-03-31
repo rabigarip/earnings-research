@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 
 from src.models.company import CompanyMaster
@@ -103,3 +104,23 @@ def test_readiness_fails_sparse_no_yahoo_no_ms():
     )
     assert r.status == Status.FAILED
     assert any("no numbers" in x.lower() or "consensus" in x.lower() for x in r.data.get("reasons", []))
+
+
+def test_readiness_permissive_allows_sparse_yahoo_only():
+    """REPORT_READINESS_MODE=permissive skips thin-data check when quote exists."""
+    old = os.environ.get("REPORT_READINESS_MODE")
+    try:
+        os.environ["REPORT_READINESS_MODE"] = "permissive"
+        r = run_readiness_check(
+            _payload(
+                quote=QuoteSnapshot(ticker="2010.SR", price=1.0),
+                quarterly=[],
+            ),
+            [],
+        )
+        assert r.status == Status.SUCCESS
+    finally:
+        if old is None:
+            os.environ.pop("REPORT_READINESS_MODE", None)
+        else:
+            os.environ["REPORT_READINESS_MODE"] = old

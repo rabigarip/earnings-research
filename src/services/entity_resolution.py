@@ -22,7 +22,7 @@ from src.storage.db import (
     invalidate_marketscreener_cache as db_invalidate_marketscreener_cache,
     reject_marketscreener_candidate as db_reject_marketscreener_candidate,
 )
-from src.providers.marketscreener_pages import resolve_marketscreener_by_isin
+from src.providers.marketscreener_pages import list_marketscreener_candidates_for_isin
 from src.providers.marketscreener import _fetch_page_with_diagnostics, _is_homepage_detailed
 
 
@@ -207,27 +207,32 @@ def ensure_marketscreener_cached(ticker: str, company: dict | None = None) -> di
     status = (row.get("marketscreener_status") or "").strip().lower()
     if url and status == "ok":
         return row
-    resolved = resolve_marketscreener_by_isin(isin)
-    if not resolved:
+    candidates = list_marketscreener_candidates_for_isin(isin, max_results=8)
+    if not candidates:
         return row
-    slug, company_url = resolved
-    validation = validate_candidate_page(row, slug, company_url, cache_name=f"validate_{ticker.replace('.', '_')}")
-    if not validation.valid:
-        db_reject_marketscreener_candidate(ticker, reason=validation.rejection_reason or "validation_failed", status="needs_review")
+    last_reason = ""
+    for slug, company_url in candidates:
+        cache_name = f"validate_{ticker.replace('.', '_')}_{slug[:24]}"
+        validation = validate_candidate_page(row, slug, company_url, cache_name=cache_name)
+        if not validation.valid:
+            last_reason = validation.rejection_reason or "validation_failed"
+            continue
+        if validation.confidence < CONFIDENCE_THRESHOLD_ACCEPT:
+            last_reason = f"confidence_{validation.confidence:.2f}_below_accept_threshold"
+            continue
+        allow, overwrite_reason = should_overwrite_existing_mapping(row, validation.confidence)
+        if not allow:
+            last_reason = overwrite_reason
+            continue
+        now = datetime.now(timezone.utc).isoformat()
+        update_company_marketscreener(
+            ticker=ticker, marketscreener_company_url=company_url,
+            marketscreener_symbol=row.get("ticker") or ticker,
+            marketscreener_status="ok", last_verified=now, marketscreener_id=slug,
+        )
         return load_company(ticker)
-    if validation.confidence < CONFIDENCE_THRESHOLD_ACCEPT:
-        db_reject_marketscreener_candidate(ticker, reason=f"confidence_{validation.confidence:.2f}_below_accept_threshold", status="needs_review")
-        return load_company(ticker)
-    allow, overwrite_reason = should_overwrite_existing_mapping(row, validation.confidence)
-    if not allow:
-        db_reject_marketscreener_candidate(ticker, reason=overwrite_reason, status="needs_review")
-        return load_company(ticker)
-    now = datetime.now(timezone.utc).isoformat()
-    update_company_marketscreener(
-        ticker=ticker, marketscreener_company_url=company_url,
-        marketscreener_symbol=row.get("ticker") or ticker,
-        marketscreener_status="ok", last_verified=now, marketscreener_id=slug,
-    )
+    if last_reason:
+        db_reject_marketscreener_candidate(ticker, reason=last_reason[:500], status="needs_review")
     return load_company(ticker)
 
 
