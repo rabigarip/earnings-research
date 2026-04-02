@@ -276,6 +276,41 @@ def seed_companies() -> int:
     return n
 
 
+def insert_discovered_company(
+    ticker: str,
+    company_name: str,
+    company_name_long: str = "",
+    exchange: str = "",
+    country: str = "",
+    currency: str = "",
+    isin: str = "",
+    sector: str = "",
+    industry: str = "",
+    is_bank: bool = False,
+) -> dict | None:
+    """Insert a company auto-discovered from yfinance (not in seed).
+    Returns the inserted row as dict, or None on failure.
+    Does NOT overwrite existing rows."""
+    conn = get_conn()
+    try:
+        conn.execute("""
+            INSERT OR IGNORE INTO company_master
+                (ticker, company_name, company_name_long, exchange, country,
+                 currency, isin, sector, industry, is_bank)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+        """, (
+            ticker, company_name, company_name_long, exchange, country,
+            currency, isin, sector, industry, int(is_bank),
+        ))
+        conn.commit()
+    except Exception as exc:
+        log.warning("insert_discovered_company failed for %s: %s", ticker, exc)
+        conn.close()
+        return None
+    conn.close()
+    return load_company(ticker)
+
+
 def load_company(ticker: str) -> dict | None:
     conn = get_conn()
     row = conn.execute(

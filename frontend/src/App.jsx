@@ -73,7 +73,7 @@ function errorToUserMessage(e) {
 }
 
 export default function App() {
-  const [ticker, setTicker] = useState("2222.SR");
+  const [ticker, setTicker] = useState("");
   const [skipLlm, setSkipLlm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
@@ -196,7 +196,7 @@ export default function App() {
       <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-xl p-6">
         <h1 className="text-2xl font-semibold mb-2">Download Earnings Report</h1>
         <p className="text-sm text-slate-400 mb-6">
-          Enter a ticker, generate report, and download it directly.
+          Enter any ticker (e.g. AAPL, MSFT, 2222.SR), generate report, and download.
         </p>
 
         <label className="block text-sm mb-2 text-slate-300" htmlFor="ticker-input">
@@ -251,7 +251,7 @@ export default function App() {
                 pickSuggestion(suggestions[highlight]);
               }
             }}
-            placeholder="Type ticker or company name…"
+            placeholder="e.g. AAPL, TSLA, 2222.SR …"
             className="w-full rounded-lg bg-slate-950 border border-slate-700 px-3 py-2 outline-none focus:border-blue-500"
           />
           {suggestOpen && (suggestions.length > 0 || suggestLoading || ticker.trim()) ? (
@@ -264,7 +264,7 @@ export default function App() {
                 <li className="px-3 py-2 text-sm text-slate-500">Loading…</li>
               ) : null}
               {!suggestLoading && suggestions.length === 0 && ticker.trim() ? (
-                <li className="px-3 py-2 text-sm text-slate-500">No matching companies</li>
+                <li className="px-3 py-2 text-sm text-slate-500">No saved matches — type any valid ticker and generate</li>
               ) : null}
               {suggestions.map((row, i) => (
                 <li

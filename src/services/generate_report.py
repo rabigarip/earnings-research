@@ -477,23 +477,21 @@ def _write_preview_pptx(
                 pass
 
         p = tf.paragraphs[0]
-        p.text = lines[0]
-        _style_paragraph(p)
-        r = p.runs[0]
-        r.font.name = "Arial"
-        r.font.size = Pt(sz)
-        r.font.bold = bold
-        r.font.color.rgb = rgb
+        def _set_para(para, line_text):
+            para.text = line_text
+            _style_paragraph(para)
+            if para.runs:
+                run = para.runs[0]
+                run.font.name = "Arial"
+                run.font.size = Pt(sz)
+                run.font.bold = bold
+                run.font.color.rgb = rgb
+
+        _set_para(p, lines[0])
 
         for ln in lines[1:]:
             pp = tf.add_paragraph()
-            pp.text = ln
-            _style_paragraph(pp)
-            rr = pp.runs[0]
-            rr.font.name = "Arial"
-            rr.font.size = Pt(sz)
-            rr.font.bold = bold
-            rr.font.color.rgb = rgb
+            _set_para(pp, ln)
 
     def rect(sl, x, y, w, h, fill, line=None, lw=1.0):
         sh = sl.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, y, w, h)
@@ -754,6 +752,34 @@ def _write_preview_pptx(
             sz=10,
             rgb=MUTED,
         )
+
+    # ── Slide 4: Important Disclosures (dark theme) ───────────
+    s4 = prs.slides.add_slide(blank)
+    rect(s4, 0, 0, prs.slide_width, prs.slide_height, DARK)
+    tx(s4, Inches(0), Inches(1.0), prs.slide_width, Inches(0.7), "Important Disclosures", sz=32, bold=True, rgb=LIGHT, al=PP_ALIGN.CENTER)
+    rect(s4, Inches(5.5), Inches(1.7), Inches(2.3), Inches(0.06), GOLD)
+    disclosures = (
+        "This document is provided for informational purposes only and does not constitute an offer, "
+        "solicitation, or recommendation to buy or sell any security. The information contained herein "
+        "is based on sources believed to be reliable, but no representation or warranty, express or "
+        "implied, is made regarding its accuracy, completeness, or timeliness.\n\n"
+        "All financial data, estimates, and projections are derived from publicly available sources "
+        "including MarketScreener and Yahoo Finance, supplemented by AI-generated qualitative analysis. "
+        "Past performance is not indicative of future results. Investors should conduct their own due "
+        "diligence and consult with a qualified financial advisor before making investment decisions.\n\n"
+        "This report does not take into account the specific investment objectives, financial situation, "
+        "or particular needs of any individual investor. The securities discussed may not be suitable for "
+        "all investors. Investing involves risks, including the possible loss of principal."
+    )
+    tx(s4, Inches(1.5), Inches(2.2), Inches(10.3), Inches(3.5), disclosures, sz=12, rgb=MUTED, line_spacing=1.2)
+    gen_ts = datetime.now().strftime("%d %B %Y at %H:%M UTC")
+    tx(s4, Inches(1.5), Inches(5.8), Inches(10.3), Inches(0.5),
+       f"Data Sources: MarketScreener, Yahoo Finance, Google Gemini  |  Generated: {gen_ts}",
+       sz=10, rgb=RGBColor(0x60, 0x66, 0x70), al=PP_ALIGN.CENTER)
+    tx(s4, Inches(0), Inches(6.8), prs.slide_width, Inches(0.3),
+       f"\u00a9 {datetime.now().year} Earnings Research  |  All rights reserved",
+       sz=10, rgb=RGBColor(0x60, 0x66, 0x70), al=PP_ALIGN.CENTER)
+
     path.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(path))
 
@@ -763,11 +789,9 @@ def run(payload: ReportPayload, memo_data: dict | None = None, qa_audit: dict | 
         try:
             iv_style = _iv_fallback_style()
             ticker = payload.company.ticker
-            run_id = (getattr(payload, "run_id", "") or "").strip()
             out_dir = report_output_dir()
-            # IMPORTANT: do not overwrite previous runs. Otherwise a later partial run
-            # can overwrite a good report for the same ticker, making downloads look "empty".
-            suffix = f"{ticker}_{run_id}_preview_{iv_style}.pptx" if run_id else f"{ticker}_preview_{iv_style}.pptx"
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            suffix = f"{ticker}_{ts}_earnings_preview.pptx"
             out_path = out_dir / suffix
             iv_text, watch = _iv_text_and_watch(payload, memo_data, iv_style)
             quality_flags: list[str] = []

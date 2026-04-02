@@ -99,22 +99,19 @@ def _fetch_consensus_page(url: str) -> tuple[BeautifulSoup | None, str, list[str
         errors.append("Invalid or non-consensus URL")
         return None, "Invalid URL", errors
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
     timeout = 15
     if _USE_CONFIG:
         try:
-            s = cfg()
-            headers["User-Agent"] = s.get("scraping", {}).get("user_agent", headers["User-Agent"])
-            timeout = s.get("scraping", {}).get("timeout_seconds", timeout)
+            timeout = cfg().get("scraping", {}).get("timeout_seconds", timeout)
         except Exception:
             pass
 
     try:
-        resp = requests.get(url, headers=headers, timeout=timeout)
+        from src.providers.marketscreener_pages import _get_session
+        session = _get_session()
+        session.headers["Sec-Fetch-Site"] = "same-origin"
+        session.headers["Referer"] = "https://www.marketscreener.com/"
+        resp = session.get(url, timeout=timeout)
         if resp.status_code != 200:
             errors.append(f"HTTP {resp.status_code}")
             return None, f"HTTP {resp.status_code}", errors
@@ -129,7 +126,8 @@ def _fetch_consensus_page(url: str) -> tuple[BeautifulSoup | None, str, list[str
                     (cache_dir / f"ms_consensus_{slug}.html").write_text(text, encoding="utf-8")
             except Exception:
                 pass
-        if "captcha" in text.lower() or "access denied" in text.lower():
+        from src.providers.marketscreener_pages import _is_blocked_response
+        if _is_blocked_response(text):
             errors.append("Captcha or access denied in response")
             return None, "Block/captcha detected", errors
         # Check if we got a real consensus page (not homepage redirect)

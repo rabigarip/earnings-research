@@ -50,7 +50,9 @@ def run(ticker: str, company: CompanyMaster) -> StepResult:
             if updated:
                 slug = get_effective_marketscreener_slug(updated)
         if not slug:
-            slug = ms.resolve_slug_from_search(ticker)
+            slug = ms.resolve_slug_from_search(
+                ticker, company_name=getattr(company, "company_name", "") or ""
+            )
             # Guardrail: validate weak search fallback before scraping multiple pages.
             if slug:
                 try:

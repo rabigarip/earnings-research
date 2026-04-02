@@ -10,7 +10,7 @@ Page mapping (see docs/DATA_SOURCE_AND_URL_REFERENCE.md for full field mapping):
   - /valuation-dividend/          → EPS & dividend forecasts, yield, distribution rate, announcement
   - /consensus/                   → analyst rating + target price summary only (delegate to marketscreener_consensus)
   - /calendar/                    → next earnings date, upcoming/past events
-  - /valuation/                  → full multiples table (P/E, P/B, EV/EBIT by year) — NOT YET IMPLEMENTED
+  - /valuation/                  → full multiples table (P/E, P/B, EV/EBIT, EV/EBITDA, Yield by year)
 
 Slug: use company_master.marketscreener_id; or discover via search/?q={TICKER}.
 Uses requests + BeautifulSoup. Playwright optional for chart/JS content (TODOs).
@@ -36,6 +36,47 @@ except ImportError:
     _USE_CONFIG = False
 
 
+# ─── Shared session (reuse TCP + cookies across MS requests) ───────────────
+
+_session: requests.Session | None = None
+
+
+def _get_session() -> requests.Session:
+    """Return a shared requests.Session with browser-like headers and cookies."""
+    global _session
+    if _session is not None:
+        return _session
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                  "image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
+    })
+    if _USE_CONFIG:
+        try:
+            ua = cfg().get("scraping", {}).get("user_agent")
+            if ua:
+                s.headers["User-Agent"] = ua
+        except Exception:
+            pass
+    # Warm the session with a homepage visit to acquire cookies.
+    try:
+        s.get("https://www.marketscreener.com/", timeout=10)
+    except Exception:
+        pass
+    _session = s
+    return s
+
+
 # ─── Status model (every provider method returns this shape) ─────────────────
 
 class PageStepStatus(BaseModel):
@@ -48,6 +89,31 @@ class PageStepStatus(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     record_count: int | None = None
     elapsed_ms: float = 0.0
+
+
+# ─── Block / captcha detection ─────────────────────────────────────────────
+
+def _is_blocked_response(text: str) -> bool:
+    """Detect actual captcha walls or access-denied blocks.
+
+    MarketScreener pages normally contain 'captcha' inside a login-form
+    reCAPTCHA site-key attribute — that is NOT a block. A real block is a
+    short page whose *primary* content is a challenge or denial.
+    """
+    lower = text.lower()
+    # Short response that mentions captcha/denied is a real block
+    if len(text) < 5000:
+        if "captcha" in lower or "access denied" in lower or "blocked" in lower:
+            return True
+    # Explicit challenge pages
+    if "verify you are human" in lower or "please complete the captcha" in lower:
+        return True
+    if "<title>access denied</title>" in lower or "<title>blocked</title>" in lower:
+        return True
+    # Cloudflare-style challenge page
+    if "ray id" in lower and "cloudflare" in lower and len(text) < 20000:
+        return True
+    return False
 
 
 # ─── Shared fetch ───────────────────────────────────────────────────────────
@@ -74,29 +140,31 @@ def _cache_slug(url: str, page_name: str, cache_key_prefix: str | None = None) -
 
 
 def _fetch_page(url: str, cache_slug: str) -> tuple[BeautifulSoup | None, list[str]]:
-    """Fetch URL, optional cache, return (soup, errors)."""
+    """Fetch URL via shared session (cookies + keep-alive), optional cache, return (soup, errors)."""
     errors: list[str] = []
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
     timeout = 15
     if _USE_CONFIG:
         try:
-            s = cfg()
-            headers["User-Agent"] = s.get("scraping", {}).get("user_agent", headers["User-Agent"])
-            timeout = s.get("scraping", {}).get("timeout_seconds", timeout)
+            timeout = cfg().get("scraping", {}).get("timeout_seconds", timeout)
         except Exception:
             pass
 
     try:
-        resp = requests.get(url, headers=headers, timeout=timeout)
+        session = _get_session()
+        # Set referer for non-search pages (looks like natural browsing)
+        if "/search/" not in url:
+            session.headers["Sec-Fetch-Site"] = "same-origin"
+            session.headers["Referer"] = "https://www.marketscreener.com/"
+        else:
+            session.headers["Sec-Fetch-Site"] = "none"
+            session.headers.pop("Referer", None)
+
+        resp = session.get(url, timeout=timeout)
         if resp.status_code != 200:
             errors.append(f"HTTP {resp.status_code}")
             return None, errors
         text = resp.text
-        if "captcha" in text.lower() or "access denied" in text.lower():
+        if _is_blocked_response(text):
             errors.append("Captcha or access denied")
             return None, errors
         if _USE_CONFIG and cfg().get("scraping", {}).get("cache_html"):
@@ -345,20 +413,33 @@ def _extract_search_result_slugs(soup) -> list[tuple[str, str]]:
     return results
 
 
-def resolve_slug_from_search(ticker: str) -> str | None:
+def resolve_slug_from_search(ticker: str, *, company_name: str = "") -> str | None:
     """
     Resolve MarketScreener slug via search. GET search/?q={TICKER}, parse first
     equity result link from the results table (not sidebar/nav).
+    Falls back to company name search if ticker search yields no results.
     Use only as fallback; prefer resolve_marketscreener_by_isin(isin).
     """
-    search_q = ticker.replace(".SR", "").strip() or ticker
+    # Try ticker first (strip exchange suffix for cleaner search)
+    search_q = ticker.replace(".SR", "").replace(".KW", "").replace(".QA", "").strip() or ticker
     url = f"https://www.marketscreener.com/search/?q={search_q}"
+    _delay_between_requests()
     soup, errors = _fetch_page(url, "search_" + re.sub(r"[^a-zA-Z0-9]", "_", search_q)[:40])
-    if soup is None:
-        return None
-    results = _extract_search_result_slugs(soup)
-    if results:
-        return results[0][0]
+    if soup is not None:
+        results = _extract_search_result_slugs(soup)
+        if results:
+            return results[0][0]
+    # Fallback: search by company name if provided and ticker search failed
+    if company_name and company_name.strip():
+        name_q = company_name.strip().split(",")[0].split("(")[0].strip()[:40]
+        if name_q.lower() != search_q.lower():
+            _delay_between_requests()
+            url2 = f"https://www.marketscreener.com/search/?q={name_q}"
+            soup2, _ = _fetch_page(url2, "search_name_" + re.sub(r"[^a-zA-Z0-9]", "_", name_q)[:40])
+            if soup2 is not None:
+                results2 = _extract_search_result_slugs(soup2)
+                if results2:
+                    return results2[0][0]
     return None
 
 

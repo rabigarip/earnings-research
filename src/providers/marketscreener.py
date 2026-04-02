@@ -49,24 +49,18 @@ def _fetch_page(url: str, cache_name: str) -> BeautifulSoup | None:
     """Fetch a URL, cache HTML, return parsed soup or None."""
     settings = cfg()
 
-    headers = {
-        "User-Agent": settings["scraping"]["user_agent"],
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-    }
-
     time.sleep(random.uniform(
         settings["scraping"]["min_delay_seconds"],
         settings["scraping"]["max_delay_seconds"],
     ))
 
     try:
-        resp = requests.get(url, headers=headers,
-                            timeout=settings["scraping"]["timeout_seconds"],
-                            allow_redirects=True)
+        from src.providers.marketscreener_pages import _get_session, _is_blocked_response
+        session = _get_session()
+        session.headers["Sec-Fetch-Site"] = "same-origin"
+        session.headers["Referer"] = "https://www.marketscreener.com/"
+        resp = session.get(url, timeout=settings["scraping"]["timeout_seconds"],
+                           allow_redirects=True)
 
         if settings["scraping"]["cache_html"]:
             cache_dir = root() / "cache"
@@ -78,7 +72,7 @@ def _fetch_page(url: str, cache_name: str) -> BeautifulSoup | None:
             log.debug("HTTP %s from %s", resp.status_code, url)
             return None
 
-        if "captcha" in resp.text.lower() or "access denied" in resp.text.lower():
+        if _is_blocked_response(resp.text):
             log.debug("Captcha/block detected on %s", url)
             return None
 
@@ -92,20 +86,18 @@ def _fetch_page(url: str, cache_name: str) -> BeautifulSoup | None:
 def _fetch_page_with_diagnostics(url: str, cache_name: str) -> FetchResult:
     """Fetch URL and return FetchResult with title, canonical, first 1000 chars, classification."""
     settings = cfg()
-    headers = {
-        "User-Agent": settings["scraping"]["user_agent"],
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
     result = FetchResult(requested_url=url)
     try:
         time.sleep(random.uniform(
             settings["scraping"]["min_delay_seconds"],
             settings["scraping"]["max_delay_seconds"],
         ))
-        resp = requests.get(url, headers=headers,
-                            timeout=settings["scraping"]["timeout_seconds"],
-                            allow_redirects=True)
+        from src.providers.marketscreener_pages import _get_session
+        session = _get_session()
+        session.headers["Sec-Fetch-Site"] = "same-origin"
+        session.headers["Referer"] = "https://www.marketscreener.com/"
+        resp = session.get(url, timeout=settings["scraping"]["timeout_seconds"],
+                           allow_redirects=True)
         result.final_url = resp.url or url
         result.status_code = resp.status_code
 
@@ -120,13 +112,10 @@ def _fetch_page_with_diagnostics(url: str, cache_name: str) -> FetchResult:
             result.rule_fired = f"http_{resp.status_code}"
             return result
 
-        if "captcha" in resp.text.lower():
+        from src.providers.marketscreener_pages import _is_blocked_response
+        if _is_blocked_response(resp.text):
             result.classification = "anti_bot_page"
-            result.rule_fired = "captcha_in_body"
-            return result
-        if "access denied" in resp.text.lower():
-            result.classification = "blocked_cookie_wall"
-            result.rule_fired = "access_denied_in_body"
+            result.rule_fired = "blocked_response"
             return result
 
         soup = BeautifulSoup(resp.text, "lxml")
