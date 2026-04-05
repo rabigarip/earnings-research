@@ -594,6 +594,21 @@ def _write_preview_pptx(
             (f"EPS {_cU}", _eps_p, _eps_e, _yoy_pct(_eps_p, _eps_e)),
             (f"FCF {_cM}", _ann_val("fcf", _ann_fy_prior), _ann_val("fcf", _ann_fy_est), None),
         ]
+
+    # Last resort: Yahoo Finance actuals when MS data is suppressed (entity validation)
+    _rows_empty = all(r[1] is None and r[2] is None for r in rows)
+    if _rows_empty:
+        ya = sorted(getattr(payload, "annual_actuals", None) or [], key=lambda p: p.period_label, reverse=True)
+        if len(ya) >= 2:
+            _ya_cur, _ya_pri = ya[0], ya[1]
+            rows = [
+                (f"Revenue {_cM}", _ya_pri.revenue, _ya_cur.revenue, _yoy_pct(_ya_pri.revenue, _ya_cur.revenue)),
+                (f"EBITDA {_cM}", _ya_pri.ebitda, _ya_cur.ebitda, _yoy_pct(_ya_pri.ebitda, _ya_cur.ebitda)),
+                (f"Net Income {_cM}", _ya_pri.net_income, _ya_cur.net_income, _yoy_pct(_ya_pri.net_income, _ya_cur.net_income)),
+                (f"EPS {_cU}", _ya_pri.eps, _ya_cur.eps, _yoy_pct(_ya_pri.eps, _ya_cur.eps)),
+                (f"FCF {_cM}", None, None, None),
+            ]
+
     pv = vm.get("periods") or []
     i26 = next((i for i, p in enumerate(pv) if "2026" in str(p)), len(pv) - 1 if pv else -1)
 
@@ -632,6 +647,17 @@ def _write_preview_pptx(
         _rev_est = _ann_val("net_sales", _ann_fy_est)
         if _ebitda_est and _rev_est and _rev_est != 0:
             em = round(_ebitda_est / _rev_est * 100, 1)
+    # Yahoo actuals fallback for key expectations when all else fails
+    if not rv and _rows_empty:
+        _ya_sorted = sorted(getattr(payload, "annual_actuals", None) or [], key=lambda p: p.period_label, reverse=True)
+        if _ya_sorted:
+            rv = _ya_sorted[0].revenue
+            ev_eps = _ya_sorted[0].eps
+            if len(_ya_sorted) >= 2 and _ya_sorted[1].revenue:
+                rc = _yoy_pct(_ya_sorted[1].revenue, rv)
+                ec = _yoy_pct(_ya_sorted[1].eps, ev_eps)
+            if _ya_sorted[0].ebitda and _ya_sorted[0].revenue and _ya_sorted[0].revenue != 0:
+                em = round(_ya_sorted[0].ebitda / _ya_sorted[0].revenue * 100, 1)
     DARK, GOLD, LIGHT, MUTED, GREEN, WHITE, BLACK = (
         RGBColor(0x0D, 0x11, 0x17), RGBColor(0xC9, 0xA2, 0x27), RGBColor(0xE6, 0xED, 0xF3),
         RGBColor(0x8B, 0x94, 0x9E), RGBColor(0x3F, 0xB9, 0x50), RGBColor(0xFF, 0xFF, 0xFF), RGBColor(0x1F, 0x23, 0x28),
@@ -836,6 +862,405 @@ def _write_preview_pptx(
     prs.save(str(path))
 
 
+def _write_preview_pptx_portrait(
+    payload: ReportPayload,
+    path: Path,
+    memo_data: dict | None,
+    iv_text: str,
+    watch: list[str],
+    quality_flags: list[str] | None = None,
+) -> None:
+    """Portrait-oriented (7.5 x 13.33 in) PPTX with expanded space for qualitative writeup."""
+    from pptx import Presentation
+    from pptx.dml.color import RGBColor
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.text import PP_ALIGN
+    from pptx.util import Inches, Pt
+
+    def pn(v, bil=False):
+        if v is None:
+            return "—"
+        try:
+            x = float(v)
+            if bil and abs(x) >= 1e9:
+                return f"{x/1e9:.1f}B"
+            if abs(x) >= 1e6:
+                return f"{x:,.0f}"
+            return f"{x:,.2f}" if x != int(x) else f"{int(x):,}"
+        except (TypeError, ValueError):
+            return str(v)
+
+    def pp(v, signed=False):
+        if v is None:
+            return "—"
+        try:
+            x = float(v)
+            return f"{x:+.1f}%" if signed else f"{x}%"
+        except (TypeError, ValueError):
+            return str(v)
+
+    def rat(rec):
+        if rec is None or str(rec).strip() in ("", "—"):
+            return "—"
+        return str(rec).strip().upper()[:20]
+
+    def rdate(exp_date):
+        if exp_date is None or str(exp_date).strip() in ("", "—"):
+            return "—"
+        s = str(exp_date).strip()
+        if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+            try:
+                y, m, d = int(s[:4]), int(s[5:7]), int(s[8:10])
+                mo = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+                if 1 <= m <= 12:
+                    return f"{d} {mo[m-1]} {y}"
+            except Exception:
+                pass
+        return s
+
+    def qlab(ps):
+        raw = (ps or f"{(datetime.now().month - 1) // 3 + 1}Q{datetime.now().strftime('%y')}").replace(" ", "").strip().upper()
+        qn = next((c for c in raw if c in "1234"), "1")
+        yr = next(("20" + y for y in ("25", "26", "27", "24") if y in raw), str(datetime.now().year))
+        return f"Q{qn} {yr}"
+
+    def tx(sl, x, y, w, h, t, *, sz=12, bold=False, rgb=RGBColor(0, 0, 0), al=PP_ALIGN.LEFT, word_wrap=True, line_spacing=None):
+        b = sl.shapes.add_textbox(x, y, w, h)
+        tf = b.text_frame
+        tf.clear()
+        tf.word_wrap = word_wrap
+        tf.margin_left = Pt(2)
+        tf.margin_right = Pt(2)
+        tf.margin_top = Pt(2)
+        tf.margin_bottom = Pt(2)
+        text = "" if t is None else str(t)
+        lines = text.split("\n") if text else [""]
+
+        def _style_paragraph(p):
+            p.alignment = al
+            if line_spacing is not None:
+                try:
+                    p.line_spacing = line_spacing
+                except Exception:
+                    pass
+            try:
+                p.space_after = Pt(0)
+                p.space_before = Pt(0)
+            except Exception:
+                pass
+
+        def _set_para(para, line_text):
+            para.text = line_text
+            _style_paragraph(para)
+            if para.runs:
+                run = para.runs[0]
+                run.font.name = "Arial"
+                run.font.size = Pt(sz)
+                run.font.bold = bold
+                run.font.color.rgb = rgb
+
+        _set_para(tf.paragraphs[0], lines[0])
+        for ln in lines[1:]:
+            p2 = tf.add_paragraph()
+            _set_para(p2, ln)
+
+    def rect(sl, x, y, w, h, fill, line=None, lw=1.0):
+        sh = sl.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, y, w, h)
+        sh.fill.solid()
+        sh.fill.fore_color.rgb = fill
+        if line is None:
+            sh.line.fill.background()
+        else:
+            sh.line.color.rgb = line
+            sh.line.width = Pt(lw)
+        return sh
+
+    c, q, memo = payload.company, payload.quote, payload.memo_computed or {}
+    header, cs, vm = (memo_data or {}).get("header") or {}, payload.consensus_summary or {}, payload.ms_valuation_multiples or {}
+    name = getattr(c, "company_name", None) or _company_attr(c, "company_name", "")
+    tk = getattr(c, "ticker", None) or _company_attr(c, "ticker", "")
+    sec = f"{_company_attr(c, 'sector', '')} / {_company_attr(c, 'industry', '')}".strip(" /") or "—"
+    curr = (getattr(c, "currency", None) or "USD").strip()
+    pshort = (memo_data or {}).get("preview_short") or memo.get("preview_quarter_short") or f"{(datetime.now().month - 1) // 3 + 1}Q{datetime.now().strftime('%y')}"
+    q_label = qlab(pshort)
+    ed = header.get("expected_report_date") or {}
+    ev = ed.get("display_value") if isinstance(ed, dict) else ed
+    exp = rdate(ev) if ev else (memo.get("next_earnings_date") or "—")
+    rr = header.get("recommendation") or {}
+    rec = (rr.get("display_value") if isinstance(rr, dict) else rr) or (cs.get("consensus_rating") or "—")
+    tr = header.get("average_target_price") or {}
+    tgt = (tr.get("display_value") if isinstance(tr, dict) else tr) or cs.get("average_target_price")
+    sr = header.get("upside_pct") or {}
+    spr = (sr.get("display_value") if isinstance(sr, dict) else sr) or memo.get("spread_pct") or cs.get("upside_to_average_target_pct")
+    mcap = q.market_cap if q else None
+    ts_val = pn(tgt)
+    if curr and ts_val != "—":
+        ts_val = f"{curr} {ts_val}"
+    ms_val = pn(mcap, bil=True)
+    if curr and ms_val != "—":
+        ms_val = f"{curr} {ms_val}"
+    sections = (memo_data or {}).get("pptx_sections") or {}
+
+    # Build rows/cards data from parent scope (passed through payload)
+    _af = getattr(payload, "ms_annual_forecasts", None) or {}
+    _ann = _af.get("annual", {}) if isinstance(_af, dict) else {}
+    _eps_div = getattr(payload, "ms_eps_dividend_forecasts", None) or {}
+    _ann_periods = _ann.get("periods") or _eps_div.get("periods") or []
+    _ann_fy_prior, _ann_fy_est = -1, -1
+    for _ai, _ap in enumerate(_ann_periods):
+        _yr = "".join(c2 for c2 in str(_ap) if c2.isdigit())[:4]
+        if _yr in ("2024", "2025"):
+            _ann_fy_prior = _ai
+        if _yr in ("2025", "2026"):
+            _ann_fy_est = _ai
+
+    def _ann_val(key, idx):
+        arr = _ann.get(key) or []
+        if 0 <= idx < len(arr) and arr[idx] is not None:
+            return arr[idx]
+        if key == "eps":
+            eps_arr = _eps_div.get("eps") or []
+            if 0 <= idx < len(eps_arr) and eps_arr[idx] is not None:
+                return eps_arr[idx]
+        return None
+
+    def _yoy_pct(prior, est):
+        if prior and est and isinstance(prior, (int, float)) and isinstance(est, (int, float)) and prior != 0:
+            return round((est - prior) / abs(prior) * 100, 1)
+        return None
+
+    cp = memo.get("calendar_prior_quarter_released") or {}
+    cn = memo.get("calendar_next_quarter") or {}
+    _has_quarterly = bool(cp.get("net_sales") or cn.get("net_sales") or cn.get("revenue"))
+    _cM = f"({curr}M)" if curr else "(M)"
+    _cU = f"({curr})" if curr else ""
+    if _has_quarterly:
+        rows = [
+            (f"Revenue {_cM}", cp.get("net_sales"), cn.get("net_sales") or cn.get("revenue"), memo.get("yoy_revenue_pct_table")),
+            (f"EBITDA {_cM}", cp.get("ebitda"), cn.get("ebitda"), memo.get("yoy_ebitda_pct_table")),
+            (f"Net Income {_cM}", cp.get("net_income"), cn.get("net_income"), memo.get("yoy_ni_pct_table")),
+            (f"EPS {_cU}", cp.get("eps"), cn.get("eps"), memo.get("yoy_eps_pct_table")),
+        ]
+    else:
+        _rev_p, _rev_e = _ann_val("net_sales", _ann_fy_prior), _ann_val("net_sales", _ann_fy_est)
+        _ni_p, _ni_e = _ann_val("net_income", _ann_fy_prior), _ann_val("net_income", _ann_fy_est)
+        _ebitda_p, _ebitda_e = _ann_val("ebitda", _ann_fy_prior), _ann_val("ebitda", _ann_fy_est)
+        _ebit_p, _ebit_e = _ann_val("ebit", _ann_fy_prior), _ann_val("ebit", _ann_fy_est)
+        _eps_p, _eps_e = _ann_val("eps", _ann_fy_prior), _ann_val("eps", _ann_fy_est)
+        rows = [
+            (f"Revenue {_cM}", _rev_p, _rev_e, _yoy_pct(_rev_p, _rev_e)),
+            (f"EBITDA {_cM}", _ebitda_p or _ebit_p, _ebitda_e or _ebit_e, _yoy_pct(_ebitda_p or _ebit_p, _ebitda_e or _ebit_e)),
+            (f"Net Income {_cM}", _ni_p, _ni_e, _yoy_pct(_ni_p, _ni_e)),
+            (f"EPS {_cU}", _eps_p, _eps_e, _yoy_pct(_eps_p, _eps_e)),
+        ]
+    # Yahoo fallback
+    if all(r[1] is None and r[2] is None for r in rows):
+        ya = sorted(getattr(payload, "annual_actuals", None) or [], key=lambda p: p.period_label, reverse=True)
+        if len(ya) >= 2:
+            _ya_cur, _ya_pri = ya[0], ya[1]
+            rows = [
+                (f"Revenue {_cM}", _ya_pri.revenue, _ya_cur.revenue, _yoy_pct(_ya_pri.revenue, _ya_cur.revenue)),
+                (f"EBITDA {_cM}", _ya_pri.ebitda, _ya_cur.ebitda, _yoy_pct(_ya_pri.ebitda, _ya_cur.ebitda)),
+                (f"Net Income {_cM}", _ya_pri.net_income, _ya_cur.net_income, _yoy_pct(_ya_pri.net_income, _ya_cur.net_income)),
+                (f"EPS {_cU}", _ya_pri.eps, _ya_cur.eps, _yoy_pct(_ya_pri.eps, _ya_cur.eps)),
+            ]
+
+    rv = cn.get("net_sales") or cn.get("revenue") or _ann_val("net_sales", _ann_fy_est)
+    ev_eps = cn.get("eps") or _ann_val("eps", _ann_fy_est)
+
+    pv = vm.get("periods") or []
+    i26 = next((i for i, p in enumerate(pv) if "2026" in str(p)), len(pv) - 1 if pv else -1)
+    def pick(arr):
+        if not arr:
+            return None
+        if 0 <= i26 < len(arr) and arr[i26] is not None:
+            return arr[i26]
+        for v in reversed(arr):
+            if v is not None:
+                return v
+        return None
+    pe = pick(vm.get("pe") or [])
+    evv = pick(vm.get("ev_ebitda") or []) or pick(vm.get("ev_ebit") or [])
+    pb = pick(vm.get("pbr") or [])
+    dy = pick(vm.get("yield_pct") or [])
+
+    DARK = RGBColor(0x0D, 0x11, 0x17)
+    GOLD = RGBColor(0xC9, 0xA2, 0x27)
+    LIGHT = RGBColor(0xE6, 0xED, 0xF3)
+    MUTED = RGBColor(0x8B, 0x94, 0x9E)
+    GREEN = RGBColor(0x3F, 0xB9, 0x50)
+    WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+    BLACK = RGBColor(0x1F, 0x23, 0x28)
+    W = Inches(7.5)
+
+    prs = Presentation()
+    prs.slide_width = W
+    prs.slide_height = Inches(13.33)
+    blank = prs.slide_layouts[6]
+
+    # ── Slide 1: Cover (dark, portrait) ───────────────────────
+    s1 = prs.slides.add_slide(blank)
+    rect(s1, 0, 0, W, prs.slide_height, DARK)
+    tx(s1, Inches(0.6), Inches(0.5), Inches(6), Inches(0.3), "EARNINGS PREVIEW NOTE", sz=10, bold=True, rgb=GOLD)
+    rect(s1, Inches(0.6), Inches(0.85), Inches(1.8), Inches(0.04), GOLD)
+    tx(s1, Inches(0.6), Inches(1.3), Inches(6.3), Inches(1.2), name or "—", sz=36, bold=True, rgb=LIGHT)
+    tx(s1, Inches(0.6), Inches(2.6), Inches(6.3), Inches(0.5), f"{q_label} Earnings Preview", sz=18, rgb=LIGHT)
+
+    my = 3.5
+    for i, (lb, vl) in enumerate([("Sector:", sec), ("Ticker:", tk), ("Market Cap:", ms_val), ("Report Date:", exp)]):
+        tx(s1, Inches(0.6), Inches(my + i * 0.4), Inches(1.8), Inches(0.3), lb, sz=11, rgb=MUTED)
+        tx(s1, Inches(2.1), Inches(my + i * 0.4), Inches(5), Inches(0.3), str(vl), sz=11, bold=True, rgb=LIGHT)
+
+    # Rating / Target / Upside — vertical cards
+    by = Inches(5.5)
+    bw = Inches(6.3)
+    for j, (lb, vl, col) in enumerate([("RATING", rat(rec), LIGHT), ("TARGET PRICE", ts_val, LIGHT), ("UPSIDE", pp(spr, True) if spr is not None else "—", GREEN)]):
+        y = by + Inches(j * 1.05)
+        rect(s1, Inches(0.6), y, bw, Inches(0.9), RGBColor(0x10, 0x17, 0x22), GOLD)
+        tx(s1, Inches(0.85), y + Inches(0.12), Inches(2), Inches(0.25), lb, sz=9, bold=True, rgb=MUTED)
+        tx(s1, Inches(0.85), y + Inches(0.38), bw - Inches(0.5), Inches(0.4), str(vl), sz=22, bold=True, rgb=col)
+
+    tx(s1, Inches(0), Inches(12.9), W, Inches(0.3), "CONFIDENTIAL | For Institutional Clients Only", sz=9, rgb=MUTED, al=PP_ALIGN.CENTER)
+
+    # ── Slide 2: Executive Summary (white, portrait — EXPANDED thesis) ──
+    s2 = prs.slides.add_slide(blank)
+    rect(s2, 0, 0, W, prs.slide_height, WHITE)
+    tx(s2, Inches(0.6), Inches(0.4), Inches(6.3), Inches(0.3), f"{name} | {q_label}", sz=12, bold=True, rgb=BLACK)
+    tx(s2, Inches(0.6), Inches(0.85), Inches(6), Inches(0.5), "Executive Summary", sz=26, bold=True, rgb=BLACK)
+    rect(s2, Inches(0.6), Inches(1.35), Inches(2), Inches(0.06), GOLD)
+
+    # Investment Thesis — EXPANDED (6" tall block)
+    tx(s2, Inches(0.6), Inches(1.6), Inches(1.5), Inches(0.3), "Investment Thesis", sz=12, bold=True, rgb=MUTED)
+    rect(s2, Inches(0.6), Inches(1.95), Inches(6.3), Inches(5.5), RGBColor(0xFA, 0xF8, 0xF3), RGBColor(0xDB, 0xE0, 0xE6))
+    rect(s2, Inches(0.6), Inches(1.95), Inches(0.06), Inches(5.5), GOLD)
+    tx(s2, Inches(0.78), Inches(2.1), Inches(6.0), Inches(5.2), iv_text or "—", sz=12, rgb=BLACK, line_spacing=1.15)
+
+    # Key Expectations — 3 cards
+    tx(s2, Inches(0.6), Inches(7.65), Inches(4), Inches(0.3), "Key Expectations", sz=14, bold=True, rgb=BLACK)
+    cw2 = Inches(2.0)
+    cg = Inches(0.15)
+    for i, (lb, va, chg) in enumerate([
+        ("Revenue", pn(rv), pp(memo.get("yoy_revenue_pct_table") or memo.get("qoq_revenue_pct"), True) if rv else "—"),
+        ("EPS", pn(ev_eps), "—"),
+        ("EBITDA Margin", pp(cn.get("ebitda_margin") or cp.get("ebitda_margin")) if (cn.get("ebitda_margin") or cp.get("ebitda_margin")) else "—", "—"),
+    ][:3]):
+        x = Inches(0.6) + i * (cw2 + cg)
+        rect(s2, x, Inches(8.0), cw2, Inches(0.85), WHITE, RGBColor(0xDB, 0xE0, 0xE6))
+        tx(s2, x + Inches(0.15), Inches(8.08), cw2 - Inches(0.3), Inches(0.2), lb, sz=9, rgb=MUTED)
+        tx(s2, x + Inches(0.15), Inches(8.3), cw2 - Inches(0.3), Inches(0.3), va if isinstance(va, str) else pn(va), sz=18, bold=True, rgb=BLACK)
+        if isinstance(chg, str) and chg != "—":
+            tx(s2, x + Inches(0.15), Inches(8.62), cw2 - Inches(0.3), Inches(0.2), chg, sz=10, bold=True, rgb=GREEN)
+
+    # What to Watch
+    wl = (sections.get("what_to_watch") if isinstance(sections, dict) else None) or watch or ["Guidance", "Segment performance", "Macro / FX", "Capital allocation"]
+    tx(s2, Inches(0.6), Inches(9.1), Inches(4), Inches(0.3), "What to Watch", sz=14, bold=True, rgb=BLACK)
+    for i, item in enumerate(wl[:4]):
+        y = Inches(9.45) + Inches(i * 0.38)
+        tx(s2, Inches(0.6), y, Inches(0.3), Inches(0.3), str(i + 1), sz=11, bold=True, rgb=GOLD)
+        tx(s2, Inches(0.95), y, Inches(5.9), Inches(0.3), item, sz=11, rgb=BLACK)
+
+    # Catalysts & Risks
+    tx(s2, Inches(0.6), Inches(11.1), Inches(4), Inches(0.3), "Catalysts & Risks", sz=14, bold=True, rgb=BLACK)
+    cbw = Inches(3.05)
+    c_list = (sections.get("catalysts") if isinstance(sections, dict) else None) or []
+    catalysts = [str(x).strip() for x in c_list if str(x).strip()][:3] if isinstance(c_list, list) else []
+    if not catalysts:
+        catalysts = ["Product / volume upside", "Cost or mix tailwind", "Policy / regulatory development"]
+    r_list = (sections.get("risks") if isinstance(sections, dict) else None) or []
+    risks = [str(x).strip() for x in r_list if str(x).strip()][:3] if isinstance(r_list, list) else []
+    if not risks:
+        risks = ["Macro / demand downside", "Pricing / competition pressure", "Execution or guidance risk"]
+
+    rect(s2, Inches(0.6), Inches(11.45), cbw, Inches(0.9), RGBColor(0xF0, 0xF9, 0xF0), RGBColor(0xDB, 0xE0, 0xE6))
+    rect(s2, Inches(0.6), Inches(11.45), Inches(0.06), Inches(0.9), RGBColor(0x1A, 0x7F, 0x37))
+    tx(s2, Inches(0.75), Inches(11.48), cbw - Inches(0.2), Inches(0.18), "CATALYSTS", sz=8, bold=True, rgb=RGBColor(0x1A, 0x7F, 0x37))
+    tx(s2, Inches(0.75), Inches(11.65), cbw - Inches(0.2), Inches(0.65), "\u2191 " + "\n\u2191 ".join(catalysts), sz=8, rgb=BLACK, word_wrap=False, line_spacing=0.9)
+
+    rx = Inches(3.85)
+    rect(s2, rx, Inches(11.45), cbw, Inches(0.9), RGBColor(0xFE, 0xF0, 0xF0), RGBColor(0xDB, 0xE0, 0xE6))
+    rect(s2, rx, Inches(11.45), Inches(0.06), Inches(0.9), RGBColor(0xCF, 0x22, 0x22))
+    tx(s2, rx + Inches(0.15), Inches(11.48), cbw - Inches(0.2), Inches(0.18), "KEY RISKS", sz=8, bold=True, rgb=RGBColor(0xCF, 0x22, 0x22))
+    tx(s2, rx + Inches(0.15), Inches(11.65), cbw - Inches(0.2), Inches(0.65), "\u2193 " + "\n\u2193 ".join(risks), sz=8, rgb=BLACK, word_wrap=False, line_spacing=0.9)
+
+    # ── Slide 3: Financial Snapshot (white, portrait) ─────────
+    s3 = prs.slides.add_slide(blank)
+    rect(s3, 0, 0, W, prs.slide_height, WHITE)
+    tx(s3, Inches(0.6), Inches(0.5), Inches(6), Inches(0.5), "Financial Snapshot", sz=26, bold=True, rgb=BLACK)
+    rect(s3, Inches(0.6), Inches(1.0), Inches(2), Inches(0.06), GOLD)
+
+    hdrs = ["Metric", "Q prior A", "Q current E", "YoY %"] if _has_quarterly else ["Metric", "FY prior A", "FY current E", "YoY %"]
+    cws = [Inches(2.0), Inches(1.5), Inches(1.5), Inches(1.3)]
+    tbx = Inches(0.6)
+    tby = Inches(1.3)
+    rh = Inches(0.42)
+    x = tbx
+    for j, h in enumerate(hdrs):
+        rect(s3, x, tby, cws[j], rh, BLACK, RGBColor(0xDB, 0xE0, 0xE6))
+        tx(s3, x + Inches(0.1), tby + Inches(0.08), cws[j] - Inches(0.2), rh, h, sz=10, bold=True, rgb=WHITE)
+        x += cws[j]
+    for i, (lb, pa, ce, yy) in enumerate(rows):
+        y = tby + rh * (i + 1)
+        x = tbx
+        vals = [lb, pn(pa), pn(ce), pp(yy, True) if yy is not None else "—"]
+        for j, v in enumerate(vals):
+            fl = RGBColor(0xFA, 0xF8, 0xF3) if j == 2 else WHITE
+            rect(s3, x, y, cws[j], rh, fl, RGBColor(0xDB, 0xE0, 0xE6))
+            tx(s3, x + Inches(0.1), y + Inches(0.08), cws[j] - Inches(0.2), rh, str(v), sz=10, bold=(j == 0), rgb=BLACK)
+            x += cws[j]
+
+    # Valuation Summary
+    tx(s3, Inches(0.6), Inches(4.2), Inches(6), Inches(0.4), "Valuation Summary", sz=22, bold=True, rgb=BLACK)
+    rect(s3, Inches(0.6), Inches(4.6), Inches(2), Inches(0.05), GOLD)
+    boxes = [
+        ("P/E (FY26E)", f"{pe:.1f}x" if pe is not None else "—"),
+        ("EV/EBITDA", f"{evv:.1f}x" if evv is not None else "—"),
+        ("P/B", f"{pb:.1f}x" if pb is not None else "—"),
+        ("Div. Yield", f"{dy:.1f}%" if dy is not None else "—"),
+    ]
+    vbw = Inches(3.05)
+    for i, (lbl, val) in enumerate(boxes):
+        x = Inches(0.6) + (Inches(3.2) if i % 2 else 0)
+        y = Inches(4.85) + (Inches(1.1) if i >= 2 else 0)
+        rect(s3, x, y, vbw, Inches(0.95), WHITE, RGBColor(0xDB, 0xE0, 0xE6))
+        rect(s3, x, y, Inches(0.06), Inches(0.95), GOLD)
+        tx(s3, x + Inches(0.18), y + Inches(0.12), vbw - Inches(0.3), Inches(0.2), lbl, sz=10, rgb=MUTED)
+        tx(s3, x + Inches(0.18), y + Inches(0.4), vbw - Inches(0.3), Inches(0.35), val, sz=22, bold=True, rgb=GOLD)
+
+    tx(s3, Inches(0.6), Inches(7.2), Inches(6), Inches(0.3), f"Source: Consensus and estimates as of {datetime.now().strftime('%d %b %Y')}", sz=9, rgb=MUTED)
+    if quality_flags:
+        tx(s3, Inches(0.6), Inches(7.45), Inches(6), Inches(0.3), "Data Quality: " + "; ".join(quality_flags[:4]), sz=9, rgb=MUTED)
+
+    # ── Slide 4: Important Disclosures (dark, portrait) ───────
+    s4 = prs.slides.add_slide(blank)
+    rect(s4, 0, 0, W, prs.slide_height, DARK)
+    tx(s4, Inches(0), Inches(1.0), W, Inches(0.6), "Important Disclosures", sz=28, bold=True, rgb=LIGHT, al=PP_ALIGN.CENTER)
+    rect(s4, Inches(2.7), Inches(1.6), Inches(2.1), Inches(0.05), GOLD)
+    disclosures = (
+        "This document is provided for informational purposes only and does not constitute an offer, "
+        "solicitation, or recommendation to buy or sell any security. The information contained herein "
+        "is based on sources believed to be reliable, but no representation or warranty, express or "
+        "implied, is made regarding its accuracy, completeness, or timeliness.\n\n"
+        "All financial data, estimates, and projections are derived from publicly available sources "
+        "including MarketScreener and Yahoo Finance, supplemented by AI-generated qualitative analysis. "
+        "Past performance is not indicative of future results. Investors should conduct their own due "
+        "diligence and consult with a qualified financial advisor before making investment decisions.\n\n"
+        "This report does not take into account the specific investment objectives, financial situation, "
+        "or particular needs of any individual investor. The securities discussed may not be suitable for "
+        "all investors. Investing involves risks, including the possible loss of principal."
+    )
+    tx(s4, Inches(0.8), Inches(2.0), Inches(5.9), Inches(5.0), disclosures, sz=11, rgb=MUTED, line_spacing=1.3)
+    gen_ts = datetime.now().strftime("%d %B %Y at %H:%M UTC")
+    tx(s4, Inches(0.8), Inches(7.5), Inches(5.9), Inches(0.5),
+       f"Data Sources: MarketScreener, Yahoo Finance, Google Gemini\nGenerated: {gen_ts}",
+       sz=9, rgb=RGBColor(0x60, 0x66, 0x70), al=PP_ALIGN.CENTER)
+    tx(s4, Inches(0), Inches(12.8), W, Inches(0.3),
+       f"\u00a9 {datetime.now().year} Earnings Research  |  All rights reserved",
+       sz=9, rgb=RGBColor(0x60, 0x66, 0x70), al=PP_ALIGN.CENTER)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    prs.save(str(path))
+
+
 def run(payload: ReportPayload, memo_data: dict | None = None, qa_audit: dict | None = None) -> StepResult:
     with StepTimer() as t:
         try:
@@ -858,7 +1283,7 @@ def run(payload: ReportPayload, memo_data: dict | None = None, qa_audit: dict | 
                     quality_flags.append("MS suppressed: contamination")
                 if qa_audit.get("reused_default_payload_detected"):
                     quality_flags.append("Default payload reused")
-            _write_preview_pptx(payload, out_path, memo_data, iv_text, watch, quality_flags or None)
+            _write_preview_pptx_portrait(payload, out_path, memo_data, iv_text, watch, quality_flags or None)
             return StepResult(step_name=STEP, status=Status.SUCCESS, source="pptx", message=f"Report saved → {out_path}", data=str(out_path), elapsed_seconds=t.elapsed)
         except Exception as exc:
             return StepResult(step_name=STEP, status=Status.FAILED, source="pptx", message="Report generation failed", error_detail=str(exc), elapsed_seconds=t.elapsed)
