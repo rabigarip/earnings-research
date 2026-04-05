@@ -334,7 +334,7 @@ def _iv_text_and_watch(payload: ReportPayload, memo_data: dict | None, iv_style:
         spread = float(spread) if spread not in (None, "—", "") else None
     except (TypeError, ValueError):
         spread = None
-    preview_short = (memo_data or {}).get("preview_short") or memo.get("preview_quarter_short") or "1Q26"
+    preview_short = (memo_data or {}).get("preview_short") or memo.get("preview_quarter_short") or f"{(datetime.now().month - 1) // 3 + 1}Q{datetime.now().strftime('%y')}"
     company_name = getattr(c, "company_name", None) or _company_attr(c, "company_name", "")
     fb1 = _build_analytical_iv_paragraph_1(
         company_name=company_name,
@@ -387,9 +387,9 @@ def _write_preview_pptx(
             return "—"
         try:
             x = float(v)
-            if bil and x >= 1e9:
-                return f"${x/1e9:.1f}B"
-            if x >= 1e6:
+            if bil and abs(x) >= 1e9:
+                return f"{x/1e9:.1f}B"
+            if abs(x) >= 1e6:
                 return f"{x:,.0f}"
             return f"{x:,.2f}" if x != int(x) else f"{int(x):,}"
         except (TypeError, ValueError):
@@ -407,14 +407,7 @@ def _write_preview_pptx(
     def rat(rec):
         if rec is None or str(rec).strip() in ("", "—"):
             return "—"
-        s = str(rec).strip().upper()
-        if any(k in s for k in ("BUY", "OUTPERFORM", "OVERWEIGHT", "STRONG BUY")):
-            return "OVERWEIGHT"
-        if any(k in s for k in ("SELL", "UNDERPERFORM", "UNDERWEIGHT")):
-            return "UNDERWEIGHT"
-        if any(k in s for k in ("HOLD", "NEUTRAL", "EQUAL")):
-            return "NEUTRAL"
-        return s[:20]
+        return str(rec).strip().upper()[:20]
 
     def rdate(exp_date):
         if exp_date is None or str(exp_date).strip() in ("", "—"):
@@ -431,7 +424,7 @@ def _write_preview_pptx(
         return s
 
     def qlab(ps):
-        raw = (ps or "1Q26").replace(" ", "").strip().upper()
+        raw = (ps or f"{(datetime.now().month - 1) // 3 + 1}Q{datetime.now().strftime('%y')}").replace(" ", "").strip().upper()
         qn = next((c for c in raw if c in "1234"), "1")
         yr = next(("20" + y for y in ("25", "26", "27", "24") if y in raw), "2026")
         return f"Q{qn} {yr}"
@@ -509,9 +502,9 @@ def _write_preview_pptx(
     name = getattr(c, "company_name", None) or _company_attr(c, "company_name", "")
     tk = getattr(c, "ticker", None) or _company_attr(c, "ticker", "")
     sec = f"{_company_attr(c, 'sector', '')} / {_company_attr(c, 'industry', '')}".strip(" /") or "—"
-    curr = (getattr(c, "currency", None) or "SAR").strip()
-    display_ccy = (cfg().get("report", {}).get("display_currency", curr) or curr).strip().upper()
-    pshort = (memo_data or {}).get("preview_short") or memo.get("preview_quarter_short") or "1Q26"
+    curr = (getattr(c, "currency", None) or "USD").strip()
+    display_ccy = (cfg().get("report", {}).get("display_currency", "") or "").strip().upper() or curr
+    pshort = (memo_data or {}).get("preview_short") or memo.get("preview_quarter_short") or f"{(datetime.now().month - 1) // 3 + 1}Q{datetime.now().strftime('%y')}"
     q_label = qlab(pshort)
     ed = header.get("expected_report_date") or {}
     ev = ed.get("display_value") if isinstance(ed, dict) else ed
@@ -540,19 +533,67 @@ def _write_preview_pptx(
         except Exception:
             pass
     ts = pn(tgt)
-    if curr and ts != "—" and not ts.startswith("$"):
+    if curr and ts != "—":
         ts = f"{curr} {ts}"
     ms = pn(mcap, bil=True)
-    if ms != "—" and not ms.startswith("$"):
+    if curr and ms != "—":
         ms = f"{curr} {ms}"
     cp, cn = memo.get("calendar_prior_quarter_released") or {}, memo.get("calendar_next_quarter") or {}
-    rows = [
-        ("Revenue ($M)", cp.get("net_sales"), cn.get("net_sales") or cn.get("revenue"), memo.get("yoy_revenue_pct_table")),
-        ("EBITDA ($M)", cp.get("ebitda"), cn.get("ebitda"), memo.get("yoy_ebitda_pct_table")),
-        ("Net Income ($M)", cp.get("net_income"), cn.get("net_income"), memo.get("yoy_ni_pct_table")),
-        ("EPS ($)", cp.get("eps"), cn.get("eps"), memo.get("yoy_eps_pct_table")),
-        ("FCF ($M)", cp.get("fcf"), cn.get("fcf"), None),
-    ]
+
+    # ── Annual fallback when quarterly data is unavailable ──
+    _af = getattr(payload, "ms_annual_forecasts", None) or {}
+    _ann = _af.get("annual", {}) if isinstance(_af, dict) else {}
+    _eps_div = getattr(payload, "ms_eps_dividend_forecasts", None) or {}
+    _ann_periods = _ann.get("periods") or _eps_div.get("periods") or []
+    _ann_fy_prior = -1
+    _ann_fy_est = -1
+    for _ai, _ap in enumerate(_ann_periods):
+        _yr = "".join(c2 for c2 in str(_ap) if c2.isdigit())[:4]
+        if _yr in ("2024", "2025"):
+            _ann_fy_prior = _ai
+        if _yr in ("2025", "2026"):
+            _ann_fy_est = _ai
+
+    def _ann_val(key, idx):
+        arr = _ann.get(key) or []
+        if 0 <= idx < len(arr) and arr[idx] is not None:
+            return arr[idx]
+        if key == "eps":
+            eps_arr = _eps_div.get("eps") or []
+            if 0 <= idx < len(eps_arr) and eps_arr[idx] is not None:
+                return eps_arr[idx]
+        return None
+
+    def _yoy_pct(prior, est):
+        if prior and est and isinstance(prior, (int, float)) and isinstance(est, (int, float)) and prior != 0:
+            return round((est - prior) / abs(prior) * 100, 1)
+        return None
+
+    _has_quarterly = bool(cp.get("net_sales") or cn.get("net_sales") or cn.get("revenue"))
+    _cM = f"({curr}M)" if curr else "(M)"
+    _cU = f"({curr})" if curr else ""
+    if _has_quarterly:
+        rows = [
+            (f"Revenue {_cM}", cp.get("net_sales"), cn.get("net_sales") or cn.get("revenue"), memo.get("yoy_revenue_pct_table")),
+            (f"EBITDA {_cM}", cp.get("ebitda"), cn.get("ebitda"), memo.get("yoy_ebitda_pct_table")),
+            (f"Net Income {_cM}", cp.get("net_income"), cn.get("net_income"), memo.get("yoy_ni_pct_table")),
+            (f"EPS {_cU}", cp.get("eps"), cn.get("eps"), memo.get("yoy_eps_pct_table")),
+            (f"FCF {_cM}", cp.get("fcf"), cn.get("fcf"), None),
+        ]
+    else:
+        _rev_p, _rev_e = _ann_val("net_sales", _ann_fy_prior), _ann_val("net_sales", _ann_fy_est)
+        _ebitda_p, _ebitda_e = _ann_val("ebitda", _ann_fy_prior), _ann_val("ebitda", _ann_fy_est)
+        _ni_p, _ni_e = _ann_val("net_income", _ann_fy_prior), _ann_val("net_income", _ann_fy_est)
+        _ebit_p, _ebit_e = _ann_val("ebit", _ann_fy_prior), _ann_val("ebit", _ann_fy_est)
+        _eps_p = _ann_val("eps", _ann_fy_prior)
+        _eps_e = _ann_val("eps", _ann_fy_est)
+        rows = [
+            (f"Revenue {_cM}", _rev_p, _rev_e, _yoy_pct(_rev_p, _rev_e)),
+            (f"EBITDA {_cM}", _ebitda_p or _ebit_p, _ebitda_e or _ebit_e, _yoy_pct(_ebitda_p or _ebit_p, _ebitda_e or _ebit_e)),
+            (f"Net Income {_cM}", _ni_p, _ni_e, _yoy_pct(_ni_p, _ni_e)),
+            (f"EPS {_cU}", _eps_p, _eps_e, _yoy_pct(_eps_p, _eps_e)),
+            (f"FCF {_cM}", _ann_val("fcf", _ann_fy_prior), _ann_val("fcf", _ann_fy_est), None),
+        ]
     pv = vm.get("periods") or []
     i26 = next((i for i, p in enumerate(pv) if "2026" in str(p)), len(pv) - 1 if pv else -1)
 
@@ -580,6 +621,17 @@ def _write_preview_pptx(
     rv, ev_eps = cn.get("net_sales") or cn.get("revenue"), cn.get("eps")
     rc, ec = memo.get("yoy_revenue_pct_table") or memo.get("qoq_revenue_pct"), memo.get("yoy_eps_pct_table") or memo.get("qoq_eps_pct")
     em = cn.get("ebitda_margin") or cp.get("ebitda_margin")
+    if not rv and not _has_quarterly:
+        rv = _ann_val("net_sales", _ann_fy_est)
+        rc = _yoy_pct(_ann_val("net_sales", _ann_fy_prior), rv)
+    if not ev_eps and not _has_quarterly:
+        ev_eps = _ann_val("eps", _ann_fy_est)
+        ec = _yoy_pct(_ann_val("eps", _ann_fy_prior), ev_eps)
+    if not em and not _has_quarterly:
+        _ebitda_est = _ann_val("ebitda", _ann_fy_est) or _ann_val("ebit", _ann_fy_est)
+        _rev_est = _ann_val("net_sales", _ann_fy_est)
+        if _ebitda_est and _rev_est and _rev_est != 0:
+            em = round(_ebitda_est / _rev_est * 100, 1)
     DARK, GOLD, LIGHT, MUTED, GREEN, WHITE, BLACK = (
         RGBColor(0x0D, 0x11, 0x17), RGBColor(0xC9, 0xA2, 0x27), RGBColor(0xE6, 0xED, 0xF3),
         RGBColor(0x8B, 0x94, 0x9E), RGBColor(0x3F, 0xB9, 0x50), RGBColor(0xFF, 0xFF, 0xFF), RGBColor(0x1F, 0x23, 0x28),
@@ -706,7 +758,7 @@ def _write_preview_pptx(
     tbx, tby = Inches(0.8), Inches(1.6)
     cws = [Inches(4.0), Inches(2.3), Inches(2.3), Inches(2.0)]
     rh = Inches(0.45)
-    hdrs = ["Metric", "Q prior A", "Q current E", "YoY %"]
+    hdrs = ["Metric", "Q prior A", "Q current E", "YoY %"] if _has_quarterly else ["Metric", "FY prior A", "FY current E", "YoY %"]
     x = tbx
     for j, h in enumerate(hdrs):
         rect(s3, x, tby, cws[j], rh, BLACK, RGBColor(0xDB, 0xE0, 0xE6))

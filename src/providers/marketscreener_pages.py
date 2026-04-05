@@ -776,7 +776,7 @@ def fetch_financial_forecast_series(base_company_url: str, cache_key_prefix: str
             "periods": [_normalize_period_label(p) for p in period_headers_quarterly],
             "net_sales": quarterly_net_sales,
         },
-        "unit_currency": unit_currency or "SAR",
+        "unit_currency": unit_currency or "",
         "unit_scale": unit_scale,
         "applicability_flags": {
             "ebitda_applicable": not _all_missing(annual_ebitda),
@@ -982,7 +982,7 @@ def fetch_dividend_eps_page(base_company_url: str, cache_key_prefix: str | None 
         "distribution_rate": [_coerce_numeric_or_none(v) for v in dist_vals],
         "reference_price": [_coerce_numeric_or_none(v) for v in ref_vals],
         "announcement_dates": ann_vals,
-        "unit_currency": "SAR",
+        "unit_currency": unit_currency or "",
         "warnings": [],
     }
 
@@ -1007,7 +1007,7 @@ def _empty_dividend_payload(source_page: str, status: PageStepStatus) -> dict[st
         "distribution_rate": [],
         "reference_price": [],
         "announcement_dates": [],
-        "unit_currency": "SAR",
+        "unit_currency": "",
         "warnings": status.errors,
     }
 

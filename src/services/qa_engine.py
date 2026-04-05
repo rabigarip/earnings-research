@@ -152,7 +152,7 @@ def build_source_snapshots(payload) -> SourceSnapshots:
     c = getattr(payload, "company", None)
     company_name = c.company_name if c else ""
     ticker = c.ticker if c else ""
-    currency = (c.currency or "SAR").strip() if c else "SAR"
+    currency = (c.currency or "USD").strip() if c else "SAR"
 
     quote = getattr(payload, "quote", None)
     quote_snapshot = None
@@ -272,7 +272,7 @@ def build_memo_data(payload, snapshots: SourceSnapshots) -> dict:
     c = getattr(payload, "company", None)
     memo = getattr(payload, "memo_computed", None) or {}
     q = getattr(payload, "quote", None)
-    currency = (getattr(c, "currency", None) or "SAR").strip() if c else "SAR"
+    currency = (getattr(c, "currency", None) or "USD").strip() if c else "SAR"
     ticker = (getattr(c, "ticker", "") or "").strip() if c else ""
     company_name = getattr(c, "company_name", "") if c else ""
     # Section-level lineage validation: do not use MS-derived data when entity/ticker mismatch or contamination

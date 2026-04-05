@@ -303,12 +303,18 @@ class CreateReportRequest(BaseModel):
     skip_llm: bool = Field(True, description="Skip Gemini news summarization")
 
 
+import re as _re
+_TICKER_RE = _re.compile(r"^[A-Z0-9\.\-]{1,20}$")
+
+
 @app.post("/api/reports")
 def create_report(req: CreateReportRequest):
     """Create a report (run preview). Returns report row + payload + steps for frontend."""
     ticker = (req.ticker or "").strip().upper()
     if not ticker:
         raise HTTPException(status_code=400, detail="ticker is required")
+    if not _TICKER_RE.match(ticker):
+        raise HTTPException(status_code=400, detail="Invalid ticker format")
     try:
         data = _run_preview_and_response(ticker, skip_llm=req.skip_llm)
         return data
@@ -386,10 +392,12 @@ def run_preview_api(req: PreviewRequest):
 
 @app.post("/api/batch")
 def batch_preview_api(req: BatchPreviewRequest):
-    """Run previews for multiple tickers (PPTX output per ticker)."""
+    """Run previews for multiple tickers (PPTX output per ticker). Max 20."""
     tickers = [t.strip().upper() for t in (req.tickers or []) if (t or "").strip()]
     if not tickers:
         raise HTTPException(status_code=400, detail="tickers is required")
+    if len(tickers) > 20:
+        raise HTTPException(status_code=400, detail="Maximum 20 tickers per batch")
 
     results = []
     for t in tickers:

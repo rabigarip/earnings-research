@@ -90,7 +90,7 @@ def fetch_quote(ticker: str) -> QuoteSnapshot | None:
                 forward_pe=info.get("forwardPE"),
                 trailing_pe=info.get("trailingPE"),
                 dividend_yield=info.get("dividendYield"),
-                currency=info.get("currency", "SAR"),
+                currency=info.get("currency") or "USD",
             )
         except Exception:
             return None
