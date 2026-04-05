@@ -15,7 +15,14 @@ class QuoteSnapshot(BaseModel):
     forward_pe: float | None = None
     trailing_pe: float | None = None
     dividend_yield: float | None = None  # decimal (e.g. 0.045)
-    currency:   str          = "SAR"
+    price_to_book: float | None = None
+    ev_to_ebitda: float | None = None
+    target_mean_price: float | None = None
+    target_high_price: float | None = None
+    target_low_price: float | None = None
+    recommendation_key: str | None = None  # "buy", "hold", "sell", "strong_buy", etc.
+    number_of_analysts: int | None = None
+    currency:   str          = "USD"
     source:     str          = "yahoo"
 
 

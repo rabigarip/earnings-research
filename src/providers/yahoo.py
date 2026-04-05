@@ -90,6 +90,13 @@ def fetch_quote(ticker: str) -> QuoteSnapshot | None:
                 forward_pe=info.get("forwardPE"),
                 trailing_pe=info.get("trailingPE"),
                 dividend_yield=info.get("dividendYield"),
+                price_to_book=info.get("priceToBook"),
+                ev_to_ebitda=info.get("enterpriseToEbitda"),
+                target_mean_price=info.get("targetMeanPrice"),
+                target_high_price=info.get("targetHighPrice"),
+                target_low_price=info.get("targetLowPrice"),
+                recommendation_key=info.get("recommendationKey"),
+                number_of_analysts=info.get("numberOfAnalystOpinions"),
                 currency=info.get("currency") or "USD",
             )
         except Exception:

@@ -518,6 +518,19 @@ def _write_preview_pptx(
     spr = (sr.get("display_value") if isinstance(sr, dict) else sr)
     spr = spr if spr is not None else memo.get("spread_pct") or cs.get("upside_to_average_target_pct")
     mcap = q.market_cap if q else None
+    # Yahoo fallbacks for rating/target/upside
+    if q:
+        if rec in (None, "—", ""):
+            _yrec = getattr(q, "recommendation_key", None) or ""
+            if _yrec and _yrec != "none":
+                rec = _yrec.upper().replace("_", " ")
+        if tgt is None and getattr(q, "target_mean_price", None):
+            tgt = q.target_mean_price
+        if spr is None and tgt is not None and q.price and q.price > 0:
+            try:
+                spr = round((float(tgt) - q.price) / q.price * 100, 1)
+            except (TypeError, ValueError):
+                pass
     if display_ccy and display_ccy != curr:
         try:
             from src.utils.currency import convert
@@ -633,6 +646,18 @@ def _write_preview_pptx(
         return None
 
     pe, evv, pb, dy = pick(vm.get("pe") or []), pick(vm.get("ev_ebitda") or []) or pick(vm.get("ev_ebit") or []), pick(vm.get("pbr") or []), pick(vm.get("yield_pct") or [])
+    # Yahoo fallback for valuation
+    if q:
+        if pe is None:
+            pe = getattr(q, "forward_pe", None) or getattr(q, "trailing_pe", None)
+        if evv is None:
+            evv = getattr(q, "ev_to_ebitda", None)
+        if pb is None:
+            pb = getattr(q, "price_to_book", None)
+        if dy is None:
+            _dy_raw = getattr(q, "dividend_yield", None)
+            if _dy_raw is not None:
+                dy = round(_dy_raw * 100, 2) if _dy_raw < 1 else _dy_raw
     drv = getattr(payload, "derived", None)
     pe_vs = getattr(drv, "pe_vs_sector_pct", None) if drv is not None else None
     ev_vs = getattr(drv, "ev_ebitda_vs_sector_pct", None) if drv is not None else None
@@ -1003,6 +1028,21 @@ def _write_preview_pptx_portrait(
     sr = header.get("upside_pct") or {}
     spr = (sr.get("display_value") if isinstance(sr, dict) else sr) or memo.get("spread_pct") or cs.get("upside_to_average_target_pct")
     mcap = q.market_cap if q else None
+
+    # ── Yahoo Finance fallbacks for when MS data is missing ──
+    if q:
+        if rec in (None, "—", ""):
+            _yrec = getattr(q, "recommendation_key", None) or ""
+            if _yrec and _yrec != "none":
+                rec = _yrec.upper().replace("_", " ")
+        if tgt is None and getattr(q, "target_mean_price", None):
+            tgt = q.target_mean_price
+        if spr is None and tgt is not None and q.price and q.price > 0:
+            try:
+                spr = round((float(tgt) - q.price) / q.price * 100, 1)
+            except (TypeError, ValueError):
+                pass
+
     ts_val = pn(tgt)
     if curr and ts_val != "—":
         ts_val = f"{curr} {ts_val}"
@@ -1103,6 +1143,19 @@ def _write_preview_pptx_portrait(
     evv = pick(vm.get("ev_ebitda") or []) or pick(vm.get("ev_ebit") or [])
     pb = pick(vm.get("pbr") or [])
     dy = pick(vm.get("yield_pct") or [])
+
+    # Yahoo fallback for valuation multiples
+    if q:
+        if pe is None:
+            pe = getattr(q, "forward_pe", None) or getattr(q, "trailing_pe", None)
+        if evv is None:
+            evv = getattr(q, "ev_to_ebitda", None)
+        if pb is None:
+            pb = getattr(q, "price_to_book", None)
+        if dy is None:
+            _dy_raw = getattr(q, "dividend_yield", None)
+            if _dy_raw is not None:
+                dy = round(_dy_raw * 100, 2) if _dy_raw < 1 else _dy_raw  # Yahoo returns decimal
 
     DARK = RGBColor(0x0D, 0x11, 0x17)
     GOLD = RGBColor(0xC9, 0xA2, 0x27)
