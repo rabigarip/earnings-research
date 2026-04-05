@@ -547,12 +547,20 @@ def _write_preview_pptx(
     _ann_periods = _ann.get("periods") or _eps_div.get("periods") or []
     _ann_fy_prior = -1
     _ann_fy_est = -1
+    _curr_yr = datetime.now().year
     for _ai, _ap in enumerate(_ann_periods):
         _yr = "".join(c2 for c2 in str(_ap) if c2.isdigit())[:4]
-        if _yr in ("2024", "2025"):
+        try:
+            _yr_int = int(_yr)
+        except ValueError:
+            continue
+        if _yr_int <= _curr_yr:
             _ann_fy_prior = _ai
-        if _yr in ("2025", "2026"):
+        if _yr_int > _curr_yr and _ann_fy_est == -1:
             _ann_fy_est = _ai
+    if _ann_fy_est == -1 and len(_ann_periods) >= 2:
+        _ann_fy_prior = len(_ann_periods) - 2
+        _ann_fy_est = len(_ann_periods) - 1
 
     def _ann_val(key, idx):
         arr = _ann.get(key) or []
@@ -610,7 +618,9 @@ def _write_preview_pptx(
             ]
 
     pv = vm.get("periods") or []
-    i26 = next((i for i, p in enumerate(pv) if "2026" in str(p)), len(pv) - 1 if pv else -1)
+    _cy = str(datetime.now().year)
+    _ny = str(datetime.now().year + 1)
+    i26 = next((i for i, p in enumerate(pv) if _cy in str(p) or _ny in str(p)), len(pv) - 1 if pv else -1)
 
     def pick(arr):
         if not arr:
@@ -1007,12 +1017,20 @@ def _write_preview_pptx_portrait(
     _eps_div = getattr(payload, "ms_eps_dividend_forecasts", None) or {}
     _ann_periods = _ann.get("periods") or _eps_div.get("periods") or []
     _ann_fy_prior, _ann_fy_est = -1, -1
+    _curr_yr = datetime.now().year
     for _ai, _ap in enumerate(_ann_periods):
         _yr = "".join(c2 for c2 in str(_ap) if c2.isdigit())[:4]
-        if _yr in ("2024", "2025"):
+        try:
+            _yr_int = int(_yr)
+        except ValueError:
+            continue
+        if _yr_int <= _curr_yr:
             _ann_fy_prior = _ai
-        if _yr in ("2025", "2026"):
+        if _yr_int > _curr_yr and _ann_fy_est == -1:
             _ann_fy_est = _ai
+    if _ann_fy_est == -1 and len(_ann_periods) >= 2:
+        _ann_fy_prior = len(_ann_periods) - 2
+        _ann_fy_est = len(_ann_periods) - 1
 
     def _ann_val(key, idx):
         arr = _ann.get(key) or []
@@ -1069,7 +1087,9 @@ def _write_preview_pptx_portrait(
     ev_eps = cn.get("eps") or _ann_val("eps", _ann_fy_est)
 
     pv = vm.get("periods") or []
-    i26 = next((i for i, p in enumerate(pv) if "2026" in str(p)), len(pv) - 1 if pv else -1)
+    _cy = str(datetime.now().year)
+    _ny = str(datetime.now().year + 1)
+    i26 = next((i for i, p in enumerate(pv) if _cy in str(p) or _ny in str(p)), len(pv) - 1 if pv else -1)
     def pick(arr):
         if not arr:
             return None

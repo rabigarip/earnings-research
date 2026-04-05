@@ -270,6 +270,12 @@ def _normalize_period_label(text: str) -> str:
         if m.group(1):
             return f"{m.group(1)}Q{m.group(2)}"
         return f"{m.group(4)}Q{m.group(3)}"
+    # Semi-annual: 2024 S1, S1 2024, 2024 H1, H1 2024 -> 2024S1
+    m = re.match(r"(?:(\d{4})\s*[SH](\d)|[SH](\d)\s*(\d{4}))", text, re.I)
+    if m:
+        if m.group(1):
+            return f"{m.group(1)}S{m.group(2)}"
+        return f"{m.group(4)}S{m.group(3)}"
     return text
 
 
@@ -335,7 +341,8 @@ def _extract_period_header_and_rows(soup: BeautifulSoup, section_hint: str) -> t
         if not periods:
             continue
         # Prefer annual (fewer columns) vs quarterly (many)
-        is_quarterly = any("Q" in p for p in periods) or len(periods) > 12
+        _sub_annual_markers = ("Q", " S", "S1", "S2", "H1", "H2")
+        is_quarterly = any(any(m in p for m in _sub_annual_markers) for p in periods) or len(periods) > 12
         if section_hint == "quarterly" and not is_quarterly:
             continue
         if section_hint == "annual" and is_quarterly:
@@ -1067,19 +1074,21 @@ def fetch_valuation_multiples(base_company_url: str, cache_key_prefix: str | Non
 
     def _row(*labels: str) -> list[str]:
         for label in labels:
+            norm = label.lower().replace(" ", "").replace("/", "")
             for rlabel, vals in row_data:
-                if label.lower() in (rlabel or "").lower():
+                rnorm = (rlabel or "").lower().replace(" ", "").replace("/", "")
+                if norm in rnorm or rnorm in norm:
                     return vals
         return []
 
-    pe_vals = _row("P/E ratio")
-    pbr_vals = _row("PBR")
+    pe_vals = _row("P/E ratio", "PE ratio", "P/E")
+    pbr_vals = _row("PBR", "P/B", "Price to Book")
     peg_vals = _row("PEG")
-    cap_rev_vals = _row("Capitalization / Revenue")
-    ev_rev_vals = _row("EV / Revenue")
-    ev_ebit_vals = _row("EV / EBIT")
-    yield_vals = _row("Rate of return")
-    ev_ebitda_vals = _row("EV / EBITDA")
+    cap_rev_vals = _row("Capitalization / Revenue", "Cap/Revenue")
+    ev_rev_vals = _row("EV / Revenue", "EV/Revenue")
+    ev_ebit_vals = _row("EV / EBIT", "EV/EBIT")
+    yield_vals = _row("Rate of return", "Yield", "Dividend Yield")
+    ev_ebitda_vals = _row("EV / EBITDA", "EV/EBITDA")
 
     payload = {
         "source_page": url,

@@ -163,6 +163,7 @@ def fetch_financials(ticker: str, currency: str, is_bank: bool
     Returns {"quarterly": [...], "annual": [...]}.
     Each list contains FinancialPeriod objects or is empty.
     """
+    currency = (currency or "").strip() or "USD"
     try:
         yt = yf.Ticker(ticker)
         return {

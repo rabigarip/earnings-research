@@ -168,7 +168,7 @@ def _parse_consensus_summary(soup: BeautifulSoup) -> tuple[ConsensusSummaryData,
         warnings.append("analyst_count not found")
 
     # Last Close Price + currency
-    m = re.search(r"Last Close Price\s+([\d,.]+)\s*([A-Z]{3})", text)
+    m = re.search(r"Last Close Price\s+([\d,.]+)\s*([A-Za-z]{2,4})", text)
     if m:
         data.last_close_price = float(m.group(1).replace(",", ""))
         data.price_currency = m.group(2)
@@ -176,7 +176,7 @@ def _parse_consensus_summary(soup: BeautifulSoup) -> tuple[ConsensusSummaryData,
         warnings.append("last_close_price / price_currency not found")
 
     # Average target price (currency may appear after number)
-    m = re.search(r"Average target price\s+([\d,.]+)\s*([A-Z]{3})?", text)
+    m = re.search(r"Average target price\s+([\d,.]+)\s*([A-Za-z]{2,4})?", text)
     if m:
         data.average_target_price = float(m.group(1).replace(",", ""))
         if m.lastindex and m.lastindex >= 2 and m.group(2):
@@ -190,7 +190,7 @@ def _parse_consensus_summary(soup: BeautifulSoup) -> tuple[ConsensusSummaryData,
         warnings.append("upside_to_average_target_pct not found")
 
     # High Price Target (optional currency)
-    m = re.search(r"High Price Target\s+([\d,.]+)\s*(?:[A-Z]{3})?", text)
+    m = re.search(r"High Price Target\s+([\d,.]+)\s*(?:[A-Za-z]{2,4})?", text)
     if m:
         data.high_target_price = float(m.group(1).replace(",", ""))
 
@@ -200,7 +200,7 @@ def _parse_consensus_summary(soup: BeautifulSoup) -> tuple[ConsensusSummaryData,
         data.upside_to_high_target_pct = float(m.group(1).replace(",", ""))
 
     # Low Price Target (optional currency)
-    m = re.search(r"Low Price Target\s+([\d,.]+)\s*(?:[A-Z]{3})?", text)
+    m = re.search(r"Low Price Target\s+([\d,.]+)\s*(?:[A-Za-z]{2,4})?", text)
     if m:
         data.low_target_price = float(m.group(1).replace(",", ""))
 
