@@ -1377,7 +1377,7 @@ def _write_preview_pptx_portrait(
     prs.save(str(path))
 
 
-def run(payload: ReportPayload, memo_data: dict | None = None, qa_audit: dict | None = None) -> StepResult:
+def run(payload: ReportPayload, memo_data: dict | None = None, qa_audit: dict | None = None, data_warnings: list[str] | None = None) -> StepResult:
     with StepTimer() as t:
         try:
             iv_style = _iv_fallback_style()
@@ -1399,6 +1399,9 @@ def run(payload: ReportPayload, memo_data: dict | None = None, qa_audit: dict | 
                     quality_flags.append("MS suppressed: contamination")
                 if qa_audit.get("reused_default_payload_detected"):
                     quality_flags.append("Default payload reused")
+            # Add automated data validation warnings
+            if data_warnings:
+                quality_flags.extend(data_warnings)
             _write_preview_pptx_portrait(payload, out_path, memo_data, iv_text, watch, quality_flags or None)
             return StepResult(step_name=STEP, status=Status.SUCCESS, source="pptx", message=f"Report saved → {out_path}", data=str(out_path), elapsed_seconds=t.elapsed)
         except Exception as exc:

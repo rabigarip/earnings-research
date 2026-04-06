@@ -217,8 +217,16 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> list[StepResult]:
         except Exception:
             pass
 
+    # ── 11b. Automated data validation ─────────────────────────
+    data_warnings: list[str] = []
+    try:
+        from src.services.data_validation import validate_report_data
+        data_warnings = validate_report_data(payload, memo_data=memo_data)
+    except Exception:
+        pass
+
     # ── 12. Generate report (.pptx) ──────────────────────────
-    r = generate_report.run(payload, memo_data=memo_data, qa_audit=qa_audit)
+    r = generate_report.run(payload, memo_data=memo_data, qa_audit=qa_audit, data_warnings=data_warnings)
     _collect(r, results)
 
     _finish(run_id, ticker, t0, results)
