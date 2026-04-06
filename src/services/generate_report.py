@@ -759,7 +759,8 @@ def _write_preview_pptx(
     )
     tx(s2, Inches(0.8), Inches(3.35), Inches(4), Inches(0.35), "Key Expectations", sz=16, bold=True, rgb=BLACK)
     cy, ch, cw2, g = Inches(3.75), Inches(1.05), Inches(3.75), Inches(0.3)
-    cards = [("Revenue", pn(rv), pp(rc, True) if rc is not None else "—"), ("EPS", pn(ev_eps), pp(ec, True) if ec is not None else "—"), ("EBITDA Margin", pp(em) if em is not None else "—", "—")]
+    _ib = bool(_company_attr(c, "is_bank", False))
+    cards = [("Revenue", pn(rv), pp(rc, True) if rc is not None else "—"), ("EPS", pn(ev_eps), pp(ec, True) if ec is not None else "—"), ("EBITDA Margin", pp(em) if em is not None else ("N/A*" if _ib else "—"), "—")]
     for i, (lb, va, chg) in enumerate(cards):
         x = Inches(0.8) + i * (cw2 + g)
         rect(s2, x, cy, cw2, ch, WHITE, RGBColor(0xDB, 0xE0, 0xE6))
@@ -851,9 +852,12 @@ def _write_preview_pptx(
             x += cws[j]
     tx(s3, Inches(0.8), Inches(4.6), Inches(7), Inches(0.5), "Valuation Summary", sz=26, bold=True, rgb=BLACK)
     rect(s3, Inches(0.8), Inches(5.05), Inches(2.5), Inches(0.06), GOLD)
+    _is_bank_l = bool(_company_attr(c, "is_bank", False))
+    _ev_label = "EV/EBITDA"
+    _ev_val = f"{evv:.1f}x" if evv is not None else ("N/A*" if _is_bank_l else "—")
     boxes = [
         ("P/E (FY26E)", f"{pe:.1f}x" if pe is not None else "—", pe_vs),
-        ("EV/EBITDA", f"{evv:.1f}x" if evv is not None else "—", ev_vs),
+        (_ev_label, _ev_val, ev_vs),
         ("P/B", f"{pb:.1f}x" if pb is not None else "—", None),
         ("Div. Yield", f"{dy:.1f}%" if dy is not None else "—", None),
     ]
@@ -868,7 +872,10 @@ def _write_preview_pptx(
         tx(s3, x + Inches(0.2), y + Inches(0.38), bww - Inches(0.3), Inches(0.35), val, sz=24, bold=True, rgb=GOLD)
         vs_text = "vs. — sector avg" if vs is None else f"vs. {vs:+.0f}% sector avg"
         tx(s3, x + Inches(2.8), y + Inches(0.45), bww - Inches(2.9), Inches(0.3), vs_text, sz=11, rgb=MUTED)
-    tx(s3, Inches(0.8), Inches(7.15), Inches(12), Inches(0.3), f"Source: Consensus and estimates as of {datetime.now().strftime('%d %b %Y')}", sz=10, rgb=MUTED)
+    _src_y = Inches(7.15)
+    tx(s3, Inches(0.8), _src_y, Inches(12), Inches(0.3), f"Source: Consensus and estimates as of {datetime.now().strftime('%d %b %Y')}", sz=10, rgb=MUTED)
+    if _is_bank_l:
+        tx(s3, Inches(0.8), _src_y + Inches(0.2), Inches(12), Inches(0.3), "* EBITDA / EV-EBITDA not applicable for banks and financial institutions", sz=9, rgb=MUTED)
     if quality_flags:
         tx(
             s3,
@@ -1317,9 +1324,10 @@ def _write_preview_pptx_portrait(
     # Valuation Summary
     tx(s3, Inches(0.6), Inches(4.2), Inches(6), Inches(0.4), "Valuation Summary", sz=22, bold=True, rgb=BLACK)
     rect(s3, Inches(0.6), Inches(4.6), Inches(2), Inches(0.05), GOLD)
+    _is_bank_p = bool(_company_attr(c, "is_bank", False))
     boxes = [
         ("P/E (FY26E)", f"{pe:.1f}x" if pe is not None else "—"),
-        ("EV/EBITDA", f"{evv:.1f}x" if evv is not None else "—"),
+        ("EV/EBITDA", f"{evv:.1f}x" if evv is not None else ("N/A*" if _is_bank_p else "—")),
         ("P/B", f"{pb:.1f}x" if pb is not None else "—"),
         ("Div. Yield", f"{dy:.1f}%" if dy is not None else "—"),
     ]
@@ -1333,6 +1341,8 @@ def _write_preview_pptx_portrait(
         tx(s3, x + Inches(0.18), y + Inches(0.4), vbw - Inches(0.3), Inches(0.35), val, sz=22, bold=True, rgb=GOLD)
 
     tx(s3, Inches(0.6), Inches(7.2), Inches(6), Inches(0.3), f"Source: Consensus and estimates as of {datetime.now().strftime('%d %b %Y')}", sz=9, rgb=MUTED)
+    if _is_bank_p:
+        tx(s3, Inches(0.6), Inches(7.4), Inches(6), Inches(0.3), "* EBITDA / EV-EBITDA not applicable for banks and financial institutions", sz=8, rgb=MUTED)
     if quality_flags:
         tx(s3, Inches(0.6), Inches(7.45), Inches(6), Inches(0.3), "Data Quality: " + "; ".join(quality_flags[:4]), sz=9, rgb=MUTED)
 
