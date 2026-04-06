@@ -14,6 +14,16 @@ revenue_warn_pct = 5.0
 revenue_alert_pct = 15.0
 eps_warn_pct = 10.0
 
+[validation]
+# Automated data validation thresholds (adjust per market if needed)
+pe_max = 500                    # P/E above this triggers warning
+ps_max = 200                    # Price/Sales above this triggers warning
+target_price_max_ratio = 5.0    # Target / price ratio above this = flag
+target_price_min_ratio = 0.2    # Target / price ratio below this = flag
+yoy_extreme_pct = 500           # YoY growth above this = flag as extreme
+analyst_count_max = 100         # More than this = suspicious
+ms_yahoo_divergence_ratio = 3.0 # MS vs Yahoo target divergence ratio threshold
+
 [news]
 # Recent context window for memo (extended to 60 days for broader coverage)
 recent_days = 60

@@ -288,16 +288,27 @@ def insert_discovered_company(
     industry: str = "",
     is_bank: bool = False,
 ) -> dict | None:
-    """Insert a company auto-discovered from yfinance (not in seed).
-    Returns the inserted row as dict, or None on failure.
-    Does NOT overwrite existing rows."""
+    """Insert or update a company auto-discovered from yfinance.
+    On conflict (ticker exists), updates name/sector/currency/isin
+    but preserves manually-curated MarketScreener mappings."""
     conn = get_conn()
     try:
         conn.execute("""
-            INSERT OR IGNORE INTO company_master
+            INSERT INTO company_master
                 (ticker, company_name, company_name_long, exchange, country,
                  currency, isin, sector, industry, is_bank)
             VALUES (?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(ticker) DO UPDATE SET
+                company_name = CASE WHEN excluded.company_name != '' THEN excluded.company_name ELSE company_master.company_name END,
+                company_name_long = CASE WHEN excluded.company_name_long != '' THEN excluded.company_name_long ELSE company_master.company_name_long END,
+                exchange = CASE WHEN excluded.exchange != '' THEN excluded.exchange ELSE company_master.exchange END,
+                country = CASE WHEN excluded.country != '' THEN excluded.country ELSE company_master.country END,
+                currency = CASE WHEN excluded.currency != '' THEN excluded.currency ELSE company_master.currency END,
+                isin = CASE WHEN excluded.isin != '' THEN excluded.isin ELSE company_master.isin END,
+                sector = CASE WHEN excluded.sector != '' THEN excluded.sector ELSE company_master.sector END,
+                industry = CASE WHEN excluded.industry != '' THEN excluded.industry ELSE company_master.industry END,
+                is_bank = excluded.is_bank,
+                updated_at = CURRENT_TIMESTAMP
         """, (
             ticker, company_name, company_name_long, exchange, country,
             currency, isin, sector, industry, int(is_bank),

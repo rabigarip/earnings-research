@@ -42,7 +42,19 @@ def _get_model():
         )
     genai.configure(api_key=key)
     settings = cfg()
-    _model = genai.GenerativeModel(settings["gemini"]["model"])
+    model_name = settings["gemini"]["model"]
+    # Try primary model, fall back to alternatives if deprecated
+    _fallback_models = [model_name, "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    for m in _fallback_models:
+        try:
+            _model = genai.GenerativeModel(m)
+            if m != model_name:
+                log.warning("Primary Gemini model '%s' unavailable, using fallback '%s'", model_name, m)
+            return _model
+        except Exception:
+            continue
+    # Last resort: use whatever was configured
+    _model = genai.GenerativeModel(model_name)
     return _model
 
 

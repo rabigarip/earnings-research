@@ -426,7 +426,9 @@ def _write_preview_pptx(
     def qlab(ps):
         raw = (ps or f"{(datetime.now().month - 1) // 3 + 1}Q{datetime.now().strftime('%y')}").replace(" ", "").strip().upper()
         qn = next((c for c in raw if c in "1234"), "1")
-        yr = next(("20" + y for y in ("25", "26", "27", "24") if y in raw), "2026")
+        _cy2 = datetime.now().strftime("%y")
+        _search_yrs = [_cy2, str(int(_cy2)+1), str(int(_cy2)-1), str(int(_cy2)+2)]
+        yr = next(("20" + y for y in _search_yrs if y in raw), str(datetime.now().year))
         return f"Q{qn} {yr}"
 
     def tx(
@@ -978,7 +980,9 @@ def _write_preview_pptx_portrait(
     def qlab(ps):
         raw = (ps or f"{(datetime.now().month - 1) // 3 + 1}Q{datetime.now().strftime('%y')}").replace(" ", "").strip().upper()
         qn = next((c for c in raw if c in "1234"), "1")
-        yr = next(("20" + y for y in ("25", "26", "27", "24") if y in raw), str(datetime.now().year))
+        _cy2p = datetime.now().strftime("%y")
+        _search_yrs_p = [_cy2p, str(int(_cy2p)+1), str(int(_cy2p)-1), str(int(_cy2p)+2)]
+        yr = next(("20" + y for y in _search_yrs_p if y in raw), str(datetime.now().year))
         return f"Q{qn} {yr}"
 
     def tx(sl, x, y, w, h, t, *, sz=12, bold=False, rgb=RGBColor(0, 0, 0), al=PP_ALIGN.LEFT, word_wrap=True, line_spacing=None):

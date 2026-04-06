@@ -11,9 +11,19 @@ import logging
 log = logging.getLogger(__name__)
 
 
+def _thresholds() -> dict:
+    """Load validation thresholds from config, with safe defaults."""
+    try:
+        from src.config import cfg
+        return cfg().get("validation", {})
+    except Exception:
+        return {}
+
+
 def validate_report_data(payload, memo_data: dict | None = None) -> list[str]:
     """Run all validation checks. Returns list of human-readable warnings."""
     warnings: list[str] = []
+    th = _thresholds()
     q = getattr(payload, "quote", None)
     c = getattr(payload, "company", None)
     cs = getattr(payload, "consensus_summary", None) or {}
@@ -29,15 +39,18 @@ def validate_report_data(payload, memo_data: dict | None = None) -> list[str]:
     target = cs.get("average_target_price")
     if target and price and price > 0:
         ratio = target / price
-        if ratio > 5.0:
+        _tgt_max = th.get("target_price_max_ratio", 5.0)
+        _tgt_min = th.get("target_price_min_ratio", 0.2)
+        if ratio > _tgt_max:
             warnings.append(f"Target price ({target:.2f}) is {ratio:.0f}x current price ({price:.2f}) — verify")
-        elif ratio < 0.2:
+        elif ratio < _tgt_min:
             warnings.append(f"Target price ({target:.2f}) is far below current price ({price:.2f}) — verify")
 
     # ── 2. P/E bounds ──
     pe_vals = vm.get("pe") or []
+    _pe_max = th.get("pe_max", 500)
     for i, pe in enumerate(pe_vals):
-        if pe is not None and (pe < 0 or pe > 500):
+        if pe is not None and (pe < 0 or pe > _pe_max):
             warnings.append(f"P/E {pe:.1f}x outside normal range (0-500x)")
             break
     # Yahoo P/E cross-check
@@ -60,13 +73,13 @@ def validate_report_data(payload, memo_data: dict | None = None) -> list[str]:
         # MS revenue is typically in millions; Yahoo mcap is in raw units
         rev_scaled = latest_rev * 1e6 if latest_rev < 1e9 else latest_rev
         ps_ratio = mcap / rev_scaled
-        if ps_ratio > 200:
+        if ps_ratio > th.get("ps_max", 200):
             warnings.append(f"Price/Sales ratio {ps_ratio:.0f}x unusually high — verify revenue units")
 
     # ── 4. YoY growth bounds ──
     for label, key in [("Revenue", "yoy_revenue_pct_table"), ("NI", "yoy_ni_pct_table"), ("EPS", "yoy_eps_pct_table")]:
         yoy = memo.get(key)
-        if yoy is not None and abs(yoy) > 500:
+        if yoy is not None and abs(yoy) > th.get("yoy_extreme_pct", 500):
             warnings.append(f"{label} YoY {yoy:+.1f}% is extreme — verify comparison period")
 
     # ── 5. Consensus vs Yahoo target cross-check ──
@@ -74,7 +87,8 @@ def validate_report_data(payload, memo_data: dict | None = None) -> list[str]:
     ms_target = cs.get("average_target_price")
     if ya_target and ms_target and ya_target > 0:
         tgt_ratio = ms_target / ya_target
-        if tgt_ratio < 0.3 or tgt_ratio > 3.0:
+        _div_r = th.get("ms_yahoo_divergence_ratio", 3.0)
+        if tgt_ratio < 1/_div_r or tgt_ratio > _div_r:
             warnings.append(f"MS target ({ms_target:.2f}) diverges from Yahoo ({ya_target:.2f}) — possible wrong entity")
 
     # ── 6. Currency consistency ──
@@ -99,7 +113,7 @@ def validate_report_data(payload, memo_data: dict | None = None) -> list[str]:
 
     # ── 9. Analyst count sanity ──
     analyst_count = cs.get("analyst_count")
-    if analyst_count is not None and (analyst_count < 1 or analyst_count > 100):
+    if analyst_count is not None and (analyst_count < 1 or analyst_count > th.get("analyst_count_max", 100)):
         warnings.append(f"Analyst count ({analyst_count}) outside normal range (1-100)")
 
     # ── 10. Stale earnings date ──
@@ -113,6 +127,33 @@ def validate_report_data(payload, memo_data: dict | None = None) -> list[str]:
                 warnings.append(f"Earnings date ({earnings_date}) is in the past")
         except (ValueError, TypeError):
             pass
+
+    # ── 11. MarketScreener data completeness (drift detection) ──
+    # If MS pages returned SUCCESS but zero data points, the HTML structure may have changed
+    ms_pages_ok = bool(getattr(payload, "ms_annual_forecasts", None) or
+                       getattr(payload, "ms_valuation_multiples", None) or
+                       getattr(payload, "ms_eps_dividend_forecasts", None))
+    ms_consensus_ok = bool(cs.get("consensus_rating") or cs.get("average_target_price"))
+    if not ms_pages_ok and not ms_consensus_ok:
+        # Check if we even tried MS (company has an MS slug)
+        ms_url = getattr(c, "marketscreener_company_url", "") if c else ""
+        if ms_url:
+            warnings.append("MarketScreener returned no data despite valid URL — possible HTML structure change")
+
+    # ── 12. Yahoo data completeness ──
+    ya_actuals = getattr(payload, "annual_actuals", None) or []
+    if q and price and not ya_actuals:
+        warnings.append("Yahoo quote exists but no annual financials — yfinance may need updating")
+
+    # ── 13. Report has at least some financial data ──
+    has_any_table_data = bool(
+        memo.get("calendar_next_quarter") or
+        memo.get("calendar_prior_quarter_released") or
+        ann.get("net_sales") or
+        ya_actuals
+    )
+    if not has_any_table_data:
+        warnings.append("No financial data from any source — report will have empty tables")
 
     if warnings:
         log.warning("Data validation warnings for %s: %s", ticker, "; ".join(warnings))
