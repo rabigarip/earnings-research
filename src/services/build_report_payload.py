@@ -9,6 +9,8 @@ lineage/entity or URL checks fail.
 """
 
 from __future__ import annotations
+import logging
+log = logging.getLogger(__name__)
 from copy import deepcopy
 from datetime import datetime, timezone
 
@@ -117,6 +119,20 @@ def _compute_memo(
     out["currency"] = (getattr(company, "currency", None) or "").strip()
     out["country"] = getattr(company, "country", "")
 
+    # Price sanity check: suppress MS consensus if price diverges >3x from Yahoo
+    # (detects wrong-entity contamination, e.g. Riyad Bank data on Al Rajhi page)
+    if consensus_summary and quote and getattr(quote, "price", None):
+        _ms_close = consensus_summary.get("last_close_price")
+        if _ms_close and quote.price > 0:
+            _ratio = _ms_close / quote.price
+            if _ratio < 0.3 or _ratio > 3.0:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Suppressing MS consensus: price divergence %.1fx (MS close=%.2f vs Yahoo=%.2f) for %s",
+                    _ratio, _ms_close, quote.price, getattr(company, "ticker", "?"),
+                )
+                consensus_summary = None
+
     # Consensus details (recommendation, analyst count, target)
     if consensus_summary:
         out["consensus_recommendation"] = consensus_summary.get("consensus_rating")
@@ -143,8 +159,19 @@ def _compute_memo(
         out["spread_pct"] = consensus_summary["upside_to_average_target_pct"]
     elif consensus_summary and consensus_summary.get("average_target_price") is not None:
         t = consensus_summary["average_target_price"]
-        # Prefer current quote price over MS last_close (which can be stale)
         p = (getattr(quote, "price", None) if quote else None) or consensus_summary.get("last_close_price")
+        # Sanity check: if MS last_close differs from Yahoo price by >50%, MS data is likely wrong entity
+        _ms_close = consensus_summary.get("last_close_price")
+        _ya_price = getattr(quote, "price", None) if quote else None
+        if _ms_close and _ya_price and _ya_price > 0:
+            _price_ratio = _ms_close / _ya_price
+            if _price_ratio < 0.3 or _price_ratio > 3.0:
+                # Price divergence too large — likely wrong company in MS. Suppress MS consensus.
+                consensus_summary = {}
+                out.pop("consensus_recommendation", None)
+                out.pop("implied_upside_pct", None)
+                out.pop("spread_pct", None)
+                p = None
         if p and p != 0:
             out["spread_pct"] = round((t - p) / p * 100, 1)
     if consensus_summary and consensus_summary.get("downside_to_low_target_pct") is not None:
@@ -633,6 +660,15 @@ def run(
             ms_calendar_events = None
             ms_quarterly_results_table = None
             ms_fingerprint = ""
+
+        # Price sanity: suppress consensus_summary if MS price diverges >3x from Yahoo
+        if consensus_summary and quote and getattr(quote, "price", None):
+            _ms_cl = consensus_summary.get("last_close_price") if isinstance(consensus_summary, dict) else None
+            if _ms_cl and quote.price > 0:
+                _r = _ms_cl / quote.price
+                if _r < 0.3 or _r > 3.0:
+                    log.warning("Suppressed consensus_summary: price divergence %.1fx for %s", _r, getattr(company, "ticker", "?"))
+                    consensus_summary = None
 
         # ── Memo-specific computed (for front-page memo) ─────────────────────
         memo_computed = _compute_memo(
