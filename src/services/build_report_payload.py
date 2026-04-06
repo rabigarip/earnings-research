@@ -141,10 +141,12 @@ def _compute_memo(
     if consensus_summary and consensus_summary.get("upside_to_average_target_pct") is not None:
         out["implied_upside_pct"] = consensus_summary["upside_to_average_target_pct"]
         out["spread_pct"] = consensus_summary["upside_to_average_target_pct"]
-    elif consensus_summary and consensus_summary.get("average_target_price") is not None and consensus_summary.get("last_close_price") and consensus_summary["last_close_price"] != 0:
+    elif consensus_summary and consensus_summary.get("average_target_price") is not None:
         t = consensus_summary["average_target_price"]
-        p = consensus_summary["last_close_price"]
-        out["spread_pct"] = round((t - p) / p * 100, 1)
+        # Prefer current quote price over MS last_close (which can be stale)
+        p = (getattr(quote, "price", None) if quote else None) or consensus_summary.get("last_close_price")
+        if p and p != 0:
+            out["spread_pct"] = round((t - p) / p * 100, 1)
     if consensus_summary and consensus_summary.get("downside_to_low_target_pct") is not None:
         out["implied_downside_pct"] = consensus_summary["downside_to_low_target_pct"]
 

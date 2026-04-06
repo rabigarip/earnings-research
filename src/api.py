@@ -240,22 +240,19 @@ def _run_preview_and_response(ticker: str, skip_llm: bool = True, *, raise_on_re
     run_id = ""
     payload = None
     for r in results:
-        if r.step_name == "build_report_payload" and r.status != Status.FAILED and r.data is not None:
+        if r.step_name == "build_report_payload" and r.data is not None:
             run_id = getattr(r.data, "run_id", "") or run_id
-            try:
-                payload = r.data.model_dump(mode="json")
-            except Exception:
-                payload = None
-        if not run_id and getattr(r, "data", None) and hasattr(r.data, "run_id"):
-            run_id = getattr(r.data, "run_id", "")
+            if r.status != Status.FAILED:
+                try:
+                    payload = r.data.model_dump(mode="json")
+                except Exception:
+                    payload = None
+    # Fallback: latest run for this ticker from DB
     if not run_id:
-        for r in results:
-            d = getattr(r.data, "step_results", []) if getattr(r, "data", None) else []
-            for s in (d or []):
-                if isinstance(s, dict) and s.get("run_id"):
-                    run_id = s.get("run_id", "")
-                    break
-            if run_id:
+        from src.storage.db import list_runs
+        for run_row in list_runs():
+            if run_row.get("ticker", "").upper() == ticker.upper() and run_row.get("memo_path"):
+                run_id = run_row["run_id"]
                 break
 
     steps = [r.to_log_dict() for r in results]

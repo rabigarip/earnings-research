@@ -40,7 +40,7 @@ def validate_ticker(ticker: str) -> StepResult:
         from src.storage.db import load_company
         exists_locally = bool(load_company(ticker))
         if not exists_locally:
-            # Last chance: try auto-discovery (yfinance .info may work even when validate fails)
+            # Last chance: auto-discovery uses same yfinance API but also inserts into DB
             try:
                 from src.services.resolve_mapping import _auto_discover
                 discovered = _auto_discover(ticker)

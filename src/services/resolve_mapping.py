@@ -53,7 +53,7 @@ def _auto_discover(ticker: str) -> dict | None:
             company_name_long=info.get("longName", name),
             exchange=info.get("exchange", ""),
             country=info.get("country", ""),
-            currency=info.get("currency", ""),
+            currency=info.get("currency") or "USD",
             isin=isin,
             sector=info.get("sector", ""),
             industry=industry,

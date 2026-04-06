@@ -623,11 +623,11 @@ def _write_preview_pptx(
         if len(ya) >= 2:
             _ya_cur, _ya_pri = ya[0], ya[1]
             def _toM(v):
-                """Scale raw Yahoo values to millions (Yahoo returns full units)."""
+                """Scale raw Yahoo values to millions. Yahoo returns full units (e.g. 5e8 for 500M)."""
                 if v is None: return None
                 try:
                     x = float(v)
-                    return round(x / 1e6, 1) if abs(x) >= 1e8 else x
+                    return round(x / 1e6, 1) if abs(x) >= 1e6 else x
                 except (TypeError, ValueError):
                     return v
             _is_bank = bool(_company_attr(c, "is_bank", False))
@@ -1139,11 +1139,11 @@ def _write_preview_pptx_portrait(
         if len(ya) >= 2:
             _ya_cur, _ya_pri = ya[0], ya[1]
             def _toM(v):
-                """Scale raw Yahoo values to millions (Yahoo returns full units)."""
+                """Scale raw Yahoo values to millions. Yahoo returns full units (e.g. 5e8 for 500M)."""
                 if v is None: return None
                 try:
                     x = float(v)
-                    return round(x / 1e6, 1) if abs(x) >= 1e8 else x
+                    return round(x / 1e6, 1) if abs(x) >= 1e6 else x
                 except (TypeError, ValueError):
                     return v
             _is_bank = bool(_company_attr(c, "is_bank", False))
