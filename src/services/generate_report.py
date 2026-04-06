@@ -630,9 +630,14 @@ def _write_preview_pptx(
                     return round(x / 1e6, 1) if abs(x) >= 1e8 else x
                 except (TypeError, ValueError):
                     return v
+            _is_bank = bool(_company_attr(c, "is_bank", False))
+            _ebitda_row = (f"EBITDA {_cM}", _toM(_ya_pri.ebitda), _toM(_ya_cur.ebitda), _yoy_pct(_ya_pri.ebitda, _ya_cur.ebitda))
+            # Banks: replace EBITDA with EBIT (operating income) if available
+            if _is_bank and _ya_pri.ebitda is None:
+                _ebitda_row = (f"EBIT {_cM}", _toM(getattr(_ya_pri, "ebit", None)), _toM(getattr(_ya_cur, "ebit", None)), _yoy_pct(getattr(_ya_pri, "ebit", None), getattr(_ya_cur, "ebit", None)))
             rows = [
                 (f"Revenue {_cM}", _toM(_ya_pri.revenue), _toM(_ya_cur.revenue), _yoy_pct(_ya_pri.revenue, _ya_cur.revenue)),
-                (f"EBITDA {_cM}", _toM(_ya_pri.ebitda), _toM(_ya_cur.ebitda), _yoy_pct(_ya_pri.ebitda, _ya_cur.ebitda)),
+                _ebitda_row,
                 (f"Net Income {_cM}", _toM(_ya_pri.net_income), _toM(_ya_cur.net_income), _yoy_pct(_ya_pri.net_income, _ya_cur.net_income)),
                 (f"EPS {_cU}", _ya_pri.eps, _ya_cur.eps, _yoy_pct(_ya_pri.eps, _ya_cur.eps)),
                 (f"FCF {_cM}", None, None, None),
@@ -834,6 +839,7 @@ def _write_preview_pptx(
         rect(s3, x, tby, cws[j], rh, BLACK, RGBColor(0xDB, 0xE0, 0xE6))
         tx(s3, x + Inches(0.15), tby + Inches(0.08), cws[j] - Inches(0.3), rh, h, sz=12, bold=True, rgb=WHITE)
         x += cws[j]
+    rows = [(lb, pa, ce, yy) for lb, pa, ce, yy in rows if pa is not None or ce is not None]
     for i, (lb, pa, ce, yy) in enumerate(rows):
         y = tby + rh * (i + 1)
         x = tbx
@@ -1133,9 +1139,13 @@ def _write_preview_pptx_portrait(
                     return round(x / 1e6, 1) if abs(x) >= 1e8 else x
                 except (TypeError, ValueError):
                     return v
+            _is_bank = bool(_company_attr(c, "is_bank", False))
+            _ebitda_row_p = (f"EBITDA {_cM}", _toM(_ya_pri.ebitda), _toM(_ya_cur.ebitda), _yoy_pct(_ya_pri.ebitda, _ya_cur.ebitda))
+            if _is_bank and _ya_pri.ebitda is None:
+                _ebitda_row_p = (f"EBIT {_cM}", _toM(getattr(_ya_pri, "ebit", None)), _toM(getattr(_ya_cur, "ebit", None)), _yoy_pct(getattr(_ya_pri, "ebit", None), getattr(_ya_cur, "ebit", None)))
             rows = [
                 (f"Revenue {_cM}", _toM(_ya_pri.revenue), _toM(_ya_cur.revenue), _yoy_pct(_ya_pri.revenue, _ya_cur.revenue)),
-                (f"EBITDA {_cM}", _toM(_ya_pri.ebitda), _toM(_ya_cur.ebitda), _yoy_pct(_ya_pri.ebitda, _ya_cur.ebitda)),
+                _ebitda_row_p,
                 (f"Net Income {_cM}", _toM(_ya_pri.net_income), _toM(_ya_cur.net_income), _yoy_pct(_ya_pri.net_income, _ya_cur.net_income)),
                 (f"EPS {_cU}", _ya_pri.eps, _ya_cur.eps, _yoy_pct(_ya_pri.eps, _ya_cur.eps)),
             ]
@@ -1293,6 +1303,7 @@ def _write_preview_pptx_portrait(
         rect(s3, x, tby, cws[j], rh, BLACK, RGBColor(0xDB, 0xE0, 0xE6))
         tx(s3, x + Inches(0.1), tby + Inches(0.08), cws[j] - Inches(0.2), rh, h, sz=10, bold=True, rgb=WHITE)
         x += cws[j]
+    rows = [(lb, pa, ce, yy) for lb, pa, ce, yy in rows if pa is not None or ce is not None]
     for i, (lb, pa, ce, yy) in enumerate(rows):
         y = tby + rh * (i + 1)
         x = tbx
