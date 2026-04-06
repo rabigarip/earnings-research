@@ -124,7 +124,7 @@ def run_readiness_check(payload: ReportPayload, step_results: list[StepResult]) 
     fq_failed = any(
         r.step_name == "fetch_quote" and r.status == Status.FAILED for r in step_results
     )
-    if not fq_failed and not _has_quote(payload):
+    if not _readiness_permissive() and not fq_failed and not _has_quote(payload):
         reasons.append(
             "No usable Yahoo quote (price or market cap). Cover slide and sizing cannot be shown reliably."
         )
