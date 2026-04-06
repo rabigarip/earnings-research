@@ -622,10 +622,18 @@ def _write_preview_pptx(
         ya = sorted(getattr(payload, "annual_actuals", None) or [], key=lambda p: p.period_label, reverse=True)
         if len(ya) >= 2:
             _ya_cur, _ya_pri = ya[0], ya[1]
+            def _toM(v):
+                """Scale raw Yahoo values to millions (Yahoo returns full units)."""
+                if v is None: return None
+                try:
+                    x = float(v)
+                    return round(x / 1e6, 1) if abs(x) >= 1e8 else x
+                except (TypeError, ValueError):
+                    return v
             rows = [
-                (f"Revenue {_cM}", _ya_pri.revenue, _ya_cur.revenue, _yoy_pct(_ya_pri.revenue, _ya_cur.revenue)),
-                (f"EBITDA {_cM}", _ya_pri.ebitda, _ya_cur.ebitda, _yoy_pct(_ya_pri.ebitda, _ya_cur.ebitda)),
-                (f"Net Income {_cM}", _ya_pri.net_income, _ya_cur.net_income, _yoy_pct(_ya_pri.net_income, _ya_cur.net_income)),
+                (f"Revenue {_cM}", _toM(_ya_pri.revenue), _toM(_ya_cur.revenue), _yoy_pct(_ya_pri.revenue, _ya_cur.revenue)),
+                (f"EBITDA {_cM}", _toM(_ya_pri.ebitda), _toM(_ya_cur.ebitda), _yoy_pct(_ya_pri.ebitda, _ya_cur.ebitda)),
+                (f"Net Income {_cM}", _toM(_ya_pri.net_income), _toM(_ya_cur.net_income), _yoy_pct(_ya_pri.net_income, _ya_cur.net_income)),
                 (f"EPS {_cU}", _ya_pri.eps, _ya_cur.eps, _yoy_pct(_ya_pri.eps, _ya_cur.eps)),
                 (f"FCF {_cM}", None, None, None),
             ]
@@ -686,10 +694,11 @@ def _write_preview_pptx(
     if not rv and _rows_empty:
         _ya_sorted = sorted(getattr(payload, "annual_actuals", None) or [], key=lambda p: p.period_label, reverse=True)
         if _ya_sorted:
-            rv = _ya_sorted[0].revenue
+            _toM_l = lambda v: round(float(v) / 1e6, 1) if v is not None and abs(float(v)) >= 1e8 else v
+            rv = _toM_l(_ya_sorted[0].revenue)
             ev_eps = _ya_sorted[0].eps
             if len(_ya_sorted) >= 2 and _ya_sorted[1].revenue:
-                rc = _yoy_pct(_ya_sorted[1].revenue, rv)
+                rc = _yoy_pct(_ya_sorted[1].revenue, _ya_sorted[0].revenue)
                 ec = _yoy_pct(_ya_sorted[1].eps, ev_eps)
             if _ya_sorted[0].ebitda and _ya_sorted[0].revenue and _ya_sorted[0].revenue != 0:
                 em = round(_ya_sorted[0].ebitda / _ya_sorted[0].revenue * 100, 1)
@@ -1116,15 +1125,28 @@ def _write_preview_pptx_portrait(
         ya = sorted(getattr(payload, "annual_actuals", None) or [], key=lambda p: p.period_label, reverse=True)
         if len(ya) >= 2:
             _ya_cur, _ya_pri = ya[0], ya[1]
+            def _toM(v):
+                """Scale raw Yahoo values to millions (Yahoo returns full units)."""
+                if v is None: return None
+                try:
+                    x = float(v)
+                    return round(x / 1e6, 1) if abs(x) >= 1e8 else x
+                except (TypeError, ValueError):
+                    return v
             rows = [
-                (f"Revenue {_cM}", _ya_pri.revenue, _ya_cur.revenue, _yoy_pct(_ya_pri.revenue, _ya_cur.revenue)),
-                (f"EBITDA {_cM}", _ya_pri.ebitda, _ya_cur.ebitda, _yoy_pct(_ya_pri.ebitda, _ya_cur.ebitda)),
-                (f"Net Income {_cM}", _ya_pri.net_income, _ya_cur.net_income, _yoy_pct(_ya_pri.net_income, _ya_cur.net_income)),
+                (f"Revenue {_cM}", _toM(_ya_pri.revenue), _toM(_ya_cur.revenue), _yoy_pct(_ya_pri.revenue, _ya_cur.revenue)),
+                (f"EBITDA {_cM}", _toM(_ya_pri.ebitda), _toM(_ya_cur.ebitda), _yoy_pct(_ya_pri.ebitda, _ya_cur.ebitda)),
+                (f"Net Income {_cM}", _toM(_ya_pri.net_income), _toM(_ya_cur.net_income), _yoy_pct(_ya_pri.net_income, _ya_cur.net_income)),
                 (f"EPS {_cU}", _ya_pri.eps, _ya_cur.eps, _yoy_pct(_ya_pri.eps, _ya_cur.eps)),
             ]
 
     rv = cn.get("net_sales") or cn.get("revenue") or _ann_val("net_sales", _ann_fy_est)
     ev_eps = cn.get("eps") or _ann_val("eps", _ann_fy_est)
+    # If table has data but cards don't, pull from the table rows (estimate or actual)
+    if not rv and rows:
+        rv = rows[0][2] or rows[0][1]  # Revenue: estimate first, then actual
+    if not ev_eps and len(rows) > 3:
+        ev_eps = rows[3][2] or rows[3][1]  # EPS: estimate first, then actual
 
     pv = vm.get("periods") or []
     _cy = str(datetime.now().year)
