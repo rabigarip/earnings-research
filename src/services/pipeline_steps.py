@@ -36,12 +36,18 @@ def validate_ticker(ticker: str) -> StepResult:
     with StepTimer() as t:
         info = _yahoo_validate(ticker)
     if info is None:
-        # Critical steps are only validate_ticker + resolve_mapping in pipeline.py.
-        # If Yahoo can not identify the ticker, we downgrade to PARTIAL *only when the ticker exists*
-        # in our local company mapping. This keeps smoke tests for truly invalid tickers (e.g. ZZZZ.FAKE)
-        # behaving as FAILED, while letting known tickers proceed for static payload isolation tests.
+        # Yahoo failed — check local DB or try auto-discovery before giving up.
         from src.storage.db import load_company
         exists_locally = bool(load_company(ticker))
+        if not exists_locally:
+            # Last chance: try auto-discovery (yfinance .info may work even when validate fails)
+            try:
+                from src.services.resolve_mapping import _auto_discover
+                discovered = _auto_discover(ticker)
+                if discovered:
+                    exists_locally = True
+            except Exception:
+                pass
         if not exists_locally:
             return StepResult(
                 step_name="validate_ticker", status=Status.FAILED, source="yahoo",
@@ -72,8 +78,8 @@ def fetch_quote(ticker: str) -> StepResult:
         q = _yahoo_quote(ticker)
     if q is None:
         return StepResult(
-            step_name="fetch_quote", status=Status.FAILED, source="yahoo",
-            message=f"No price data returned for {ticker}",
+            step_name="fetch_quote", status=Status.PARTIAL, source="yahoo",
+            message=f"Yahoo Finance — quote: No price data returned for {ticker}",
             elapsed_seconds=t.elapsed,
         )
     sign = "+" if (q.change_pct or 0) >= 0 else ""
