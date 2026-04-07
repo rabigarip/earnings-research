@@ -34,6 +34,12 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> tuple[str, list[StepR
     t0 = datetime.now(timezone.utc)
     results: list[StepResult] = []
 
+    if not (ticker or "").strip():
+        r = StepResult(step_name="validate_ticker", status=Status.FAILED, source="local",
+                       message="Empty ticker")
+        results.append(r)
+        return run_id, results
+
     _banner(ticker, run_id, t0)
 
     # ── 1. Validate ticker (CRITICAL) ─────────────────────────
