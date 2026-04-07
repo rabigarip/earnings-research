@@ -1171,10 +1171,11 @@ def _write_preview_pptx_portrait(
                 rec = _yrec.upper().replace("_", " ")
         if tgt is None and getattr(q, "target_mean_price", None):
             tgt = q.target_mean_price
-    # Always compute upside from live price
-    if tgt is not None and q and q.price and q.price > 0:
+    # Compute upside from best available price (Yahoo live → MS last_close)
+    _live_price = (q.price if q else None) or _ms_price
+    if tgt is not None and _live_price and _live_price > 0:
         try:
-            spr = round((float(tgt) - q.price) / q.price * 100, 1)
+            spr = round((float(tgt) - _live_price) / _live_price * 100, 1)
         except (TypeError, ValueError):
             spr = memo.get("spread_pct") or cs.get("upside_to_average_target_pct")
 
