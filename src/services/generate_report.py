@@ -626,7 +626,7 @@ def _write_preview_pptx(
             return round((est - prior) / abs(prior) * 100, 1)
         return None
 
-    _has_quarterly = bool(cp.get("net_sales") or cn.get("net_sales") or cn.get("revenue"))
+    _has_quarterly = bool((cp.get("net_sales") or cp.get("revenue")) and (cn.get("net_sales") or cn.get("revenue")))
     _cM = f"({curr}M)" if curr else "(M)"
     _cU = f"({curr})" if curr else ""
     if _has_quarterly:
@@ -1118,7 +1118,11 @@ def _write_preview_pptx_portrait(
     # Determine report type: quarterly preview vs annual consensus
     _cp_early = memo.get("calendar_prior_quarter_released") or {}
     _cn_early = memo.get("calendar_next_quarter") or {}
-    _has_quarterly_early = bool(_cp_early.get("net_sales") or _cn_early.get("net_sales") or _cn_early.get("revenue"))
+    # Quarterly mode only when BOTH prior AND estimate exist (not just one sparse quarter)
+    _has_quarterly_early = bool(
+        (_cp_early.get("net_sales") or _cp_early.get("revenue")) and
+        (_cn_early.get("net_sales") or _cn_early.get("revenue"))
+    )
 
     # Annual data boundary
     _af_early = getattr(payload, "ms_annual_forecasts", None) or {}
@@ -1178,6 +1182,8 @@ def _write_preview_pptx_portrait(
     if curr and ts_val != "—":
         ts_val = f"{curr} {ts_val}"
     ms_val = pn(mcap, bil=True)
+    if ms_val == "—" and _ms_price:
+        ms_val = f"Price: {_ms_price}"  # Show price when market cap unavailable
     if curr and ms_val != "—":
         ms_val = f"{curr} {ms_val}"
     sections = (memo_data or {}).get("pptx_sections") or {}
@@ -1235,7 +1241,7 @@ def _write_preview_pptx_portrait(
 
     cp = memo.get("calendar_prior_quarter_released") or {}
     cn = memo.get("calendar_next_quarter") or {}
-    _has_quarterly = bool(cp.get("net_sales") or cn.get("net_sales") or cn.get("revenue"))
+    _has_quarterly = bool((cp.get("net_sales") or cp.get("revenue")) and (cn.get("net_sales") or cn.get("revenue")))
     _cM = f"({curr}M)" if curr else "(M)"
     _cU = f"({curr})" if curr else ""
     if _has_quarterly:
