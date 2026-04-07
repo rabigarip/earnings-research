@@ -292,51 +292,26 @@ class CreateReportRequest(BaseModel):
 
 
 import re as _re
-import threading
-import uuid as _uuid
 
 _TICKER_RE = _re.compile(r"^[A-Z0-9\.\-]{1,20}$")
-
-# Background job tracker
-_jobs: dict = {}
-
-
-def _run_job(job_id: str, ticker: str, skip_llm: bool):
-    try:
-        data = _run_preview_and_response(ticker, skip_llm=skip_llm, raise_on_readiness=False)
-        _jobs[job_id]["result"] = data
-        _jobs[job_id]["status"] = "completed"
-    except Exception as e:
-        _jobs[job_id]["error"] = str(e)
-        _jobs[job_id]["status"] = "failed"
 
 
 @app.post("/api/reports")
 def create_report(req: CreateReportRequest):
-    """Start report generation in background. Returns job_id for polling."""
+    """Create a report synchronously. Returns report row + payload + steps."""
     ticker = (req.ticker or "").strip().upper()
     if not ticker:
         raise HTTPException(status_code=400, detail="ticker is required")
     if not _TICKER_RE.match(ticker):
         raise HTTPException(status_code=400, detail="Invalid ticker format")
-    job_id = _uuid.uuid4().hex[:12]
-    _jobs[job_id] = {"status": "running", "ticker": ticker, "result": None, "error": None}
-    t = threading.Thread(target=_run_job, args=(job_id, ticker, req.skip_llm), daemon=True)
-    t.start()
-    return {"job_id": job_id, "status": "running", "ticker": ticker}
-
-
-@app.get("/api/reports/job/{job_id}")
-def poll_job(job_id: str):
-    """Poll background job status."""
-    job = _jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    if job["status"] == "running":
-        return {"job_id": job_id, "status": "running", "ticker": job["ticker"]}
-    if job["status"] == "failed":
-        raise HTTPException(status_code=500, detail=job["error"] or "Report generation failed")
-    return {"job_id": job_id, "status": "completed", **(job["result"] or {})}
+    try:
+        data = _run_preview_and_response(ticker, skip_llm=req.skip_llm)
+        return data
+    except HTTPException:
+        raise
+    except Exception as e:
+        msg = str(e).strip() or repr(e)
+        raise HTTPException(status_code=500, detail=f"Report creation failed: {msg}")
 
 
 @app.post("/api/reports/{run_id}/rerun")
