@@ -405,6 +405,15 @@ def _compute_memo(
     if ni_cons is not None and same_ly_ni and same_ly_ni != 0:
         out["yoy_ni_pct_table"] = round((ni_cons - same_ly_ni) / abs(same_ly_ni) * 100, 1)
 
+    # EBITDA QoQ / YoY
+    ebitda_cons = cal_next.get("ebitda")
+    prior_ebitda = cal_prior.get("ebitda")
+    same_ly_ebitda = cal_same_ly.get("ebitda")
+    if ebitda_cons is not None and prior_ebitda and prior_ebitda != 0:
+        out["qoq_ebitda_pct"] = round((ebitda_cons - prior_ebitda) / abs(prior_ebitda) * 100, 1)
+    if ebitda_cons is not None and same_ly_ebitda and same_ly_ebitda != 0:
+        out["yoy_ebitda_pct_table"] = round((ebitda_cons - same_ly_ebitda) / abs(same_ly_ebitda) * 100, 1)
+
     # EPS QoQ / YoY when preview consensus and comparison actuals exist
     eps_cons = cal_next.get("eps")
     prior_eps = cal_prior.get("eps")
