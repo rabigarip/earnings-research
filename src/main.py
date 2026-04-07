@@ -117,7 +117,7 @@ def main() -> None:
         from src.pipeline import run_preview
         # Do not delete outputs here. Each run writes a unique run_id-based filename,
         # and deleting can break downloads for recent runs.
-        results = run_preview(args.ticker, skip_llm=args.skip_llm)
+        _rid, results = run_preview(args.ticker, skip_llm=args.skip_llm)
 
         from src.models.step_result import Status
         any_fail = any(r.status == Status.FAILED for r in results)
@@ -157,7 +157,7 @@ def main() -> None:
         print(f"[calendar] Tickers with earnings within {args.days} days: {len(matches)}")
         from src.pipeline import run_preview
         for t in matches:
-            run_preview(t, skip_llm=args.skip_llm)
+            _rid, _res = run_preview(t, skip_llm=args.skip_llm)
 
         sys.exit(0)
 
@@ -169,7 +169,7 @@ def main() -> None:
         from src.pipeline import run_preview
         any_fail = False
         for t in tickers:
-            results = run_preview(t, skip_llm=args.skip_llm)
+            _rid, results = run_preview(t, skip_llm=args.skip_llm)
             from src.models.step_result import Status
             if any(r.status == Status.FAILED for r in results):
                 any_fail = True

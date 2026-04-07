@@ -231,29 +231,20 @@ def _run_preview_and_response(ticker: str, skip_llm: bool = True, *, raise_on_re
     from src.models.step_result import Status
     from src.storage.db import load_company, load_run
 
-    results = run_preview(ticker, skip_llm=skip_llm)
+    run_id, results = run_preview(ticker, skip_llm=skip_llm)
     err = _readiness_error_detail(results)
     if err and raise_on_readiness:
         raise HTTPException(status_code=422, detail=err)
     statuses = {r.status for r in results}
     overall = "partial" if (Status.FAILED in statuses or Status.PARTIAL in statuses) else "success"
-    run_id = ""
+    # run_id comes directly from pipeline (no fragile extraction needed)
     payload = None
     for r in results:
-        if r.step_name == "build_report_payload" and r.data is not None:
-            run_id = getattr(r.data, "run_id", "") or run_id
-            if r.status != Status.FAILED:
-                try:
-                    payload = r.data.model_dump(mode="json")
-                except Exception:
-                    payload = None
-    # Fallback: latest run for this ticker from DB
-    if not run_id:
-        from src.storage.db import list_runs
-        for run_row in list_runs():
-            if run_row.get("ticker", "").upper() == ticker.upper() and run_row.get("memo_path"):
-                run_id = run_row["run_id"]
-                break
+        if r.step_name == "build_report_payload" and r.data is not None and r.status != Status.FAILED:
+            try:
+                payload = r.data.model_dump(mode="json")
+            except Exception:
+                payload = None
 
     steps = [r.to_log_dict() for r in results]
 
@@ -376,38 +367,20 @@ def run_preview_api(req: PreviewRequest):
     if not ticker:
         raise HTTPException(status_code=400, detail="ticker is required")
 
-    results = run_preview(ticker, skip_llm=req.skip_llm)
+    run_id, results = run_preview(ticker, skip_llm=req.skip_llm)
     err = _readiness_error_detail(results)
     if err:
         raise HTTPException(status_code=422, detail=err)
 
-    # Overall status
     statuses = {r.status for r in results}
     overall = "partial" if (Status.FAILED in statuses or Status.PARTIAL in statuses) else "success"
-
-    # Run ID from first step or from build_report_payload step
-    run_id = ""
     payload = None
     for r in results:
         if r.step_name == "build_report_payload" and r.status != Status.FAILED and r.data is not None:
-            run_id = getattr(r.data, "run_id", "") or run_id
             try:
                 payload = r.data.model_dump(mode="json")
             except Exception:
                 payload = None
-        if not run_id and hasattr(r, "data") and r.data and hasattr(r.data, "run_id"):
-            run_id = getattr(r.data, "run_id", "")
-
-    if not run_id and results:
-        # Fallback: use step_results from last step if they contain run_id
-        for r in results:
-            d = getattr(r.data, "step_results", []) if r.data else []
-            for s in (d or []):
-                if isinstance(s, dict) and s.get("run_id"):
-                    run_id = s.get("run_id", "")
-                    break
-            if run_id:
-                break
 
     steps = [r.to_log_dict() for r in results]
     return PreviewResponse(run_id=run_id, overall=overall, steps=steps, payload=payload)

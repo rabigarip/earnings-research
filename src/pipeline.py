@@ -28,7 +28,8 @@ from src.storage.db import save_run
 logger = logging.getLogger(__name__)
 
 
-def run_preview(ticker: str, *, skip_llm: bool = False) -> list[StepResult]:
+def run_preview(ticker: str, *, skip_llm: bool = False) -> tuple[str, list[StepResult]]:
+    """Returns (run_id, step_results)."""
     run_id = uuid.uuid4().hex[:8]
     t0 = datetime.now(timezone.utc)
     results: list[StepResult] = []
@@ -40,14 +41,14 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> list[StepResult]:
     _collect(r, results)
     if r.status == Status.FAILED:
         _finish(run_id, ticker, t0, results)
-        return results
+        return run_id, results
 
     # ── 2. Resolve company mapping (CRITICAL) ─────────────────
     r = resolve_mapping.run(ticker)
     _collect(r, results)
     if r.status == Status.FAILED:
         _finish(run_id, ticker, t0, results)
-        return results
+        return run_id, results
     company = r.data
 
     # ── 3. Fetch quote ────────────────────────────────────────
@@ -163,7 +164,7 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> list[StepResult]:
     _collect(r, results)
     if r.status == Status.FAILED:
         _finish(run_id, ticker, t0, results)
-        return results
+        return run_id, results
     payload = r.data
 
     # Persist MS fingerprint for cross-company contamination checks
@@ -188,7 +189,7 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> list[StepResult]:
     _collect(r, results)
     if r.status == Status.FAILED:
         _finish(run_id, ticker, t0, results)
-        return results
+        return run_id, results
 
     # ── 11. Draft slide text (LLM LAST) ─────────────────────
     # We draft PPTX sections (thesis / watch / catalysts / risks) via Gemini when an API key is present.
@@ -230,7 +231,7 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> list[StepResult]:
     _collect(r, results)
 
     _finish(run_id, ticker, t0, results)
-    return results
+    return run_id, results
 
 
 # ── Helpers ───────────────────────────────────────────────────
