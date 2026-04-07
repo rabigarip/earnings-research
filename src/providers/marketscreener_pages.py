@@ -1098,6 +1098,8 @@ def fetch_valuation_multiples(base_company_url: str, cache_key_prefix: str | Non
     ev_ebit_vals = _row("EV / EBIT", "EV/EBIT")
     yield_vals = _row("Rate of return", "Yield", "Dividend Yield")
     ev_ebitda_vals = _row("EV / EBITDA", "EV/EBITDA")
+    eps_vals = _row("EPS", "Earnings Per Share")
+    dps_vals = _row("Dividend per Share", "DPS")
 
     payload = {
         "source_page": url,
@@ -1112,6 +1114,8 @@ def fetch_valuation_multiples(base_company_url: str, cache_key_prefix: str | Non
         "ev_ebit": [_coerce_numeric_or_none(v) for v in ev_ebit_vals],
         "ev_ebitda": [_coerce_numeric_or_none(v) for v in ev_ebitda_vals],
         "yield_pct": [_coerce_numeric_or_none(v) for v in yield_vals],
+        "eps": [_coerce_numeric_or_none(v) for v in eps_vals],
+        "dps": [_coerce_numeric_or_none(v) for v in dps_vals],
         "warnings": [],
     }
 

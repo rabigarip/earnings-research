@@ -518,9 +518,9 @@ def _write_preview_pptx(
     tgt = tgt if tgt is not None else cs.get("average_target_price")
     sr = header.get("upside_pct") or {}
     spr = (sr.get("display_value") if isinstance(sr, dict) else sr)
-    spr = spr if spr is not None else memo.get("spread_pct") or cs.get("upside_to_average_target_pct")
+    spr = None  # Always recalculate from live price for accuracy
     mcap = q.market_cap if q else None
-    # Yahoo fallbacks for rating/target/upside
+    # Yahoo fallbacks for rating/target
     if q:
         if rec in (None, "—", ""):
             _yrec = getattr(q, "recommendation_key", None) or ""
@@ -528,11 +528,12 @@ def _write_preview_pptx(
                 rec = _yrec.upper().replace("_", " ")
         if tgt is None and getattr(q, "target_mean_price", None):
             tgt = q.target_mean_price
-        if spr is None and tgt is not None and q.price and q.price > 0:
-            try:
-                spr = round((float(tgt) - q.price) / q.price * 100, 1)
-            except (TypeError, ValueError):
-                pass
+    # Always compute upside from live price (not stale MS last_close)
+    if tgt is not None and q and q.price and q.price > 0:
+        try:
+            spr = round((float(tgt) - q.price) / q.price * 100, 1)
+        except (TypeError, ValueError):
+            spr = memo.get("spread_pct") or cs.get("upside_to_average_target_pct")
     if display_ccy and display_ccy != curr:
         try:
             from src.utils.currency import convert
@@ -562,29 +563,47 @@ def _write_preview_pptx(
     _ann_periods = _ann.get("periods") or _eps_div.get("periods") or []
     _ann_fy_prior = -1
     _ann_fy_est = -1
-    _curr_yr = datetime.now().year
+    # Use announcement dates to determine actual vs estimate boundary:
+    # If announcement date exists (not "-" or empty), it's an actual.
+    _ann_dates = _ann.get("announcement_dates") or []
     for _ai, _ap in enumerate(_ann_periods):
-        _yr = "".join(c2 for c2 in str(_ap) if c2.isdigit())[:4]
-        try:
-            _yr_int = int(_yr)
-        except ValueError:
-            continue
-        if _yr_int <= _curr_yr:
-            _ann_fy_prior = _ai
-        if _yr_int > _curr_yr and _ann_fy_est == -1:
-            _ann_fy_est = _ai
+        _has_ann_date = (_ai < len(_ann_dates) and _ann_dates[_ai] and str(_ann_dates[_ai]).strip() not in ("", "-", "None"))
+        if _has_ann_date:
+            _ann_fy_prior = _ai  # latest actual (keeps overwriting)
+        elif _ann_fy_est == -1:
+            _ann_fy_est = _ai    # first estimate
+    # Fallback if no announcement dates available: use year-based logic
+    if _ann_fy_prior == -1 and _ann_fy_est == -1:
+        _curr_yr = datetime.now().year
+        for _ai, _ap in enumerate(_ann_periods):
+            _yr = "".join(c2 for c2 in str(_ap) if c2.isdigit())[:4]
+            try:
+                _yr_int = int(_yr)
+            except ValueError:
+                continue
+            if _yr_int < _curr_yr:
+                _ann_fy_prior = _ai
+            if _yr_int >= _curr_yr and _ann_fy_est == -1:
+                _ann_fy_est = _ai
     if _ann_fy_est == -1 and len(_ann_periods) >= 2:
         _ann_fy_prior = len(_ann_periods) - 2
         _ann_fy_est = len(_ann_periods) - 1
+
+    _vm = getattr(payload, "ms_valuation_multiples", None) or {}
 
     def _ann_val(key, idx):
         arr = _ann.get(key) or []
         if 0 <= idx < len(arr) and arr[idx] is not None:
             return arr[idx]
         if key == "eps":
+            # Fallback 1: /valuation-dividend/ page
             eps_arr = _eps_div.get("eps") or []
             if 0 <= idx < len(eps_arr) and eps_arr[idx] is not None:
                 return eps_arr[idx]
+            # Fallback 2: /valuation/ page (has EPS in its own row)
+            vm_eps = _vm.get("eps") or []
+            if 0 <= idx < len(vm_eps) and vm_eps[idx] is not None:
+                return vm_eps[idx]
         return None
 
     def _yoy_pct(prior, est):
@@ -1051,11 +1070,10 @@ def _write_preview_pptx_portrait(
     rec = (rr.get("display_value") if isinstance(rr, dict) else rr) or (cs.get("consensus_rating") or "—")
     tr = header.get("average_target_price") or {}
     tgt = (tr.get("display_value") if isinstance(tr, dict) else tr) or cs.get("average_target_price")
-    sr = header.get("upside_pct") or {}
-    spr = (sr.get("display_value") if isinstance(sr, dict) else sr) or memo.get("spread_pct") or cs.get("upside_to_average_target_pct")
+    spr = None  # Always recalculate from live price
     mcap = q.market_cap if q else None
 
-    # ── Yahoo Finance fallbacks for when MS data is missing ──
+    # Yahoo fallbacks for rating/target
     if q:
         if rec in (None, "—", ""):
             _yrec = getattr(q, "recommendation_key", None) or ""
@@ -1063,11 +1081,12 @@ def _write_preview_pptx_portrait(
                 rec = _yrec.upper().replace("_", " ")
         if tgt is None and getattr(q, "target_mean_price", None):
             tgt = q.target_mean_price
-        if spr is None and tgt is not None and q.price and q.price > 0:
-            try:
-                spr = round((float(tgt) - q.price) / q.price * 100, 1)
-            except (TypeError, ValueError):
-                pass
+    # Always compute upside from live price
+    if tgt is not None and q and q.price and q.price > 0:
+        try:
+            spr = round((float(tgt) - q.price) / q.price * 100, 1)
+        except (TypeError, ValueError):
+            spr = memo.get("spread_pct") or cs.get("upside_to_average_target_pct")
 
     ts_val = pn(tgt)
     if curr and ts_val != "—":
@@ -1083,29 +1102,44 @@ def _write_preview_pptx_portrait(
     _eps_div = getattr(payload, "ms_eps_dividend_forecasts", None) or {}
     _ann_periods = _ann.get("periods") or _eps_div.get("periods") or []
     _ann_fy_prior, _ann_fy_est = -1, -1
-    _curr_yr = datetime.now().year
+    _ann_dates = _ann.get("announcement_dates") or []
     for _ai, _ap in enumerate(_ann_periods):
-        _yr = "".join(c2 for c2 in str(_ap) if c2.isdigit())[:4]
-        try:
-            _yr_int = int(_yr)
-        except ValueError:
-            continue
-        if _yr_int <= _curr_yr:
+        _has_ann_date = (_ai < len(_ann_dates) and _ann_dates[_ai] and str(_ann_dates[_ai]).strip() not in ("", "-", "None"))
+        if _has_ann_date:
             _ann_fy_prior = _ai
-        if _yr_int > _curr_yr and _ann_fy_est == -1:
+        elif _ann_fy_est == -1:
             _ann_fy_est = _ai
+    if _ann_fy_prior == -1 and _ann_fy_est == -1:
+        _curr_yr = datetime.now().year
+        for _ai, _ap in enumerate(_ann_periods):
+            _yr = "".join(c2 for c2 in str(_ap) if c2.isdigit())[:4]
+            try:
+                _yr_int = int(_yr)
+            except ValueError:
+                continue
+            if _yr_int < _curr_yr:
+                _ann_fy_prior = _ai
+            if _yr_int >= _curr_yr and _ann_fy_est == -1:
+                _ann_fy_est = _ai
     if _ann_fy_est == -1 and len(_ann_periods) >= 2:
         _ann_fy_prior = len(_ann_periods) - 2
         _ann_fy_est = len(_ann_periods) - 1
+
+    _vm = getattr(payload, "ms_valuation_multiples", None) or {}
 
     def _ann_val(key, idx):
         arr = _ann.get(key) or []
         if 0 <= idx < len(arr) and arr[idx] is not None:
             return arr[idx]
         if key == "eps":
+            # Fallback 1: /valuation-dividend/ page
             eps_arr = _eps_div.get("eps") or []
             if 0 <= idx < len(eps_arr) and eps_arr[idx] is not None:
                 return eps_arr[idx]
+            # Fallback 2: /valuation/ page (has EPS in its own row)
+            vm_eps = _vm.get("eps") or []
+            if 0 <= idx < len(vm_eps) and vm_eps[idx] is not None:
+                return vm_eps[idx]
         return None
 
     def _yoy_pct(prior, est):
@@ -1251,6 +1285,15 @@ def _write_preview_pptx_portrait(
     rect(s2, Inches(0.6), Inches(1.95), Inches(0.06), Inches(5.5), GOLD)
     tx(s2, Inches(0.78), Inches(2.1), Inches(6.0), Inches(5.2), iv_text or "—", sz=12, rgb=BLACK, line_spacing=1.15)
 
+    # Compute EBITDA margin for key expectations card
+    _em_rev = cn.get("net_sales") or _ann_val("net_sales", _ann_fy_est)
+    _em_ebitda = cn.get("ebitda") or _ann_val("ebitda", _ann_fy_est)
+    _is_bank_card = bool(_company_attr(c, "is_bank", False))
+    if _em_rev and _em_ebitda and _em_rev != 0:
+        _em_display = pp(round(_em_ebitda / _em_rev * 100, 1))
+    else:
+        _em_display = "N/A*" if _is_bank_card else "—"
+
     # Key Expectations — 3 cards
     tx(s2, Inches(0.6), Inches(7.65), Inches(4), Inches(0.3), "Key Expectations", sz=14, bold=True, rgb=BLACK)
     cw2 = Inches(2.0)
@@ -1258,7 +1301,7 @@ def _write_preview_pptx_portrait(
     for i, (lb, va, chg) in enumerate([
         ("Revenue", pn(rv), pp(memo.get("yoy_revenue_pct_table") or memo.get("qoq_revenue_pct"), True) if rv else "—"),
         ("EPS", pn(ev_eps), "—"),
-        ("EBITDA Margin", pp(cn.get("ebitda_margin") or cp.get("ebitda_margin")) if (cn.get("ebitda_margin") or cp.get("ebitda_margin")) else "—", "—"),
+        ("EBITDA Margin", _em_display, "—"),
     ][:3]):
         x = Inches(0.6) + i * (cw2 + cg)
         rect(s2, x, Inches(8.0), cw2, Inches(0.85), WHITE, RGBColor(0xDB, 0xE0, 0xE6))
