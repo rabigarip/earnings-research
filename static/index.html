@@ -7,6 +7,38 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;1,400;1,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <script>
+      // Intercept POST /api/reports to add async polling (prevents Render timeout)
+      const _origFetch = window.fetch;
+      window.fetch = async function(url, opts) {
+        if (typeof url === 'string' && url.includes('/api/reports') && opts && opts.method === 'POST' && !url.includes('/rerun')) {
+          // Start async job
+          const startRes = await _origFetch(url, opts);
+          if (!startRes.ok) return startRes;
+          const startData = await startRes.json();
+          if (!startData.job_id) {
+            // Old sync response — return as-is wrapped in a new Response
+            return new Response(JSON.stringify(startData), { status: 200, headers: {'Content-Type': 'application/json'} });
+          }
+          // Poll for completion
+          const jobId = startData.job_id;
+          for (let i = 0; i < 90; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            const pollRes = await _origFetch(`/api/reports/job/${jobId}`);
+            if (!pollRes.ok) {
+              const err = await pollRes.json().catch(() => ({}));
+              return new Response(JSON.stringify(err), { status: pollRes.status, headers: {'Content-Type': 'application/json'} });
+            }
+            const pollData = await pollRes.json();
+            if (pollData.status === 'completed') {
+              return new Response(JSON.stringify(pollData), { status: 200, headers: {'Content-Type': 'application/json'} });
+            }
+          }
+          return new Response(JSON.stringify({detail: 'Report generation timed out'}), { status: 504, headers: {'Content-Type': 'application/json'} });
+        }
+        return _origFetch(url, opts);
+      };
+    </script>
     <script type="module" crossorigin src="/assets/index-DfjJFbt3.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-TTpJKOpB.css">
   </head>

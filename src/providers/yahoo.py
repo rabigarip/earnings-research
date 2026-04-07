@@ -19,8 +19,8 @@ import yfinance as yf
 from src.models.financials import FinancialPeriod, QuoteSnapshot
 
 # Retry config for Yahoo rate-limit / transient errors
-_YAHOO_RETRIES = 3
-_YAHOO_BACKOFF_SEC = 2.0
+_YAHOO_RETRIES = 2
+_YAHOO_BACKOFF_SEC = 1.0
 
 
 # ── Ticker validation ─────────────────────────────────────────

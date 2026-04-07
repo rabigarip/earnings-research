@@ -3,9 +3,9 @@ app_name = "earnings-research"
 version = "0.1.0"
 
 [scraping]
-timeout_seconds = 15
-min_delay_seconds = 1.0
-max_delay_seconds = 3.0
+timeout_seconds = 10
+min_delay_seconds = 0.5
+max_delay_seconds = 1.5
 cache_html = true
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 
