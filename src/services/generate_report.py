@@ -501,10 +501,15 @@ def _write_preview_pptx(
 
     c, q, memo = payload.company, payload.quote, payload.memo_computed or {}
     header, cs, vm = (memo_data or {}).get("header") or {}, payload.consensus_summary or {}, payload.ms_valuation_multiples or {}
+    # MS price fallback when Yahoo has no price (Oman, Bahrain, some UAE)
+    _ms_price = cs.get("last_close_price") if cs else None
+    _ms_ccy = cs.get("price_currency") if cs else None
     name = getattr(c, "company_name", None) or _company_attr(c, "company_name", "")
     tk = getattr(c, "ticker", None) or _company_attr(c, "ticker", "")
     sec = f"{_company_attr(c, 'sector', '')} / {_company_attr(c, 'industry', '')}".strip(" /") or "—"
     curr = (getattr(c, "currency", None) or "USD").strip()
+    if not curr or curr == "USD":
+        curr = _ms_ccy or curr  # Use MS currency if company currency unknown
     display_ccy = (cfg().get("report", {}).get("display_currency", "") or "").strip().upper() or curr
     pshort = (memo_data or {}).get("preview_short") or memo.get("preview_quarter_short") or f"{(datetime.now().month - 1) // 3 + 1}Q{datetime.now().strftime('%y')}"
     q_label = qlab(pshort)
@@ -520,6 +525,16 @@ def _write_preview_pptx(
     spr = (sr.get("display_value") if isinstance(sr, dict) else sr)
     spr = None  # Always recalculate from live price for accuracy
     mcap = q.market_cap if q else None
+    # Use MS price as fallback when Yahoo has no price (frontier markets)
+    _live_price = (q.price if q else None) or _ms_price
+    if not mcap and _ms_price:
+        # Estimate market cap from MS last_close × shares (from valuation page)
+        _shares = None
+        try:
+            _shares_arr = vm.get("shares") or []
+            _shares = next((s for s in reversed(_shares_arr) if s), None)
+        except Exception:
+            pass
     # Yahoo fallbacks for rating/target
     if q:
         if rec in (None, "—", ""):
@@ -528,10 +543,10 @@ def _write_preview_pptx(
                 rec = _yrec.upper().replace("_", " ")
         if tgt is None and getattr(q, "target_mean_price", None):
             tgt = q.target_mean_price
-    # Always compute upside from live price (not stale MS last_close)
-    if tgt is not None and q and q.price and q.price > 0:
+    # Compute upside from best available price (Yahoo live → MS last_close)
+    if tgt is not None and _live_price and _live_price > 0:
         try:
-            spr = round((float(tgt) - q.price) / q.price * 100, 1)
+            spr = round((float(tgt) - _live_price) / _live_price * 100, 1)
         except (TypeError, ValueError):
             spr = memo.get("spread_pct") or cs.get("upside_to_average_target_pct")
     if display_ccy and display_ccy != curr:
@@ -637,7 +652,33 @@ def _write_preview_pptx(
             (f"FCF {_cM}", _ann_val("fcf", _ann_fy_prior), _ann_val("fcf", _ann_fy_est), None),
         ]
 
-    # Last resort: Yahoo Finance actuals when MS data is suppressed (entity validation)
+    # Last resort: Yahoo or MS income statement actuals when forecasts unavailable
+    _rows_empty = all(r[1] is None and r[2] is None for r in rows)
+    if _rows_empty:
+        # Try MS income statement actuals first (works for Oman, Bahrain, frontier markets)
+        _ms_is = getattr(payload, "ms_income_statement_actuals", None) or {}
+        _ms_is_periods = _ms_is.get("periods") or []
+        _ms_is_rev = _ms_is.get("total_revenues") or _ms_is.get("revenues_before_provision_for_loan_losses") or []
+        _ms_is_ni = _ms_is.get("net_income_is") or _ms_is.get("net_income_to_company") or []
+        _ms_is_eps = _ms_is.get("eps_basic") or []
+        if len(_ms_is_periods) >= 2 and (_ms_is_rev or _ms_is_ni):
+            _p, _c = -2, -1  # second-last and last period
+            def _ms_is_val(arr, idx):
+                if arr and 0 <= (len(arr)+idx) < len(arr):
+                    return arr[idx]
+                return None
+            def _ms_toM(v):
+                if v is None: return None
+                try:
+                    x = float(v)
+                    return round(x / 1e6, 1) if abs(x) >= 1e6 else x
+                except: return v
+            rows = [
+                (f"Revenue {_cM}", _ms_toM(_ms_is_val(_ms_is_rev, _p)), _ms_toM(_ms_is_val(_ms_is_rev, _c)), _yoy_pct(_ms_is_val(_ms_is_rev, _p), _ms_is_val(_ms_is_rev, _c))),
+                (f"Net Income {_cM}", _ms_toM(_ms_is_val(_ms_is_ni, _p)), _ms_toM(_ms_is_val(_ms_is_ni, _c)), _yoy_pct(_ms_is_val(_ms_is_ni, _p), _ms_is_val(_ms_is_ni, _c))),
+                (f"EPS {_cU}", _ms_is_val(_ms_is_eps, _p), _ms_is_val(_ms_is_eps, _c), _yoy_pct(_ms_is_val(_ms_is_eps, _p), _ms_is_val(_ms_is_eps, _c))),
+            ]
+
     _rows_empty = all(r[1] is None and r[2] is None for r in rows)
     if _rows_empty:
         ya = sorted(getattr(payload, "annual_actuals", None) or [], key=lambda p: p.period_label, reverse=True)
@@ -1057,10 +1098,14 @@ def _write_preview_pptx_portrait(
 
     c, q, memo = payload.company, payload.quote, payload.memo_computed or {}
     header, cs, vm = (memo_data or {}).get("header") or {}, payload.consensus_summary or {}, payload.ms_valuation_multiples or {}
+    _ms_price = cs.get("last_close_price") if cs else None
+    _ms_ccy = cs.get("price_currency") if cs else None
     name = getattr(c, "company_name", None) or _company_attr(c, "company_name", "")
     tk = getattr(c, "ticker", None) or _company_attr(c, "ticker", "")
     sec = f"{_company_attr(c, 'sector', '')} / {_company_attr(c, 'industry', '')}".strip(" /") or "—"
     curr = (getattr(c, "currency", None) or "USD").strip()
+    if not curr or curr == "USD":
+        curr = _ms_ccy or curr
     pshort = (memo_data or {}).get("preview_short") or memo.get("preview_quarter_short") or f"{(datetime.now().month - 1) // 3 + 1}Q{datetime.now().strftime('%y')}"
     q_label = qlab(pshort)
     ed = header.get("expected_report_date") or {}
