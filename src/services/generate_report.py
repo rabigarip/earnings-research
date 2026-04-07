@@ -896,7 +896,16 @@ def _write_preview_pptx(
     tbx, tby = Inches(0.8), Inches(1.6)
     cws = [Inches(4.0), Inches(2.3), Inches(2.3), Inches(2.0)]
     rh = Inches(0.45)
-    hdrs = ["Metric", "Q prior A", "Q current E", "YoY %"] if _has_quarterly else ["Metric", "FY prior A", "FY current E", "YoY %"]
+    if _has_quarterly:
+        hdrs = ["Metric", "Q prior (A)", "Q next (E)", "YoY %"]
+    elif _first_est_period:
+        _last_act = None
+        for _i2, _d2 in enumerate(_ann_dates_early):
+            if _d2 and str(_d2).strip() not in ("", "-", "None"):
+                _last_act = _ann_periods_early[_i2] if _i2 < len(_ann_periods_early) else None
+        hdrs = ["Metric", f"{_last_act or 'Prior'} (A)", f"{_first_est_period} (E)", "YoY %"]
+    else:
+        hdrs = ["Metric", "Prior (A)", "Current (E)", "YoY %"]
     x = tbx
     for j, h in enumerate(hdrs):
         rect(s3, x, tby, cws[j], rh, BLACK, RGBColor(0xDB, 0xE0, 0xE6))
@@ -935,7 +944,7 @@ def _write_preview_pptx(
         vs_text = "vs. — sector avg" if vs is None else f"vs. {vs:+.0f}% sector avg"
         tx(s3, x + Inches(2.8), y + Inches(0.45), bww - Inches(2.9), Inches(0.3), vs_text, sz=11, rgb=MUTED)
     _src_y = Inches(7.15)
-    tx(s3, Inches(0.8), _src_y, Inches(12), Inches(0.3), f"Source: Consensus and estimates as of {datetime.now().strftime('%d %b %Y')}", sz=10, rgb=MUTED)
+    tx(s3, Inches(0.8), _src_y, Inches(12), Inches(0.3), f"Actuals: company filings via Yahoo Finance  |  Estimates: MarketScreener analyst consensus as of {datetime.now().strftime('%d %b %Y')}", sz=10, rgb=MUTED)
     if _is_bank_l:
         tx(s3, Inches(0.8), _src_y + Inches(0.2), Inches(12), Inches(0.3), "* EBITDA / EV-EBITDA not applicable for banks and financial institutions", sz=9, rgb=MUTED)
     if quality_flags:
@@ -1106,8 +1115,32 @@ def _write_preview_pptx_portrait(
     curr = (getattr(c, "currency", None) or "USD").strip()
     if not curr or curr == "USD":
         curr = _ms_ccy or curr
-    pshort = (memo_data or {}).get("preview_short") or memo.get("preview_quarter_short") or f"{(datetime.now().month - 1) // 3 + 1}Q{datetime.now().strftime('%y')}"
-    q_label = qlab(pshort)
+    # Determine report type: quarterly preview vs annual consensus
+    _cp_early = memo.get("calendar_prior_quarter_released") or {}
+    _cn_early = memo.get("calendar_next_quarter") or {}
+    _has_quarterly_early = bool(_cp_early.get("net_sales") or _cn_early.get("net_sales") or _cn_early.get("revenue"))
+
+    # Annual data boundary
+    _af_early = getattr(payload, "ms_annual_forecasts", None) or {}
+    _ann_early = _af_early.get("annual", {}) if isinstance(_af_early, dict) else {}
+    _ann_dates_early = _ann_early.get("announcement_dates") or []
+    _ann_periods_early = _ann_early.get("periods") or []
+    _first_est_period = None
+    for _i, _d in enumerate(_ann_dates_early):
+        if not _d or str(_d).strip() in ("", "-", "None"):
+            _first_est_period = _ann_periods_early[_i] if _i < len(_ann_periods_early) else None
+            break
+
+    if _has_quarterly_early:
+        pshort = (memo_data or {}).get("preview_short") or memo.get("preview_quarter_short") or f"{(datetime.now().month - 1) // 3 + 1}Q{datetime.now().strftime('%y')}"
+        q_label = qlab(pshort)
+        _title_suffix = f"{q_label} Earnings Preview"
+    else:
+        # Annual mode: label as "FY2026 Consensus Preview" not "Q1 2026 Earnings Preview"
+        _fy_label = _first_est_period or f"FY{datetime.now().year}"
+        q_label = _fy_label
+        _title_suffix = f"{_fy_label} Consensus Preview"
+
     ed = header.get("expected_report_date") or {}
     ev = ed.get("display_value") if isinstance(ed, dict) else ed
     exp = rdate(ev) if ev else (memo.get("next_earnings_date") or "—")
@@ -1115,8 +1148,16 @@ def _write_preview_pptx_portrait(
     rec = (rr.get("display_value") if isinstance(rr, dict) else rr) or (cs.get("consensus_rating") or "—")
     tr = header.get("average_target_price") or {}
     tgt = (tr.get("display_value") if isinstance(tr, dict) else tr) or cs.get("average_target_price")
-    spr = None  # Always recalculate from live price
+    spr = None
     mcap = q.market_cap if q else None
+
+    # Suppress rating/target when data quality warnings indicate unreliable MS data
+    _has_dq_warnings = bool(quality_flags)
+    if _has_dq_warnings and any("entity mismatch" in (f or "").lower() or "missing current" in (f or "").lower() for f in (quality_flags or [])):
+        if cs and not (q and getattr(q, "target_mean_price", None)):
+            # MS data unreliable and no Yahoo fallback — suppress
+            rec = "—"
+            tgt = None
 
     # Yahoo fallbacks for rating/target
     if q:
@@ -1299,7 +1340,7 @@ def _write_preview_pptx_portrait(
     tx(s1, Inches(0.6), Inches(0.5), Inches(6), Inches(0.3), "EARNINGS PREVIEW NOTE", sz=10, bold=True, rgb=GOLD)
     rect(s1, Inches(0.6), Inches(0.85), Inches(1.8), Inches(0.04), GOLD)
     tx(s1, Inches(0.6), Inches(1.3), Inches(6.3), Inches(1.2), name or "—", sz=36, bold=True, rgb=LIGHT)
-    tx(s1, Inches(0.6), Inches(2.6), Inches(6.3), Inches(0.5), f"{q_label} Earnings Preview", sz=18, rgb=LIGHT)
+    tx(s1, Inches(0.6), Inches(2.6), Inches(6.3), Inches(0.5), _title_suffix, sz=18, rgb=LIGHT)
 
     my = 3.5
     for i, (lb, vl) in enumerate([("Sector:", sec), ("Ticker:", tk), ("Market Cap:", ms_val), ("Report Date:", exp)]):
@@ -1392,7 +1433,16 @@ def _write_preview_pptx_portrait(
     tx(s3, Inches(0.6), Inches(0.5), Inches(6), Inches(0.5), "Financial Snapshot", sz=26, bold=True, rgb=BLACK)
     rect(s3, Inches(0.6), Inches(1.0), Inches(2), Inches(0.06), GOLD)
 
-    hdrs = ["Metric", "Q prior A", "Q current E", "YoY %"] if _has_quarterly else ["Metric", "FY prior A", "FY current E", "YoY %"]
+    if _has_quarterly:
+        hdrs = ["Metric", "Q prior (A)", "Q next (E)", "YoY %"]
+    elif _first_est_period:
+        _last_act = None
+        for _i2, _d2 in enumerate(_ann_dates_early):
+            if _d2 and str(_d2).strip() not in ("", "-", "None"):
+                _last_act = _ann_periods_early[_i2] if _i2 < len(_ann_periods_early) else None
+        hdrs = ["Metric", f"{_last_act or 'Prior'} (A)", f"{_first_est_period} (E)", "YoY %"]
+    else:
+        hdrs = ["Metric", "Prior (A)", "Current (E)", "YoY %"]
     cws = [Inches(2.0), Inches(1.5), Inches(1.5), Inches(1.3)]
     tbx = Inches(0.6)
     tby = Inches(1.3)
@@ -1432,7 +1482,7 @@ def _write_preview_pptx_portrait(
         tx(s3, x + Inches(0.18), y + Inches(0.12), vbw - Inches(0.3), Inches(0.2), lbl, sz=10, rgb=MUTED)
         tx(s3, x + Inches(0.18), y + Inches(0.4), vbw - Inches(0.3), Inches(0.35), val, sz=22, bold=True, rgb=GOLD)
 
-    tx(s3, Inches(0.6), Inches(7.2), Inches(6), Inches(0.3), f"Source: Consensus and estimates as of {datetime.now().strftime('%d %b %Y')}", sz=9, rgb=MUTED)
+    tx(s3, Inches(0.6), Inches(7.2), Inches(6), Inches(0.3), f"Actuals: company filings via Yahoo Finance  |  Estimates: MarketScreener analyst consensus as of {datetime.now().strftime('%d %b %Y')}", sz=9, rgb=MUTED)
     if _is_bank_p:
         tx(s3, Inches(0.6), Inches(7.4), Inches(6), Inches(0.3), "* EBITDA / EV-EBITDA not applicable for banks and financial institutions", sz=8, rgb=MUTED)
     if quality_flags:
