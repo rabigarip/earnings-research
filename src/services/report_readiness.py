@@ -121,15 +121,19 @@ def run_readiness_check(payload: ReportPayload, step_results: list[StepResult]) 
             }
         )
 
-    fq_failed = any(
-        r.step_name == "fetch_quote" and r.status == Status.FAILED for r in step_results
-    )
-    if not _readiness_permissive() and not fq_failed and not _has_quote(payload):
-        reasons.append(
-            "No usable Yahoo quote (price or market cap). Cover slide and sizing cannot be shown reliably."
+    # In permissive mode, always generate a report (even with partial/missing data).
+    # The report will show "—" for missing fields and the data validation layer
+    # will flag any issues in the Data Quality line.
+    if _readiness_permissive():
+        pass  # Skip all data-sparsity checks
+    else:
+        fq_failed = any(
+            r.step_name == "fetch_quote" and r.status == Status.FAILED for r in step_results
         )
-
-    if not _readiness_permissive():
+        if not fq_failed and not _has_quote(payload):
+            reasons.append(
+                "No usable Yahoo quote (price or market cap). Cover slide and sizing cannot be shown reliably."
+            )
         fin_failed = any(
             r.step_name == "fetch_financials" and r.status == Status.FAILED for r in step_results
         )
