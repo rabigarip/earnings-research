@@ -1392,7 +1392,7 @@ def _write_preview_pptx_portrait(
     cw2 = Inches(2.0)
     cg = Inches(0.15)
     for i, (lb, va, chg) in enumerate([
-        ("Revenue", pn(rv), pp(memo.get("yoy_revenue_pct_table") or memo.get("qoq_revenue_pct"), True) if rv else "—"),
+        ("Revenue", pn(rv), pp(rows[0][3] if rows and rows[0][3] is not None else memo.get("yoy_revenue_pct_table") or memo.get("qoq_revenue_pct"), True) if rv else "—"),
         ("EPS", pn(ev_eps), "—"),
         ("EBITDA Margin", _em_display, "—"),
     ][:3]):
