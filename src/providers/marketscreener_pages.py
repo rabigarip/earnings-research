@@ -428,15 +428,24 @@ def resolve_slug_from_search(ticker: str, *, company_name: str = "") -> str | No
     Use only as fallback; prefer resolve_marketscreener_by_isin(isin).
     """
     # Try ticker first (strip exchange suffix for cleaner search)
-    search_q = ticker.replace(".SR", "").replace(".KW", "").replace(".QA", "").strip() or ticker
+    search_q = ticker.replace(".SR", "").replace(".KW", "").replace(".QA", "").replace(".OM", "").replace(".BH", "").replace(".AE", "").strip() or ticker
     url = f"https://www.marketscreener.com/search/?q={search_q}"
     _delay_between_requests()
     soup, errors = _fetch_page(url, "search_" + re.sub(r"[^a-zA-Z0-9]", "_", search_q)[:40])
     if soup is not None:
         results = _extract_search_result_slugs(soup)
         if results:
-            return results[0][0]
-    # Fallback: search by company name if provided and ticker search failed
+            # Verify the first result actually matches our company (prevent wrong-entity matches)
+            _result_name = (results[0][1] or "").lower()
+            _company_lower = (company_name or "").lower()
+            _name_tokens = set(_company_lower.split()) - {"co", "co.", "ltd", "ltd.", "inc", "inc.", "corp", "the", "of", "and", "plc", "saog", "bsc", "pjsc", "as", "sa"}
+            _result_tokens = set(_result_name.split()) - {"co", "co.", "ltd", "ltd.", "inc", "inc.", "corp", "the", "of", "and", "plc", "saog", "bsc", "pjsc", "as", "sa"}
+            _overlap = _name_tokens & _result_tokens
+            if not company_name or len(_overlap) >= 1:
+                return results[0][0]
+            # Ticker search returned wrong company — fall through to name search
+            log.info("Ticker search for '%s' returned '%s' — no name overlap with '%s', trying name search", search_q, results[0][1], company_name)
+    # Fallback: search by company name
     if company_name and company_name.strip():
         name_q = company_name.strip().split(",")[0].split("(")[0].strip()[:40]
         if name_q.lower() != search_q.lower():
