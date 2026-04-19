@@ -361,6 +361,126 @@ def run_preview_api(req: PreviewRequest):
     return PreviewResponse(run_id=run_id, overall=overall, steps=steps, payload=payload)
 
 
+# ─── Earnings calendar ───────────────────────────────────────────────────
+
+import threading as _threading
+import uuid as _uuid
+from datetime import datetime as _dt, timedelta as _td
+
+# In-memory job registry for background refreshes (session-scoped).
+_calendar_jobs: dict[str, dict] = {}
+_calendar_jobs_lock = _threading.Lock()
+
+
+def _iso_date_or_none(s: str | None) -> str | None:
+    if not s:
+        return None
+    try:
+        # Accept YYYY-MM-DD (strict) to avoid surprises
+        _dt.strptime(s, "%Y-%m-%d")
+        return s
+    except ValueError:
+        return None
+
+
+@app.get("/api/calendar")
+def get_calendar(
+    start: str | None = None,
+    end: str | None = None,
+    countries: str | None = None,
+    confirmed: int = 0,
+):
+    """Return earnings events in [start, end] (inclusive).
+
+    Defaults to a 60-day window around today if start/end omitted.
+    `countries` is an optional comma-separated list of ISO-2 codes.
+    `confirmed=1` returns only confirmed events.
+    """
+    from src.storage.db import list_calendar_events
+
+    s = _iso_date_or_none(start)
+    e = _iso_date_or_none(end)
+    if not s or not e:
+        today = _dt.utcnow().date()
+        if not s:
+            s = (today - _td(days=14)).isoformat()
+        if not e:
+            e = (today + _td(days=46)).isoformat()
+    country_list = None
+    if countries:
+        country_list = [c.strip().upper() for c in countries.split(",") if c.strip()]
+    events = list_calendar_events(
+        start=s,
+        end=e,
+        countries=country_list,
+        confirmed_only=bool(confirmed),
+    )
+    return {"start": s, "end": e, "events": events}
+
+
+@app.get("/api/calendar/ticker/{ticker}")
+def get_calendar_for_ticker(ticker: str):
+    from src.storage.db import list_calendar_for_ticker
+    ticker = (ticker or "").strip().upper()
+    if not ticker:
+        raise HTTPException(status_code=400, detail="ticker is required")
+    return {"ticker": ticker, "events": list_calendar_for_ticker(ticker)}
+
+
+class CalendarRefreshRequest(BaseModel):
+    tickers: list[str] | None = Field(None, description="Optional ticker list; defaults to all seeded companies")
+    force: bool = Field(False, description="Bypass freshness check and re-fetch every ticker")
+
+
+def _run_calendar_refresh_job(job_id: str, tickers: list[str] | None, force: bool) -> None:
+    from src.services.fetch_calendar import refresh_calendar
+    with _calendar_jobs_lock:
+        _calendar_jobs[job_id]["status"] = "running"
+    try:
+        summary = refresh_calendar(tickers=tickers, force=force)
+        with _calendar_jobs_lock:
+            _calendar_jobs[job_id]["status"] = "completed"
+            _calendar_jobs[job_id]["summary"] = summary
+            _calendar_jobs[job_id]["finished_at"] = _dt.utcnow().isoformat() + "Z"
+    except Exception as exc:
+        with _calendar_jobs_lock:
+            _calendar_jobs[job_id]["status"] = "failed"
+            _calendar_jobs[job_id]["error"] = str(exc)
+            _calendar_jobs[job_id]["finished_at"] = _dt.utcnow().isoformat() + "Z"
+
+
+@app.post("/api/calendar/refresh")
+def post_calendar_refresh(req: CalendarRefreshRequest):
+    """Kick off an async refresh of the earnings calendar. Returns a job_id."""
+    tickers = [t.strip().upper() for t in (req.tickers or []) if (t or "").strip()] or None
+    job_id = _uuid.uuid4().hex[:12]
+    with _calendar_jobs_lock:
+        _calendar_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "started_at": _dt.utcnow().isoformat() + "Z",
+            "finished_at": None,
+            "summary": None,
+            "error": None,
+        }
+    t = _threading.Thread(
+        target=_run_calendar_refresh_job,
+        args=(job_id, tickers, bool(req.force)),
+        daemon=True,
+    )
+    t.start()
+    return {"job_id": job_id, "status": "queued"}
+
+
+@app.get("/api/calendar/refresh/{job_id}")
+def get_calendar_refresh_status(job_id: str):
+    with _calendar_jobs_lock:
+        job = _calendar_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
 @app.post("/api/batch")
 def batch_preview_api(req: BatchPreviewRequest):
     """Run previews for multiple tickers (PPTX output per ticker). Max 20."""

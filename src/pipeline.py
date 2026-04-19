@@ -71,7 +71,8 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> tuple[str, list[StepR
     try:
         if quarterly:
             from src.services.store_actuals import upsert_actuals
-            latest_q = sorted(quarterly, key=lambda p: p.period_label)[-1]
+            from src.utils.periods import latest_period
+            latest_q = latest_period(quarterly)
             ebitda_margin = (latest_q.ebitda / latest_q.revenue * 100) if (latest_q.ebitda is not None and latest_q.revenue) else None
             upsert_actuals(
                 ticker=ticker,

@@ -119,6 +119,23 @@ CREATE TABLE IF NOT EXISTS actuals (
     created_at TEXT DEFAULT (datetime('now')),
     PRIMARY KEY (ticker, period)
 );
+
+CREATE TABLE IF NOT EXISTS earnings_calendar (
+    ticker            TEXT NOT NULL,
+    event_date        TEXT NOT NULL,
+    event_time        TEXT DEFAULT '',
+    confirmed         INTEGER DEFAULT 0,
+    period_label      TEXT DEFAULT '',
+    fiscal_year_end   TEXT DEFAULT '',
+    consensus_revenue REAL,
+    consensus_eps     REAL,
+    source            TEXT DEFAULT 'yahoo',
+    last_checked      TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (ticker, event_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_earnings_calendar_date
+    ON earnings_calendar(event_date);
 """
 
 
@@ -142,6 +159,7 @@ def init_db() -> None:
     _migrate_company_master_identifier_columns(conn)
     _migrate_pipeline_runs_memo_path(conn)
     _migrate_actuals_table(conn)
+    _migrate_earnings_calendar_table(conn)
     conn.commit()
     conn.close()
     log.info("Initialized → %s", _db_path())
@@ -160,8 +178,33 @@ def ensure_migrations() -> None:
     conn = get_conn()
     _migrate_pipeline_runs_memo_path(conn)
     _migrate_actuals_table(conn)
+    _migrate_earnings_calendar_table(conn)
     conn.commit()
     conn.close()
+
+
+def _migrate_earnings_calendar_table(conn: sqlite3.Connection) -> None:
+    """Create earnings_calendar if missing (for existing DBs)."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS earnings_calendar (
+            ticker            TEXT NOT NULL,
+            event_date        TEXT NOT NULL,
+            event_time        TEXT DEFAULT '',
+            confirmed         INTEGER DEFAULT 0,
+            period_label      TEXT DEFAULT '',
+            fiscal_year_end   TEXT DEFAULT '',
+            consensus_revenue REAL,
+            consensus_eps     REAL,
+            source            TEXT DEFAULT 'yahoo',
+            last_checked      TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (ticker, event_date)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_earnings_calendar_date ON earnings_calendar(event_date)"
+    )
 
 
 def _migrate_actuals_table(conn: sqlite3.Connection) -> None:
@@ -480,6 +523,101 @@ def list_runs() -> list[dict]:
         d["step_results"] = steps
         out.append(d)
     return out
+
+
+def upsert_calendar_event(
+    ticker: str,
+    event_date: str,
+    *,
+    event_time: str = "",
+    confirmed: bool = False,
+    period_label: str = "",
+    fiscal_year_end: str = "",
+    consensus_revenue: float | None = None,
+    consensus_eps: float | None = None,
+    source: str = "yahoo",
+) -> None:
+    """Upsert an earnings event. event_date is ISO YYYY-MM-DD."""
+    conn = get_conn()
+    conn.execute(
+        """
+        INSERT INTO earnings_calendar
+            (ticker, event_date, event_time, confirmed, period_label,
+             fiscal_year_end, consensus_revenue, consensus_eps, source, last_checked)
+        VALUES (?,?,?,?,?,?,?,?,?, datetime('now'))
+        ON CONFLICT(ticker, event_date) DO UPDATE SET
+            event_time      = CASE WHEN excluded.event_time != '' THEN excluded.event_time ELSE earnings_calendar.event_time END,
+            confirmed       = MAX(earnings_calendar.confirmed, excluded.confirmed),
+            period_label    = CASE WHEN excluded.period_label != '' THEN excluded.period_label ELSE earnings_calendar.period_label END,
+            fiscal_year_end = CASE WHEN excluded.fiscal_year_end != '' THEN excluded.fiscal_year_end ELSE earnings_calendar.fiscal_year_end END,
+            consensus_revenue = COALESCE(excluded.consensus_revenue, earnings_calendar.consensus_revenue),
+            consensus_eps     = COALESCE(excluded.consensus_eps,     earnings_calendar.consensus_eps),
+            source          = CASE WHEN excluded.source != '' THEN excluded.source ELSE earnings_calendar.source END,
+            last_checked    = datetime('now')
+        """,
+        (
+            ticker, event_date, event_time, int(bool(confirmed)), period_label,
+            fiscal_year_end, consensus_revenue, consensus_eps, source,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_calendar_events(
+    start: str | None = None,
+    end: str | None = None,
+    countries: list[str] | None = None,
+    confirmed_only: bool = False,
+) -> list[dict]:
+    """List earnings events joined with company metadata.
+
+    Dates are ISO YYYY-MM-DD; start/end are inclusive.
+    """
+    q = [
+        "SELECT e.ticker, e.event_date, e.event_time, e.confirmed, e.period_label,",
+        "       e.consensus_revenue, e.consensus_eps, e.source, e.last_checked,",
+        "       c.company_name, c.country, c.sector, c.currency",
+        "FROM earnings_calendar e",
+        "LEFT JOIN company_master c ON c.ticker = e.ticker",
+    ]
+    where: list[str] = []
+    args: list = []
+    if start:
+        where.append("e.event_date >= ?")
+        args.append(start)
+    if end:
+        where.append("e.event_date <= ?")
+        args.append(end)
+    if countries:
+        placeholders = ",".join("?" for _ in countries)
+        where.append(f"c.country IN ({placeholders})")
+        args.extend(countries)
+    if confirmed_only:
+        where.append("e.confirmed = 1")
+    if where:
+        q.append("WHERE " + " AND ".join(where))
+    q.append("ORDER BY e.event_date ASC, e.ticker ASC")
+    conn = get_conn()
+    rows = conn.execute(" ".join(q), args).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def list_calendar_for_ticker(ticker: str) -> list[dict]:
+    """Upcoming + historical events for one ticker, newest first."""
+    conn = get_conn()
+    rows = conn.execute(
+        """
+        SELECT ticker, event_date, event_time, confirmed, period_label,
+               fiscal_year_end, consensus_revenue, consensus_eps, source, last_checked
+        FROM earnings_calendar WHERE ticker = ?
+        ORDER BY event_date DESC
+        """,
+        (ticker,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def load_run(run_id: str) -> dict | None:

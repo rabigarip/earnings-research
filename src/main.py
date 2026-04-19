@@ -51,7 +51,9 @@ def main() -> None:
     ap.add_argument("--tickers", type=str, default="",
                     help="Comma-separated tickers for --mode batch (e.g. 2010.SR,1120.SR)")
     ap.add_argument("--days", type=int, default=14,
-                    help="Days ahead for --mode calendar (best-effort; may be partial)")
+                    help="Days ahead for --mode calendar (refreshes then lists matches)")
+    ap.add_argument("--run-previews", action="store_true",
+                    help="With --mode calendar: also run previews for matching tickers")
     ap.add_argument("--init-db",  action="store_true",
                     help="Initialize DB + seed companies, then exit")
     ap.add_argument("--store-actuals", type=str, default="",
@@ -85,7 +87,8 @@ def main() -> None:
         if not qs:
             print(f"[store-actuals] no quarterly financials for {ticker}")
             sys.exit(1)
-        latest = sorted(qs, key=lambda p: p.period_label)[-1]
+        from src.utils.periods import latest_period
+        latest = latest_period(qs)
         period = (args.period or latest.period_label or "").strip()
         if not period:
             print("[store-actuals] period is required")
@@ -124,40 +127,26 @@ def main() -> None:
         sys.exit(1 if any_fail else 0)
 
     elif args.mode == "calendar":
-        # Best-effort: use Yahoo calendar and run previews only for tickers with an earnings date
-        # inside the next N days. Network issues may produce partial results.
-        from datetime import datetime, timedelta
-        import yfinance as yf
-        from src.storage.db import list_companies
+        # Refresh earnings_calendar via the rate-limited service, then (optionally)
+        # run previews for tickers whose next event falls inside --days.
+        from datetime import date, timedelta
+        from src.services.fetch_calendar import refresh_calendar
+        from src.storage.db import list_calendar_events
 
-        cutoff = datetime.now() + timedelta(days=max(0, int(args.days)))
-        companies = list_companies()
-        tickers = [c.get("ticker") for c in companies if c.get("ticker")]
+        print(f"[calendar] refreshing earnings_calendar (days={args.days}) …")
+        summary = refresh_calendar()
+        print(f"[calendar] {summary}")
 
-        matches: list[str] = []
-        for t in tickers:
-            try:
-                cal = yf.Ticker(t).calendar
-                dates = None
-                if isinstance(cal, dict):
-                    dates = cal.get("Earnings Date")
-                if isinstance(dates, list) and dates:
-                    d0 = dates[0]
-                    if hasattr(d0, "to_pydatetime"):
-                        d0 = d0.to_pydatetime()
-                    if hasattr(d0, "date"):
-                        d0_dt = datetime.combine(d0.date(), datetime.min.time())
-                    else:
-                        d0_dt = d0 if isinstance(d0, datetime) else None
-                    if d0_dt and d0_dt <= cutoff:
-                        matches.append(t)
-            except Exception:
-                continue
-
+        today = date.today()
+        end = today + timedelta(days=max(0, int(args.days)))
+        events = list_calendar_events(start=today.isoformat(), end=end.isoformat())
+        matches = [e["ticker"] for e in events]
         print(f"[calendar] Tickers with earnings within {args.days} days: {len(matches)}")
-        from src.pipeline import run_preview
-        for t in matches:
-            _rid, _res = run_preview(t, skip_llm=args.skip_llm)
+
+        if args.run_previews:
+            from src.pipeline import run_preview
+            for t in matches:
+                _rid, _res = run_preview(t, skip_llm=args.skip_llm)
 
         sys.exit(0)
 
