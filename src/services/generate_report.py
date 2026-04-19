@@ -142,7 +142,50 @@ def _sector_operating_kpis_and_what_matters(company) -> tuple[list[str], list[st
         p2 = "Volume, realized price, utilization, and feedstock spread are the main levers; guidance and key metrics drive the story."
         return kpis, matters[:5], p2
 
-    # Default: labeled rows for manual entry
+    if "real estate" in sector or "real estate" in ind or "reit" in ind or "property" in ind:
+        kpis = ["Occupancy", "Rental rates", "Recurring income mix", "Development pipeline"]
+        matters = ["Occupancy trend", "Rental and sales prices", "Recurring vs development income", "Development pipeline and pre-sales", "Leverage and cost of debt"]
+        p2 = "For real estate, the narrative typically turns on occupancy, rental rates, and the mix of recurring versus development income; pipeline execution, pre-sales, and leverage drive the stock."
+        return kpis, matters[:5], p2
+
+    if "insurance" in sector or "insurance" in ind:
+        kpis = ["Gross written premium", "Combined ratio", "Investment yield", "Solvency"]
+        matters = ["Premium growth", "Underwriting margin and combined ratio", "Investment income and asset mix", "Claims experience", "Capital and solvency"]
+        p2 = "For insurers, the story centers on premium growth, the combined ratio, and investment yield; claims experience and solvency drive the multiple."
+        return kpis, matters[:5], p2
+
+    if "financial" in sector or "capital markets" in ind or "asset management" in ind or "investment" in ind:
+        kpis = ["AUM / assets", "Fee rate", "Cost/income", "Capital return"]
+        matters = ["Asset growth", "Fee rate and revenue mix", "Cost efficiency", "Asset quality / risk-weighted assets", "Capital return"]
+        p2 = "For diversified financials, the narrative turns on asset growth, fee rate, and cost/income; risk posture and capital return drive the valuation."
+        return kpis, matters[:5], p2
+
+    if "utilities" in sector or "utility" in ind or "water" in ind or "electric" in ind or ("gas" in ind and "oil" not in ind):
+        kpis = ["Regulated asset base", "Tariff / allowed return", "Volumes", "Capex"]
+        matters = ["Tariff and allowed return", "Regulated asset base growth", "Demand / volumes", "Capex delivery", "Guidance"]
+        p2 = "For utilities, the story typically turns on regulated asset base growth, tariffs, and volumes; capex execution and any guidance changes drive the stock."
+        return kpis, matters[:5], p2
+
+    if "consumer staples" in sector or "food" in ind or "beverage" in ind or "household" in ind or "personal product" in ind:
+        kpis = ["Volume", "Price/mix", "Gross margin", "Guidance"]
+        matters = ["Volume and price/mix", "Gross margin and input costs", "Market share", "Marketing / promotional intensity", "Guidance"]
+        p2 = "For consumer staples, the narrative is driven by volume and price/mix; input cost and promotional intensity set margins, and guidance anchors the multiple."
+        return kpis, matters[:5], p2
+
+    if "consumer discretionary" in sector or "apparel" in ind or "auto" in ind or "restaurant" in ind or "lodging" in ind or "specialty retail" in ind:
+        kpis = ["Same-store sales / volumes", "Price/mix", "Margin", "Guidance"]
+        matters = ["Same-store sales and unit growth", "Price/mix and discounting", "Gross and operating margin", "Inventory position", "Guidance"]
+        p2 = "For consumer discretionary, same-store sales, price/mix, and margin are the core drivers; inventory discipline and guidance shape the stock."
+        return kpis, matters[:5], p2
+
+    if "healthcare" in sector or "pharma" in ind or "biotech" in ind or "medical" in ind or "drug" in ind:
+        kpis = ["Revenue by franchise", "Gross margin", "R&D progress", "Guidance"]
+        matters = ["Franchise performance", "Pricing and volume", "Gross and operating margin", "Pipeline / R&D milestones", "Guidance"]
+        p2 = "For healthcare names, franchise revenue trends, margins, and pipeline milestones dominate; pricing pressure and guidance anchor sentiment."
+        return kpis, matters[:5], p2
+
+    # Default: labeled rows for manual entry. Kept generic on purpose so the report
+    # makes clear the section is a placeholder rather than claiming sector-specific focus.
     kpis = ["Key metric 1", "Key metric 2", "Key metric 3", "Key metric 4"]
     matters = ["Headline vs consensus", "Margin and pricing", "Guidance", "Key metrics"]
     p2 = "This quarter, sector operating metrics and headline results versus consensus matter most; earnings quality—whether a beat or miss is recurring or one-off—and guidance drive the narrative."
@@ -528,12 +571,18 @@ def _write_preview_pptx(
     # Use MS price as fallback when Yahoo has no price (frontier markets)
     _live_price = (q.price if q else None) or _ms_price
     if not mcap and _ms_price:
-        # Estimate market cap from MS last_close × shares (from valuation page)
+        # Estimate market cap from MS last_close × shares (from valuation page).
+        # Never leak the raw price into the market-cap slot (fixes ADNOCGAS cover bug).
         _shares = None
         try:
             _shares_arr = vm.get("shares") or []
             _shares = next((s for s in reversed(_shares_arr) if s), None)
         except Exception:
+            _shares = None
+        try:
+            if _shares and float(_shares) > 0:
+                mcap = float(_ms_price) * float(_shares)
+        except (TypeError, ValueError):
             pass
     # Yahoo fallbacks for rating/target
     if q:
@@ -1182,9 +1231,21 @@ def _write_preview_pptx_portrait(
     ts_val = pn(tgt)
     if curr and ts_val != "—":
         ts_val = f"{curr} {ts_val}"
+    # Market-cap fallback: if Yahoo is missing, estimate from MS last_close × shares.
+    # Never leak raw price into the Market Cap slot (previously produced "AED Price: 0.893").
+    if mcap is None and _ms_price:
+        _shares = None
+        try:
+            _shares_arr = (vm or {}).get("shares") or []
+            _shares = next((s for s in reversed(_shares_arr) if s), None)
+        except Exception:
+            _shares = None
+        try:
+            if _shares and float(_shares) > 0:
+                mcap = float(_ms_price) * float(_shares)
+        except (TypeError, ValueError):
+            pass
     ms_val = pn(mcap, bil=True)
-    if ms_val == "—" and _ms_price:
-        ms_val = f"Price: {_ms_price}"  # Show price when market cap unavailable
     if curr and ms_val != "—":
         ms_val = f"{curr} {ms_val}"
     sections = (memo_data or {}).get("pptx_sections") or {}

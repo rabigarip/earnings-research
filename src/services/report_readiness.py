@@ -33,6 +33,43 @@ def _readiness_permissive() -> bool:
         return False
 
 
+def _block_on_currency_mismatch() -> bool:
+    """Opt-in gate: refuse render when company currency != MS consensus currency.
+
+    Default off to preserve current behavior (report still renders with a Data
+    Quality warning). Enable via env REPORT_BLOCK_CURRENCY_MISMATCH=1 or
+    config.report.block_on_currency_mismatch=true.
+    """
+    import os
+
+    env = (os.environ.get("REPORT_BLOCK_CURRENCY_MISMATCH") or "").strip().lower()
+    if env in {"1", "true", "yes"}:
+        return True
+    if env in {"0", "false", "no"}:
+        return False
+    try:
+        from src.config import cfg
+
+        return bool((cfg().get("report", {}) or {}).get("block_on_currency_mismatch", False))
+    except Exception:
+        return False
+
+
+def _currency_mismatch_reason(payload: ReportPayload) -> str | None:
+    """Return a human-readable reason if company/consensus currencies diverge, else None."""
+    c = getattr(payload, "company", None)
+    cs = getattr(payload, "consensus_summary", None) or {}
+    company_ccy = (getattr(c, "currency", "") or "").upper()
+    ms_ccy = (cs.get("price_currency") or "").upper()
+    if company_ccy and ms_ccy and company_ccy != ms_ccy:
+        return (
+            f"Currency mismatch: company is in {company_ccy} but consensus is in {ms_ccy}. "
+            "Upside, target price, and consensus numbers would be on an inconsistent basis. "
+            "Set REPORT_BLOCK_CURRENCY_MISMATCH=0 to override, or supply an FX conversion."
+        )
+    return None
+
+
 # If any of these steps failed, the run cannot produce a trustworthy preview.
 _BLOCKING_STEPS = frozenset(
     {
@@ -120,6 +157,13 @@ def run_readiness_check(payload: ReportPayload, step_results: list[StepResult]) 
                 "error_detail": r.error_detail,
             }
         )
+
+    # Currency-mismatch gate is evaluated regardless of permissive mode because
+    # it is a correctness issue (numbers on different bases), not a sparsity issue.
+    if _block_on_currency_mismatch():
+        msg = _currency_mismatch_reason(payload)
+        if msg:
+            reasons.append(msg)
 
     # In permissive mode, always generate a report (even with partial/missing data).
     # The report will show "—" for missing fields and the data validation layer
