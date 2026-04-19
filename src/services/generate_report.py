@@ -1433,11 +1433,67 @@ def _write_preview_pptx_portrait(
     tx(s2, Inches(0.6), Inches(0.85), Inches(6), Inches(0.5), "Executive Summary", sz=26, bold=True, rgb=BLACK)
     rect(s2, Inches(0.6), Inches(1.35), Inches(2), Inches(0.06), GOLD)
 
-    # Investment Thesis — EXPANDED (6" tall block)
+    # Investment Thesis — compact (3.2" tall) to make room for charts below.
     tx(s2, Inches(0.6), Inches(1.6), Inches(1.5), Inches(0.3), "Investment Thesis", sz=12, bold=True, rgb=MUTED)
-    rect(s2, Inches(0.6), Inches(1.95), Inches(6.3), Inches(5.5), RGBColor(0xFA, 0xF8, 0xF3), RGBColor(0xDB, 0xE0, 0xE6))
-    rect(s2, Inches(0.6), Inches(1.95), Inches(0.06), Inches(5.5), GOLD)
-    tx(s2, Inches(0.78), Inches(2.1), Inches(6.0), Inches(5.2), iv_text or "—", sz=12, rgb=BLACK, line_spacing=1.15)
+    rect(s2, Inches(0.6), Inches(1.95), Inches(6.3), Inches(3.2), RGBColor(0xFA, 0xF8, 0xF3), RGBColor(0xDB, 0xE0, 0xE6))
+    rect(s2, Inches(0.6), Inches(1.95), Inches(0.06), Inches(3.2), GOLD)
+    tx(s2, Inches(0.78), Inches(2.05), Inches(6.0), Inches(3.0), iv_text or "—", sz=11, rgb=BLACK, line_spacing=1.15)
+
+    # ── Native pptx charts: Income Statement Evolution + P/E ──
+    # Port of chart_builders.py from earnings-preview.v2. Silently no-op
+    # when data is thin, so tickers with sparse annuals keep rendering.
+    try:
+        from src.services.chart_builders import build_revenue_ni_chart, build_pe_chart
+
+        _chart_periods = [str(p) for p in (_ann_periods or []) if str(p).strip()]
+        # Prefer last 6 FY (older historical + forward estimates)
+        if len(_chart_periods) > 6:
+            _chart_periods = _chart_periods[-6:]
+        _rev_series = (_ann.get("net_sales") or [])[-len(_chart_periods):] if _chart_periods else []
+        _ni_series = (_ann.get("net_income") or [])[-len(_chart_periods):] if _chart_periods else []
+        _ebit_series = (_ann.get("ebit") or [])[-len(_chart_periods):] if _chart_periods else None
+        if _ebit_series and all(v is None for v in _ebit_series):
+            _ebit_series = None
+
+        # Actuals boundary = index of last announcement date (same logic as table)
+        _dates_series = (_ann.get("announcement_dates") or [])[-len(_chart_periods):]
+        _actuals_boundary = -1
+        for _i, _d in enumerate(_dates_series):
+            if _d and str(_d).strip() not in ("", "-", "None"):
+                _actuals_boundary = _i
+
+        _chart_row_y = Inches(5.35)
+        _chart_row_h = Inches(2.15)
+
+        if _chart_periods and (any(_rev_series) or any(_ni_series)):
+            tx(s2, Inches(0.6), Inches(5.0), Inches(3), Inches(0.3),
+               "Income Statement Evolution", sz=11, bold=True, rgb=MUTED)
+            build_revenue_ni_chart(
+                s2,
+                Inches(0.6), _chart_row_y, Inches(3.2), _chart_row_h,
+                _chart_periods, _rev_series, _ni_series,
+                actuals_boundary=_actuals_boundary,
+                currency=curr,
+                ebit_values=_ebit_series,
+            )
+
+        _pe_vals = (_vm.get("pe") or [])[-len(_chart_periods):] if _chart_periods else []
+        if _pe_vals and any(v for v in _pe_vals if v):
+            tx(s2, Inches(3.95), Inches(5.0), Inches(3), Inches(0.3),
+               "P/E Multiple", sz=11, bold=True, rgb=MUTED)
+            # 5yr avg: mean of non-None, non-negative historical P/E
+            _hist_pe = [float(v) for v in _pe_vals[:max(0, _actuals_boundary + 1)]
+                        if isinstance(v, (int, float)) and v and v > 0]
+            _5yr_avg = (sum(_hist_pe) / len(_hist_pe)) if _hist_pe else None
+            build_pe_chart(
+                s2,
+                Inches(3.95), _chart_row_y, Inches(3.0), _chart_row_h,
+                _chart_periods, _pe_vals, five_yr_avg=_5yr_avg,
+            )
+    except Exception as _chart_exc:
+        # Never let chart failures block the rest of the slide; keep going.
+        import logging as _logging
+        _logging.getLogger(__name__).warning("Chart rendering failed: %s", _chart_exc)
 
     # Compute EBITDA margin for key expectations card
     _em_rev = cn.get("net_sales") or _ann_val("net_sales", _ann_fy_est)
