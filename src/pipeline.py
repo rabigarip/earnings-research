@@ -57,6 +57,22 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> tuple[str, list[StepR
         return run_id, results
     company = r.data
 
+    # ── 2b. Bloomberg manual export (optional) ────────────────
+    # No-op when data/bloomberg/<TICKER>_*.xlsx files are absent.
+    bloomberg_bundle_dict: dict | None = None
+    try:
+        from src.services.bloomberg_parser import load_bloomberg_bundle
+        from dataclasses import asdict as _dc_asdict
+        _bbg = load_bloomberg_bundle(ticker)
+        if _bbg is not None:
+            bloomberg_bundle_dict = _dc_asdict(_bbg)
+            logger.info(
+                "[bloomberg] %s bundle loaded: %d quarters, %d annuals",
+                ticker, len(_bbg.consensus_quarterly), len(_bbg.annuals),
+            )
+    except Exception as exc:
+        logger.warning("[bloomberg] load failed for %s: %s", ticker, exc)
+
     # ── 3. Fetch quote ────────────────────────────────────────
     r = fetch_quote(ticker)
     _collect(r, results)
@@ -167,6 +183,7 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> tuple[str, list[StepR
         recent_context_enrichment_log=news_data.get("recent_context_enrichment_log") or [],
         rejected_candidates_top_10=news_data.get("rejected_candidates_top_10") or [],
         recent_context_articles_qa=news_data.get("recent_context_articles_qa") or [],
+        bloomberg_bundle=bloomberg_bundle_dict,
     )
     _collect(r, results)
     if r.status == Status.FAILED:

@@ -548,6 +548,7 @@ def run(
     cross_company_contamination_detected: bool = False,
     identical_to_previous_ticker_payload: bool = False,
     yahoo_earnings_date: str | None = None,
+    bloomberg_bundle: dict | None = None,
 ) -> StepResult:
     with StepTimer() as t:
         warnings: list[str] = []
@@ -772,6 +773,7 @@ def run(
             ms_valuation_multiples=ms_valuation_multiples,
             ms_calendar_events=ms_calendar_events,
             ms_quarterly_results_table=ms_quarterly_results_table,
+            bloomberg_bundle=bloomberg_bundle,
             derived=derived,
             news_items=list(news_items),
             news_summary=news_summary,

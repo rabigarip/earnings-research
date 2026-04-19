@@ -69,6 +69,16 @@ class ReportPayload(BaseModel):
     ms_calendar_events:        dict | None = None   # Source: /calendar/
     ms_quarterly_results_table: dict | None = None  # Source: /calendar/ (metrics-dict shape: quarters, metrics)
 
+    # Bloomberg manual export (dict-of-dataclasses as JSON). Present only when
+    # data/bloomberg/<TICKER>_cons_q.xlsx and/or _FA.xlsx exist. Shape:
+    #   {"ticker", "bbg_ticker", "company_name", "currency",
+    #    "consensus_quarterly": [{period_label, period_end, is_estimate,
+    #                             currency, metrics: {key: [mean, n_analysts]}}],
+    #    "annuals": [{period_label, period_end, is_estimate, is_ltm,
+    #                 currency, metrics: {key: value}}],
+    #    "warnings": [...]}
+    bloomberg_bundle:           dict | None = None
+
     # Derived
     derived:              DerivedMetrics | None     = None
 

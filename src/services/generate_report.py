@@ -1445,22 +1445,42 @@ def _write_preview_pptx_portrait(
     try:
         from src.services.chart_builders import build_revenue_ni_chart, build_pe_chart
 
-        _chart_periods = [str(p) for p in (_ann_periods or []) if str(p).strip()]
-        # Prefer last 6 FY (older historical + forward estimates)
-        if len(_chart_periods) > 6:
-            _chart_periods = _chart_periods[-6:]
-        _rev_series = (_ann.get("net_sales") or [])[-len(_chart_periods):] if _chart_periods else []
-        _ni_series = (_ann.get("net_income") or [])[-len(_chart_periods):] if _chart_periods else []
-        _ebit_series = (_ann.get("ebit") or [])[-len(_chart_periods):] if _chart_periods else None
-        if _ebit_series and all(v is None for v in _ebit_series):
-            _ebit_series = None
+        # Prefer Bloomberg multi-year grid when a bundle was loaded; fall back
+        # to MarketScreener annuals otherwise. Bloomberg has 5-7 historical
+        # FYs + LTM + 2 forward estimates, all in consistent units.
+        _bbg_bundle = getattr(payload, "bloomberg_bundle", None) or {}
+        _bbg_annuals = _bbg_bundle.get("annuals") or [] if isinstance(_bbg_bundle, dict) else []
 
-        # Actuals boundary = index of last announcement date (same logic as table)
-        _dates_series = (_ann.get("announcement_dates") or [])[-len(_chart_periods):]
-        _actuals_boundary = -1
-        for _i, _d in enumerate(_dates_series):
-            if _d and str(_d).strip() not in ("", "-", "None"):
-                _actuals_boundary = _i
+        _chart_source_label = "MarketScreener"
+        if _bbg_annuals:
+            # Keep the last 6 non-LTM periods (mixing LTM into a column chart
+            # double-counts with the adjacent FY actual).
+            _bbg_noltm = [a for a in _bbg_annuals if not a.get("is_ltm")]
+            _bbg_slice = _bbg_noltm[-6:] if len(_bbg_noltm) > 6 else _bbg_noltm
+            _chart_periods = [str(a.get("period_label") or "") for a in _bbg_slice]
+            _rev_series = [(a.get("metrics") or {}).get("revenue") for a in _bbg_slice]
+            _ni_series = [(a.get("metrics") or {}).get("net_income") for a in _bbg_slice]
+            _ebit_series = None  # Bloomberg FA has EBITDA but no EBIT line; leave out.
+            # Actuals boundary = index of last non-estimate, non-LTM period
+            _actuals_boundary = -1
+            for _i, _a in enumerate(_bbg_slice):
+                if not _a.get("is_estimate"):
+                    _actuals_boundary = _i
+            _chart_source_label = "Bloomberg"
+        else:
+            _chart_periods = [str(p) for p in (_ann_periods or []) if str(p).strip()]
+            if len(_chart_periods) > 6:
+                _chart_periods = _chart_periods[-6:]
+            _rev_series = (_ann.get("net_sales") or [])[-len(_chart_periods):] if _chart_periods else []
+            _ni_series = (_ann.get("net_income") or [])[-len(_chart_periods):] if _chart_periods else []
+            _ebit_series = (_ann.get("ebit") or [])[-len(_chart_periods):] if _chart_periods else None
+            if _ebit_series and all(v is None for v in _ebit_series):
+                _ebit_series = None
+            _dates_series = (_ann.get("announcement_dates") or [])[-len(_chart_periods):]
+            _actuals_boundary = -1
+            for _i, _d in enumerate(_dates_series):
+                if _d and str(_d).strip() not in ("", "-", "None"):
+                    _actuals_boundary = _i
 
         _chart_row_y = Inches(5.35)
         _chart_row_h = Inches(2.15)
@@ -1481,7 +1501,6 @@ def _write_preview_pptx_portrait(
         if _pe_vals and any(v for v in _pe_vals if v):
             tx(s2, Inches(3.95), Inches(5.0), Inches(3), Inches(0.3),
                "P/E Multiple", sz=11, bold=True, rgb=MUTED)
-            # 5yr avg: mean of non-None, non-negative historical P/E
             _hist_pe = [float(v) for v in _pe_vals[:max(0, _actuals_boundary + 1)]
                         if isinstance(v, (int, float)) and v and v > 0]
             _5yr_avg = (sum(_hist_pe) / len(_hist_pe)) if _hist_pe else None
@@ -1490,6 +1509,11 @@ def _write_preview_pptx_portrait(
                 Inches(3.95), _chart_row_y, Inches(3.0), _chart_row_h,
                 _chart_periods, _pe_vals, five_yr_avg=_5yr_avg,
             )
+
+        # Source chip (top-right of chart row) — tells the reader where the
+        # series came from so Bloomberg-backed decks are distinguishable.
+        tx(s2, Inches(5.8), Inches(5.0), Inches(1.2), Inches(0.3),
+           f"Source: {_chart_source_label}", sz=7, rgb=MUTED, al=PP_ALIGN.RIGHT)
     except Exception as _chart_exc:
         # Never let chart failures block the rest of the slide; keep going.
         import logging as _logging
