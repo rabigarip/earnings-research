@@ -24,6 +24,12 @@ class QuoteSnapshot(BaseModel):
     number_of_analysts: int | None = None
     currency:   str          = "USD"
     source:     str          = "yahoo"
+    # 1-year daily closing-price history (parallel arrays). Populated by
+    # fetch_quote when yfinance returns a history; empty otherwise. Used by
+    # the slide-3 price chart. Kept on QuoteSnapshot rather than a separate
+    # model to avoid payload-shape changes elsewhere.
+    price_history_dates:  list[str]   = []   # ISO YYYY-MM-DD
+    price_history_prices: list[float] = []
 
 
 class FinancialPeriod(BaseModel):

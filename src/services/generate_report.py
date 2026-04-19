@@ -1606,11 +1606,34 @@ def _write_preview_pptx_portrait(
         tx(s3, x + Inches(0.18), y + Inches(0.12), vbw - Inches(0.3), Inches(0.2), lbl, sz=10, rgb=MUTED)
         tx(s3, x + Inches(0.18), y + Inches(0.4), vbw - Inches(0.3), Inches(0.35), val, sz=22, bold=True, rgb=GOLD)
 
-    tx(s3, Inches(0.6), Inches(7.2), Inches(6), Inches(0.3), f"Actuals: company filings via Yahoo Finance  |  Estimates: MarketScreener analyst consensus as of {datetime.now().strftime('%d %b %Y')}", sz=9, rgb=MUTED)
+    # ── 1-Year Price chart ────────────────────────────────────
+    # Uses the price_history arrays populated by fetch_quote (Yahoo). Chart
+    # silently no-ops on sparse data, so tickers without history still
+    # render the rest of the slide cleanly.
+    _footer_y = Inches(7.3)
+    try:
+        from src.services.chart_builders import build_price_chart
+
+        _q_hist_dates = getattr(q, "price_history_dates", None) or []
+        _q_hist_prices = getattr(q, "price_history_prices", None) or []
+        if _q_hist_dates and _q_hist_prices and len(_q_hist_dates) >= 10:
+            tx(s3, Inches(0.6), Inches(7.15), Inches(4), Inches(0.3),
+               "1-Year Price", sz=14, bold=True, rgb=BLACK)
+            build_price_chart(
+                s3,
+                Inches(0.6), Inches(7.55), Inches(6.3), Inches(2.4),
+                _q_hist_dates, _q_hist_prices, ticker=getattr(c, "ticker", ""),
+            )
+            _footer_y = Inches(10.15)
+    except Exception as _price_exc:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("Price chart failed: %s", _price_exc)
+
+    tx(s3, Inches(0.6), _footer_y, Inches(6), Inches(0.3), f"Actuals: company filings via Yahoo Finance  |  Estimates: MarketScreener analyst consensus as of {datetime.now().strftime('%d %b %Y')}", sz=9, rgb=MUTED)
     if _is_bank_p:
-        tx(s3, Inches(0.6), Inches(7.4), Inches(6), Inches(0.3), "* EBITDA / EV-EBITDA not applicable for banks and financial institutions", sz=8, rgb=MUTED)
+        tx(s3, Inches(0.6), _footer_y + Inches(0.2), Inches(6), Inches(0.3), "* EBITDA / EV-EBITDA not applicable for banks and financial institutions", sz=8, rgb=MUTED)
     if quality_flags:
-        tx(s3, Inches(0.6), Inches(7.45), Inches(6), Inches(0.3), "Data Quality: " + "; ".join(quality_flags[:4]), sz=9, rgb=MUTED)
+        tx(s3, Inches(0.6), _footer_y + Inches(0.4), Inches(6), Inches(0.3), "Data Quality: " + "; ".join(quality_flags[:4]), sz=9, rgb=MUTED)
 
     # ── Slide 4: Important Disclosures (dark, portrait) ───────
     s4 = prs.slides.add_slide(blank)

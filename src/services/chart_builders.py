@@ -88,7 +88,7 @@ def build_revenue_ni_chart(
     ebit_vals = _to_display(ebit_values) if ebit_values is not None else [0.0] * len(periods)
 
     chart_data = CategoryChartData()
-    labels = [p.replace("FY", "") for p in periods]
+    labels = [p.replace("FY", "").strip() for p in periods]
     chart_data.categories = labels
     chart_data.add_series("Sales", rev_vals)
     chart_data.add_series("EBIT", ebit_vals)
@@ -159,7 +159,7 @@ def build_pe_chart(
         return
 
     chart_data = CategoryChartData()
-    labels = [p.replace("FY", "") for p in periods]
+    labels = [p.replace("FY", "").strip() for p in periods]
     chart_data.categories = labels
     pe_clean: list[float] = []
     nm_years: list[str] = []

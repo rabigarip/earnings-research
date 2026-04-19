@@ -69,16 +69,36 @@ def _yahoo_retry(fn, *args, _warn_cb=None, **kwargs):
 
 
 def fetch_quote(ticker: str) -> QuoteSnapshot | None:
-    """Fetch current price, change, market cap. Retries with backoff on failure."""
+    """Fetch current price, change, market cap, and 1Y daily close history.
+
+    Retries with backoff on failure. The history fetch is best-effort —
+    price_history_dates/prices stay empty if yfinance doesn't return a
+    valid DataFrame (common for illiquid frontier-market tickers).
+    """
     def _get():
         try:
-            info = yf.Ticker(ticker).info or {}
+            t = yf.Ticker(ticker)
+            info = t.info or {}
             price = info.get("currentPrice") or info.get("regularMarketPrice")
             if price is None:
                 return None
             prev = info.get("previousClose") or info.get("regularMarketPreviousClose")
             change = round(price - prev, 4) if prev else None
             pct = round((change / prev) * 100, 2) if (change is not None and prev) else None
+
+            # 1Y daily close history — best effort.
+            hist_dates: list[str] = []
+            hist_prices: list[float] = []
+            try:
+                hist = t.history(period="1y", interval="1d", auto_adjust=False)
+                if hist is not None and not hist.empty and "Close" in hist.columns:
+                    closes = hist["Close"].dropna()
+                    hist_dates = [idx.strftime("%Y-%m-%d") for idx in closes.index]
+                    hist_prices = [float(v) for v in closes.values]
+            except Exception:
+                # Leave arrays empty; price chart will silently skip.
+                hist_dates, hist_prices = [], []
+
             return QuoteSnapshot(
                 ticker=ticker,
                 price=price,
@@ -98,6 +118,8 @@ def fetch_quote(ticker: str) -> QuoteSnapshot | None:
                 recommendation_key=info.get("recommendationKey"),
                 number_of_analysts=info.get("numberOfAnalystOpinions"),
                 currency=info.get("currency") or "USD",
+                price_history_dates=hist_dates,
+                price_history_prices=hist_prices,
             )
         except Exception:
             return None
