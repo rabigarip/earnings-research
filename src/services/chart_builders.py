@@ -131,8 +131,11 @@ def build_revenue_ni_chart(
     except Exception:
         pass
 
+    # Values arrive in millions already (MS quotes financials in millions; Yahoo
+    # raw values are pre-scaled by `_toM` upstream). The previous format
+    # `'#,##0,,"M"'` divided by another 1M and rendered every tick as "0M".
     try:
-        val_axis.tick_labels.number_format = '#,##0,,"M"'
+        val_axis.tick_labels.number_format = '#,##0"M"'
         val_axis.tick_labels.number_format_is_linked = False
     except Exception:
         pass

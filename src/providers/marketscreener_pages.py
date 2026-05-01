@@ -723,14 +723,40 @@ def fetch_financial_forecast_series(base_company_url: str, cache_key_prefix: str
     # Find annual section: table with Fiscal Period: December and year columns (no Q)
     period_headers_annual, annual_rows = _extract_period_header_and_rows(soup, "annual")
     period_headers_quarterly, quarterly_rows = _extract_period_header_and_rows(soup, "quarterly")
-    # Per reference doc: if quarterly not on main page, try ?type=trimestral
+    # Per reference doc: if quarterly not on main page, try ?type=trimestral.
+    # MS now serves the quarterly tab via JS; the static GET often returns the
+    # annual table again. Fall back to a Playwright-rendered fetch which lets
+    # the JS hydrate the quarterly grid before reading the DOM.
     if (not period_headers_quarterly or not quarterly_rows) and base_company_url:
         url_trimestral = base_company_url.rstrip("/") + "/finances/?type=trimestral"
+
+        # 1) Cheap static GET first (works on cached HTML and many tickers).
         soup_q, _ = _fetch_page(url_trimestral, _cache_slug(url, "finances_trimestral", cache_key_prefix))
         if soup_q:
             period_headers_quarterly, quarterly_rows = _extract_period_header_and_rows(soup_q, "quarterly")
             if period_headers_quarterly:
-                warnings.append("Quarterly data from ?type=trimestral")
+                warnings.append("Quarterly data from ?type=trimestral (static)")
+
+        # 2) Playwright fallback when the static fetch returned the annual
+        #    grid again. Degrades silently if Playwright isn't installed
+        #    (`fetch_page_with_browser` returns "" on any error).
+        if not period_headers_quarterly or not quarterly_rows:
+            try:
+                from src.scraping.browser import fetch_page_with_browser
+                rendered_html = fetch_page_with_browser(
+                    url_trimestral,
+                    wait_selector="table",  # any table renders post-hydration
+                    timeout_ms=15000,
+                    wait_timeout_ms=8000,
+                )
+            except Exception as exc:
+                log.info("[MarketScreener] Playwright quarterly fallback errored: %s", exc)
+                rendered_html = ""
+            if rendered_html:
+                soup_q2 = BeautifulSoup(rendered_html, "lxml")
+                period_headers_quarterly, quarterly_rows = _extract_period_header_and_rows(soup_q2, "quarterly")
+                if period_headers_quarterly:
+                    warnings.append("Quarterly data from ?type=trimestral (rendered)")
 
     def _row_by_label(rows: list[tuple[str, list[str]]], *labels: str) -> list[str] | None:
         for label in labels:
@@ -763,10 +789,30 @@ def fetch_financial_forecast_series(base_company_url: str, cache_key_prefix: str
     has_annual = bool(period_headers_annual and (annual_net_sales or annual_net_income))
     log.info("[MarketScreener] Annual financial forecast rows extracted... %s", "SUCCESS" if has_annual else "PARTIAL")
 
-    # Quarterly
+    # Quarterly — extract every metric the table publishes, not just net_sales.
+    # Earlier the only quarterly field consumed downstream was net_sales; the
+    # report now drives a full Q-prior(A)/Q-next(E) table on slide 3, so we
+    # surface ebitda / ebit / net_income / eps / announcement_dates too. When
+    # MS lacks a row (e.g. EPS for a non-listed unit), we leave it empty and
+    # the renderer drops it via the "all-None" rule.
     quarterly_net_sales = _parse_row(_row_by_label(quarterly_rows, "Net sales"), period_headers_quarterly)
+    quarterly_ebitda = _parse_row(_row_by_label(quarterly_rows, "EBITDA"), period_headers_quarterly)
+    quarterly_ebit = _parse_row(_row_by_label(quarterly_rows, "EBIT"), period_headers_quarterly)
+    quarterly_net_income = _parse_row(_row_by_label(quarterly_rows, "Net income"), period_headers_quarterly)
+    quarterly_eps = _parse_row(_row_by_label(quarterly_rows, "EPS"), period_headers_quarterly)
+    quarterly_announcement_raw = _row_by_label(quarterly_rows, "Announcement Date") or []
+    quarterly_announcement = quarterly_announcement_raw[: len(period_headers_quarterly)]
+    while len(quarterly_announcement) < len(period_headers_quarterly):
+        quarterly_announcement.append(None)
     has_q = bool(period_headers_quarterly and quarterly_net_sales)
-    log.info("[MarketScreener] Quarterly net sales extracted... %s", "SUCCESS" if has_q else "PARTIAL")
+    log.info(
+        "[MarketScreener] Quarterly extracted... net_sales=%s ebitda=%s ebit=%s ni=%s eps=%s",
+        "✓" if quarterly_net_sales else "✗",
+        "✓" if quarterly_ebitda else "✗",
+        "✓" if quarterly_ebit else "✗",
+        "✓" if quarterly_net_income else "✗",
+        "✓" if quarterly_eps else "✗",
+    )
 
     # Unit note from page text
     full_text = soup.get_text(" ", strip=True)
@@ -791,6 +837,11 @@ def fetch_financial_forecast_series(base_company_url: str, cache_key_prefix: str
         "quarterly": {
             "periods": [_normalize_period_label(p) for p in period_headers_quarterly],
             "net_sales": quarterly_net_sales,
+            "ebitda": quarterly_ebitda,
+            "ebit": quarterly_ebit,
+            "net_income": quarterly_net_income,
+            "eps": quarterly_eps,
+            "announcement_dates": quarterly_announcement,
         },
         "unit_currency": unit_currency or "",
         "unit_scale": unit_scale,
@@ -814,7 +865,10 @@ def _empty_forecast_payload(source_page: str, source_type: str, status: PageStep
         "source_type": source_type,
         "extracted_at": datetime.now(timezone.utc).isoformat(),
         "annual": {"periods": [], "net_sales": [], "ebitda": [], "ebit": [], "net_income": [], "announcement_dates": []},
-        "quarterly": {"periods": [], "net_sales": []},
+        "quarterly": {
+            "periods": [], "net_sales": [], "ebitda": [], "ebit": [],
+            "net_income": [], "eps": [], "announcement_dates": [],
+        },
         "unit_currency": None,
         "unit_scale": None,
         "applicability_flags": {"ebitda_applicable": True},
@@ -987,6 +1041,15 @@ def fetch_dividend_eps_page(base_company_url: str, cache_key_prefix: str | None 
     ref_vals = _row("Reference price")
     ann_vals = _row("Announcement Date")
 
+    # Currency note from the page text — same heuristic as
+    # fetch_financial_forecast_series. Earlier this referenced an undefined
+    # `unit_currency` variable and the whole payload assembly raised, so the
+    # /valuation-dividend/ page was unusable. Now resolved before payload.
+    # `_parse_unit_note` returns (currency, scale); we only need currency.
+    full_text = soup.get_text(" ", strip=True)
+    unit_currency_pair = _parse_unit_note(full_text)
+    unit_currency = (unit_currency_pair[0] or "") if unit_currency_pair else ""
+
     payload = {
         "source_page": url,
         "source_type": "dividend_eps_forecasts",
@@ -998,7 +1061,7 @@ def fetch_dividend_eps_page(base_company_url: str, cache_key_prefix: str | None 
         "distribution_rate": [_coerce_numeric_or_none(v) for v in dist_vals],
         "reference_price": [_coerce_numeric_or_none(v) for v in ref_vals],
         "announcement_dates": ann_vals,
-        "unit_currency": unit_currency or "",
+        "unit_currency": unit_currency,
         "warnings": [],
     }
 

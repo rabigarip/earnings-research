@@ -28,8 +28,19 @@ function formatNumber(v) {
   return String(v);
 }
 
+// Source colour map — one dot per provider so a chip can be skimmed
+// without opening the detail panel. Colours match the legend below the
+// calendar grid.
+const SOURCE_DOT = {
+  marketscreener: "bg-sky-400",
+  yahoo: "bg-violet-400",
+  bloomberg: "bg-orange-400",
+};
+
 function EventChip({ event, onClick }) {
   const confirmed = !!event.confirmed;
+  const source = (event.source || "").toLowerCase();
+  const sourceDot = SOURCE_DOT[source] || "bg-slate-400";
   return (
     <button
       type="button"
@@ -39,15 +50,25 @@ function EventChip({ event, onClick }) {
           ? "bg-emerald-900/40 hover:bg-emerald-800/60 border border-emerald-700/60"
           : "bg-slate-800 hover:bg-slate-700 border border-slate-700"
       }`}
-      title={`${event.ticker} — ${event.company_name || ""} (${confirmed ? "confirmed" : "estimated"})`}
+      title={`${event.ticker} — ${event.company_name || ""} (${confirmed ? "confirmed" : "estimated"} · ${event.source || "unknown"})`}
     >
       <div className="flex items-center gap-1">
         <span
           className={`h-1.5 w-1.5 rounded-full ${
             confirmed ? "bg-emerald-400" : "bg-amber-400"
           }`}
+          aria-label={confirmed ? "confirmed" : "estimated"}
+        />
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${sourceDot}`}
+          aria-label={`source: ${event.source || "unknown"}`}
         />
         <span className="font-mono text-blue-300 truncate">{event.ticker}</span>
+        {event.company_name ? (
+          <span className="text-slate-300 truncate ml-1 text-[10px]">
+            {event.company_name}
+          </span>
+        ) : null}
       </div>
     </button>
   );
@@ -124,6 +145,11 @@ export default function CalendarPage() {
   const [generating, setGenerating] = useState(false);
   const [confirmedOnly, setConfirmedOnly] = useState(false);
   const [countryFilter, setCountryFilter] = useState("");
+  // Sector filter is client-side: the API already returns event.sector, so
+  // we filter without re-fetching. Comma-separated, case-insensitive.
+  const [sectorFilter, setSectorFilter] = useState("");
+  // View toggle: "grid" = month-grid (default), "agenda" = sortable list.
+  const [viewMode, setViewMode] = useState("grid");
 
   const days = useMemo(() => {
     const start = startOfWeek(startOfMonth(anchor), { weekStartsOn: WEEK_STARTS_ON });
@@ -160,15 +186,39 @@ export default function CalendarPage() {
     fetchEvents();
   }, [fetchEvents]);
 
+  // Client-side sector filter. Comma-separated; substring match on
+  // event.sector (case-insensitive). Whitespace-only filter = no-op.
+  const filteredEvents = useMemo(() => {
+    const tokens = sectorFilter
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    if (tokens.length === 0) return events;
+    return events.filter((e) => {
+      const s = (e.sector || "").toLowerCase();
+      return tokens.some((t) => s.includes(t));
+    });
+  }, [events, sectorFilter]);
+
   const eventsByDay = useMemo(() => {
     const map = new Map();
-    for (const e of events) {
+    for (const e of filteredEvents) {
       const d = e.event_date;
       if (!map.has(d)) map.set(d, []);
       map.get(d).push(e);
     }
     return map;
-  }, [events]);
+  }, [filteredEvents]);
+
+  // Agenda view sorts by date ascending so the upcoming print is at the top.
+  const agendaEvents = useMemo(() => {
+    return [...filteredEvents].sort((a, b) => {
+      const ad = a.event_date || "";
+      const bd = b.event_date || "";
+      if (ad !== bd) return ad < bd ? -1 : 1;
+      return (a.ticker || "").localeCompare(b.ticker || "");
+    });
+  }, [filteredEvents]);
 
   const triggerRefresh = async () => {
     setRefreshing(true);
@@ -209,10 +259,13 @@ export default function CalendarPage() {
   const generatePreview = async (ticker) => {
     setGenerating(true);
     try {
+      // Use the full pipeline (LLM enabled) so calendar-triggered previews
+      // produce the same investment thesis / catalysts / risks as the main
+      // flow. Earlier this passed `skip_llm: true` and shipped empty narrative.
       const res = await fetch(`${API_BASE}/api/reports`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker, skip_llm: true }),
+        body: JSON.stringify({ ticker }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
@@ -288,6 +341,32 @@ export default function CalendarPage() {
       </div>
 
       <div className="flex flex-wrap gap-3 mb-4 text-sm">
+        {/* Grid / Agenda toggle. Defaults to grid; agenda is the
+            institutional-list style requested for week-of-print review. */}
+        <div className="inline-flex rounded-md border border-slate-700 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setViewMode("grid")}
+            className={`px-3 py-1 text-xs ${
+              viewMode === "grid"
+                ? "bg-slate-700 text-white"
+                : "bg-slate-900 text-slate-300 hover:bg-slate-800"
+            }`}
+          >
+            Grid
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("agenda")}
+            className={`px-3 py-1 text-xs border-l border-slate-700 ${
+              viewMode === "agenda"
+                ? "bg-slate-700 text-white"
+                : "bg-slate-900 text-slate-300 hover:bg-slate-800"
+            }`}
+          >
+            Agenda
+          </button>
+        </div>
         <label className="flex items-center gap-2 text-slate-300">
           <input
             type="checkbox"
@@ -301,7 +380,14 @@ export default function CalendarPage() {
           placeholder="Countries (e.g. SA,AE)"
           value={countryFilter}
           onChange={(e) => setCountryFilter(e.target.value)}
-          className="rounded-md bg-slate-900 border border-slate-700 px-3 py-1 text-sm w-48"
+          className="rounded-md bg-slate-900 border border-slate-700 px-3 py-1 text-sm w-44"
+        />
+        <input
+          type="text"
+          placeholder="Sectors (e.g. financials,energy)"
+          value={sectorFilter}
+          onChange={(e) => setSectorFilter(e.target.value)}
+          className="rounded-md bg-slate-900 border border-slate-700 px-3 py-1 text-sm w-56"
         />
         {refreshStatus ? (
           <span className="text-xs text-slate-400 self-center">{refreshStatus}</span>
@@ -314,54 +400,139 @@ export default function CalendarPage() {
         ) : null}
       </div>
 
-      <div className="grid grid-cols-7 gap-[1px] bg-slate-800 border border-slate-800 rounded-lg overflow-hidden">
-        {weekdayLabels.map((w) => (
-          <div
-            key={w}
-            className="bg-slate-900 text-xs uppercase tracking-wide text-slate-500 px-2 py-2 text-center"
-          >
-            {w}
-          </div>
-        ))}
-        {days.map((day) => {
-          const key = iso(day);
-          const dayEvents = eventsByDay.get(key) || [];
-          const inMonth = isSameMonth(day, anchor);
-          const today = isSameDay(day, new Date());
-          return (
+      {viewMode === "grid" ? (
+        <div className="grid grid-cols-7 gap-[1px] bg-slate-800 border border-slate-800 rounded-lg overflow-hidden">
+          {weekdayLabels.map((w) => (
             <div
-              key={key}
-              className={`min-h-[110px] p-1.5 bg-slate-950 ${
-                inMonth ? "" : "opacity-50"
-              }`}
+              key={w}
+              className="bg-slate-900 text-xs uppercase tracking-wide text-slate-500 px-2 py-2 text-center"
             >
+              {w}
+            </div>
+          ))}
+          {days.map((day) => {
+            const key = iso(day);
+            const dayEvents = eventsByDay.get(key) || [];
+            const inMonth = isSameMonth(day, anchor);
+            const today = isSameDay(day, new Date());
+            return (
               <div
-                className={`text-xs mb-1 ${
-                  today
-                    ? "inline-block rounded bg-blue-600 text-white px-1.5"
-                    : "text-slate-400"
+                key={key}
+                className={`min-h-[110px] p-1.5 bg-slate-950 ${
+                  inMonth ? "" : "opacity-50"
                 }`}
               >
-                {format(day, "d")}
+                <div
+                  className={`text-xs mb-1 ${
+                    today
+                      ? "inline-block rounded bg-blue-600 text-white px-1.5"
+                      : "text-slate-400"
+                  }`}
+                >
+                  {format(day, "d")}
+                </div>
+                <div className="flex flex-col gap-1">
+                  {dayEvents.slice(0, 4).map((e) => (
+                    <EventChip
+                      key={`${e.ticker}-${e.event_date}`}
+                      event={e}
+                      onClick={() => setSelected(e)}
+                    />
+                  ))}
+                  {dayEvents.length > 4 ? (
+                    <div className="text-[10px] text-slate-500 pl-1">
+                      +{dayEvents.length - 4} more
+                    </div>
+                  ) : null}
+                </div>
               </div>
-              <div className="flex flex-col gap-1">
-                {dayEvents.slice(0, 4).map((e) => (
-                  <EventChip
-                    key={`${e.ticker}-${e.event_date}`}
-                    event={e}
-                    onClick={() => setSelected(e)}
-                  />
-                ))}
-                {dayEvents.length > 4 ? (
-                  <div className="text-[10px] text-slate-500 pl-1">
-                    +{dayEvents.length - 4} more
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      ) : (
+        // ── Agenda view: sortable list of events in the visible date range. ──
+        // Used by institutional reviewers who scan "what's printing this week"
+        // without thinking in calendar grid coordinates.
+        <div className="border border-slate-800 rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-900 text-slate-400 uppercase text-[10px] tracking-wide">
+              <tr>
+                <th className="text-left px-3 py-2 w-28">Date</th>
+                <th className="text-left px-3 py-2 w-24">Ticker</th>
+                <th className="text-left px-3 py-2">Company</th>
+                <th className="text-left px-3 py-2 w-28">Country</th>
+                <th className="text-left px-3 py-2 w-40">Sector</th>
+                <th className="text-left px-3 py-2 w-28">Period</th>
+                <th className="text-left px-3 py-2 w-28">Status</th>
+                <th className="text-left px-3 py-2 w-32">Source</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800">
+              {agendaEvents.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
+                    No events in range matching the current filters.
+                  </td>
+                </tr>
+              ) : (
+                agendaEvents.map((e) => {
+                  const confirmed = !!e.confirmed;
+                  return (
+                    <tr
+                      key={`${e.ticker}-${e.event_date}-${e.source || ""}`}
+                      onClick={() => setSelected(e)}
+                      className="cursor-pointer hover:bg-slate-900/60"
+                    >
+                      <td className="px-3 py-2 text-slate-300 font-mono text-xs">
+                        {e.event_date}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-blue-300">
+                        {e.ticker}
+                      </td>
+                      <td className="px-3 py-2 text-slate-200 truncate">
+                        {e.company_name || "—"}
+                      </td>
+                      <td className="px-3 py-2 text-slate-400">
+                        {e.country || "—"}
+                      </td>
+                      <td className="px-3 py-2 text-slate-400 truncate">
+                        {e.sector || "—"}
+                      </td>
+                      <td className="px-3 py-2 text-slate-300">
+                        {e.period_label || "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`inline-flex items-center gap-1 text-xs ${
+                            confirmed ? "text-emerald-400" : "text-amber-400"
+                          }`}
+                        >
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              confirmed ? "bg-emerald-400" : "bg-amber-400"
+                            }`}
+                          />
+                          {confirmed ? "confirmed" : "estimated"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-slate-400 capitalize">
+                        <span className="inline-flex items-center gap-1">
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              SOURCE_DOT[(e.source || "").toLowerCase()] || "bg-slate-400"
+                            }`}
+                          />
+                          {e.source || "—"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <EventDetail
         event={selected}
@@ -370,14 +541,28 @@ export default function CalendarPage() {
         generating={generating}
       />
 
-      <div className="mt-6 text-xs text-slate-500">
-        <span className="inline-flex items-center gap-1 mr-4">
+      <div className="mt-6 text-xs text-slate-500 flex flex-wrap gap-x-5 gap-y-2">
+        <span className="text-slate-400 uppercase tracking-wide">Status</span>
+        <span className="inline-flex items-center gap-1">
           <span className="h-2 w-2 rounded-full bg-emerald-400 inline-block" />
           confirmed
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="h-2 w-2 rounded-full bg-amber-400 inline-block" />
           estimated
+        </span>
+        <span className="text-slate-400 uppercase tracking-wide ml-2">Source</span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-sky-400 inline-block" />
+          MarketScreener
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-violet-400 inline-block" />
+          Yahoo
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-2 w-2 rounded-full bg-orange-400 inline-block" />
+          Bloomberg
         </span>
       </div>
     </div>

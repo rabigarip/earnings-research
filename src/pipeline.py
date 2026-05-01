@@ -228,12 +228,18 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> tuple[str, list[StepR
                     headlines.append(h)
             sector = f"{getattr(payload.company, 'sector', '')} / {getattr(payload.company, 'industry', '')}".strip(" /")
             quarter = (memo_data.get("preview_short") or getattr(payload, "memo_computed", {}).get("preview_quarter_short") or "").strip()
+            # Surface payload.memo_computed inside memo_data so the LLM prompt
+            # can read direction signals (surprise history, YoY direction,
+            # spread sign) and ground catalysts/risks in real facts. Pass-by-
+            # value so the QA artifact downstream isn't mutated.
+            memo_data_for_prompt = dict(memo_data)
+            memo_data_for_prompt["memo_computed"] = dict(getattr(payload, "memo_computed", {}) or {})
             rr = draft_sections(
                 company_name=getattr(payload.company, "company_name", "") or "",
                 ticker=getattr(payload.company, "ticker", "") or "",
                 sector=sector,
                 quarter=quarter,
-                memo_data=memo_data,
+                memo_data=memo_data_for_prompt,
                 news_headlines=headlines,
             )
             _collect(rr, results)

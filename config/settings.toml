@@ -178,3 +178,16 @@ output_dir = "outputs"
 readiness_mode = "permissive"
 # Set to true to also write QA audit as JSON (for debugging). Primary review format is QA .docx.
 qa_audit_json = false
+
+[calendar]
+# Tunables for `src/services/fetch_calendar.refresh_calendar`.
+max_workers = 6
+per_request_min_seconds = 0.25      # global rate-limit between MS/Yahoo calls
+refresh_stale_hours = 12            # skip a ticker if its NEXT event was checked within this window
+http_timeout_seconds = 15
+# Daily auto-refresh: when true, the host process should call
+# `refresh_calendar()` once per day for the seeded universe. Wire this to a
+# cron / Render scheduled job — the service itself does NOT spawn its own
+# scheduler, so it stays a no-op until the scheduler invokes it.
+auto_refresh_enabled = true
+auto_refresh_utc_hour = 6           # 06:00 UTC (≈ 09:00 GST / pre-MENA market open)

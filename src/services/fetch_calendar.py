@@ -80,10 +80,21 @@ def _rate_limit(min_seconds: float) -> None:
 # ── Staleness check ──────────────────────────────────────────────────────
 
 def _is_fresh(ticker: str, stale_hours: int) -> bool:
-    """Return True if ticker's latest earnings_calendar.last_checked is within window."""
+    """Return True if a *future* earnings event for this ticker was checked
+    within the freshness window.
+
+    The earlier implementation looked at MAX(last_checked) across ALL rows
+    for the ticker. That meant a ticker whose past event was scraped 11h
+    ago would be considered "fresh" even though we never re-checked the
+    upcoming event — so the next earnings date never refreshed until
+    `stale_hours` past the most-recent past event check. Filtering on
+    `event_date >= today` fixes that.
+    """
     conn = get_conn()
     row = conn.execute(
-        "SELECT MAX(last_checked) AS last_checked FROM earnings_calendar WHERE ticker = ?",
+        "SELECT MAX(last_checked) AS last_checked "
+        "FROM earnings_calendar "
+        "WHERE ticker = ? AND event_date >= DATE('now')",
         (ticker,),
     ).fetchone()
     conn.close()
@@ -187,16 +198,35 @@ def _as_float(v) -> float | None:
 
 # ── Fetch: MarketScreener ────────────────────────────────────────────────
 
+def _ms_company_url(company_row: dict | None) -> str:
+    """Resolve the MS /quote/stock/<SLUG>/ URL from whatever the seed row has.
+
+    company_master.json uses `marketscreener_id` (the slug like
+    `SABIC-AGRI-NUTRIENTS-COMP-6497974`), but legacy code paths sometimes
+    expect a fully-qualified `marketscreener_company_url`. Accept either.
+    Returns "" when neither field is populated.
+    """
+    if not company_row:
+        return ""
+    explicit = (company_row.get("marketscreener_company_url") or "").strip()
+    if explicit:
+        return explicit
+    slug = (company_row.get("marketscreener_id") or "").strip()
+    if not slug:
+        return ""
+    # MS paths look like https://www.marketscreener.com/quote/stock/<SLUG>/
+    return f"https://www.marketscreener.com/quote/stock/{slug}/"
+
+
 def _fetch_marketscreener(ticker: str, company_row: dict | None) -> dict | None:
     """Return {event_date, confirmed, source} from MS /calendar/ page, or None.
 
-    Only runs when the company row has a marketscreener_company_url. Uses the
-    existing scraper from src.providers.marketscreener_pages; relies on its
-    own retry + cache so we don't duplicate that logic here.
+    Resolves the MS company URL from either `marketscreener_company_url`
+    (explicit) or `marketscreener_id` (slug). Earlier this only checked the
+    explicit URL field, which silently no-op'd for the entire seeded
+    universe (the seed file uses `marketscreener_id`).
     """
-    if not company_row:
-        return None
-    base = (company_row.get("marketscreener_company_url") or "").strip()
+    base = _ms_company_url(company_row)
     if not base:
         return None
     try:
@@ -224,11 +254,18 @@ def _fetch_marketscreener(ticker: str, company_row: dict | None) -> dict | None:
 # ── Fetch: Bloomberg xlsx (period-end of first estimate quarter) ────────
 
 def _fetch_bloomberg(ticker: str) -> dict | None:
-    """Return next-quarter event date from the cons_q.xlsx when present.
+    """Return a placeholder event date from the cons_q.xlsx when present.
 
-    The cons_q grid's first estimate column's period-end date is the next
-    reporting quarter-end, not the announce date — but when MS/Yahoo have
-    nothing, this at least plants a ticker in the right month.
+    The cons_q grid only gives us the period-END (e.g. 2026-03-31 for Q1
+    2026). Announcement dates typically land 4–6 weeks after period-end —
+    earlier the placeholder used the period-end itself, which planted
+    tickers in the wrong calendar month (Q1 results announced in late
+    April showed up under March 31).
+
+    New behaviour: shift the period-end forward by 35 days so the ticker
+    lands in the *expected* announcement month, but keep `confirmed=false`
+    so the calendar UI badges the date as "estimated". The actual MS or
+    Yahoo refresh, when it succeeds, will overwrite with the true date.
     """
     try:
         from src.services.bloomberg_parser import load_bloomberg_bundle
@@ -240,19 +277,66 @@ def _fetch_bloomberg(ticker: str) -> dict | None:
     nxt = bundle.next_estimate_quarter()
     if nxt is None or not nxt.period_end:
         return None
+    try:
+        period_end_dt = datetime.fromisoformat(str(nxt.period_end)[:10])
+    except ValueError:
+        return None
+    estimated_announce = (period_end_dt + timedelta(days=35)).date().isoformat()
     return {
-        "event_date": nxt.period_end,
-        "confirmed": False,  # period-end is implied, not announced
+        "event_date": estimated_announce,
+        "confirmed": False,
         "period_label": nxt.period_label,
+        "period_end": nxt.period_end,  # surface raw period-end for UI tooltip
         "source": "bloomberg",
     }
 
 
 # ── Per-ticker worker ────────────────────────────────────────────────────
 
+def _prune_nearby_duplicates(
+    ticker: str, kept_date: str, kept_confirmed: bool, kept_source: str, *, day_window: int = 7
+) -> None:
+    """Drop near-duplicate rows for the same ticker within ±N days of the row
+    just upserted, when the kept row dominates by confirmation rank.
+
+    Source confirmation rank (high → low):
+        marketscreener-confirmed (calendar shows date)
+      > yahoo-confirmed (single date, not a range)
+      > yahoo-range (Yahoo gave a window of dates)
+      > bloomberg (period-end + 35 day estimate)
+
+    Without this, MS-confirmed Apr 29 and Yahoo-range Apr 30 would render as
+    two adjacent chips for the same earnings event. Now the higher-confidence
+    one wins and the rest are removed.
+    """
+    if not kept_confirmed:
+        return  # only confirmed rows can dominate
+    try:
+        conn = get_conn()
+        conn.execute(
+            """
+            DELETE FROM earnings_calendar
+            WHERE ticker = ?
+              AND event_date != ?
+              AND ABS(julianday(event_date) - julianday(?)) <= ?
+              AND confirmed = 0
+            """,
+            (ticker, kept_date, kept_date, int(day_window)),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        log.info("[calendar] %s prune-near failed: %s", ticker, exc)
+
+
 def _refresh_one(ticker: str, config: CalendarConfig) -> str:
     """Try MS → Yahoo → Bloomberg in order; upsert every hit so all three
     contribute (later sources can raise `confirmed` but not lower it).
+
+    After each upsert from a confirmed source, prune any nearby (±7 days)
+    unconfirmed rows for the same ticker so the calendar UI shows one chip
+    per earnings event rather than two adjacent ones from disagreeing
+    sources.
 
     Returns a short status token for reporting: 'fresh'|'updated'|'none'|'error'.
     """
@@ -283,6 +367,10 @@ def _refresh_one(ticker: str, config: CalendarConfig) -> str:
                 confirmed=bool(ms_info.get("confirmed")),
                 source=ms_info.get("source", "marketscreener"),
             )
+            _prune_nearby_duplicates(
+                ticker, ms_info["event_date"], bool(ms_info.get("confirmed")),
+                ms_info.get("source", "marketscreener"),
+            )
             got_any = True
         except Exception as exc:
             log.warning("[calendar] %s MS upsert failed: %s", ticker, exc)
@@ -304,6 +392,10 @@ def _refresh_one(ticker: str, config: CalendarConfig) -> str:
                 consensus_revenue=y_info.get("consensus_revenue"),
                 consensus_eps=y_info.get("consensus_eps"),
                 source=y_info.get("source", "yahoo"),
+            )
+            _prune_nearby_duplicates(
+                ticker, y_info["event_date"], bool(y_info.get("confirmed")),
+                y_info.get("source", "yahoo"),
             )
             got_any = True
         except Exception as exc:
