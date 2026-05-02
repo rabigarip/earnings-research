@@ -188,7 +188,21 @@ def _render_multi_period(s3, table, grid, *, tbx, tby, rh, tx, rect) -> None:
             if v is None:
                 display = "—"
             elif metric_key == "eps":
-                display = f"{v:.2f}" if isinstance(v, (int, float)) else str(v)
+                # Preserve precision for sub-1 EPS (Oman / India). Two
+                # decimals collapses 0.028 / 0.031 / 0.033 to identical
+                # "0.03" — useless. Use 3 decimals when |v| < 0.5,
+                # 2 decimals when 0.5 ≤ |v| < 100, 1 decimal for ≥ 100
+                # (rare double-digit-EPS names like Industries Qatar).
+                try:
+                    fv = float(v)
+                    if abs(fv) < 0.5:
+                        display = f"{fv:.3f}"
+                    elif abs(fv) < 100:
+                        display = f"{fv:.2f}"
+                    else:
+                        display = f"{fv:.1f}"
+                except (TypeError, ValueError):
+                    display = str(v)
             else:
                 try:
                     display = f"{float(v):,.0f}"
