@@ -19,6 +19,7 @@ Uses requests + BeautifulSoup. Playwright optional for chart/JS content (TODOs).
 from __future__ import annotations
 import logging
 import re
+import os
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -140,7 +141,13 @@ def _cache_slug(url: str, page_name: str, cache_key_prefix: str | None = None) -
 
 
 def _fetch_page(url: str, cache_slug: str) -> tuple[BeautifulSoup | None, list[str]]:
-    """Fetch URL via shared session (cookies + keep-alive), optional cache, return (soup, errors)."""
+    """Fetch URL via shared session (cookies + keep-alive), optional cache, return (soup, errors).
+
+    When `MS_OFFLINE_CACHE_FIRST=1` is set (used by tests and as a
+    rate-limit recovery mode), serve from the on-disk cache before
+    attempting any network request. Falls through to network when the
+    cached file is absent or contains a captcha/block page.
+    """
     errors: list[str] = []
     timeout = 15
     if _USE_CONFIG:
@@ -148,6 +155,30 @@ def _fetch_page(url: str, cache_slug: str) -> tuple[BeautifulSoup | None, list[s
             timeout = cfg().get("scraping", {}).get("timeout_seconds", timeout)
         except Exception:
             pass
+
+    cache_dir = None
+    cached_path = None
+    try:
+        if _USE_CONFIG and cfg().get("scraping", {}).get("cache_html"):
+            cache_dir = root() / "cache"
+            safe = re.sub(r"[^a-zA-Z0-9-]", "_", cache_slug)[:80]
+            cached_path = cache_dir / f"ms_{safe}.html"
+    except Exception:
+        cache_dir = None
+        cached_path = None
+
+    # Cache-first path — opt-in via env var.
+    if (
+        os.environ.get("MS_OFFLINE_CACHE_FIRST") == "1"
+        and cached_path is not None
+        and cached_path.exists()
+    ):
+        try:
+            text = cached_path.read_text(encoding="utf-8")
+            if not _is_blocked_response(text):
+                return BeautifulSoup(text, "lxml"), errors
+        except Exception:
+            pass  # fall through to network
 
     try:
         session = _get_session()
@@ -796,6 +827,53 @@ def fetch_financial_forecast_series(base_company_url: str, cache_key_prefix: str
 
     if _all_missing(annual_ebitda) and annual_ebitda:
         warnings.append("EBITDA row missing or all '-' (e.g. bank); ebitda_applicable=false")
+
+    # ── Structural invariants ──
+    # Catch parser regressions BEFORE the deck ships:
+    #   1. EBIT == EBITDA exactly across all populated periods is the
+    #      signature of the historical substring-collision bug (where
+    #      `_row_by_label("EBIT")` matched the EBITDA row first because
+    #      "ebit" ⊂ "ebitda"). If a future code change re-introduces it,
+    #      this warning + the parser-fixture tests catch it immediately.
+    #   2. EBIT > EBITDA at any period is economically impossible
+    #      (EBITDA = EBIT + D&A, D&A ≥ 0). Logging it surfaces both
+    #      mis-aligned columns and weird MS data.
+    def _both_populated(a, b, i):
+        return (i < len(a) and i < len(b)
+                and a[i] is not None and b[i] is not None)
+
+    if annual_ebit and annual_ebitda:
+        # Identical rows? Collision smell.
+        n = min(len(annual_ebit), len(annual_ebitda))
+        identical = (
+            n > 0
+            and any(_both_populated(annual_ebit, annual_ebitda, i) for i in range(n))
+            and all(
+                annual_ebit[i] == annual_ebitda[i]
+                for i in range(n)
+                if _both_populated(annual_ebit, annual_ebitda, i)
+            )
+        )
+        if identical:
+            warnings.append(
+                "EBIT == EBITDA exactly across populated periods — "
+                "possible substring-collision parser regression"
+            )
+            log.warning(
+                "[MarketScreener] EBIT == EBITDA exactly for all populated "
+                "periods — investigate _row_by_label substring match"
+            )
+        # EBIT > EBITDA at any period? Economically impossible.
+        for i in range(n):
+            if _both_populated(annual_ebit, annual_ebitda, i):
+                if annual_ebit[i] > annual_ebitda[i]:
+                    log.warning(
+                        "[MarketScreener] EBIT (%.2f) > EBITDA (%.2f) at period %s — "
+                        "data anomaly or column misalignment",
+                        annual_ebit[i], annual_ebitda[i],
+                        period_headers_annual[i] if i < len(period_headers_annual) else f"#{i}",
+                    )
+                    break  # one log line is enough
 
     has_annual = bool(period_headers_annual and (annual_net_sales or annual_net_income))
     log.info("[MarketScreener] Annual financial forecast rows extracted... %s", "SUCCESS" if has_annual else "PARTIAL")
