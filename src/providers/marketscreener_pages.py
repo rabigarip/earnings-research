@@ -1233,11 +1233,19 @@ def fetch_valuation_multiples(base_company_url: str, cache_key_prefix: str | Non
         status.elapsed_ms = (time.perf_counter() * 1000) - start
         return _empty_valuation_payload(url, status), status
 
-    def _row(*labels: str) -> list[str]:
+    def _row(*labels: str, exclude: tuple[str, ...] = ()) -> list[str]:
+        excl_norms = tuple(
+            x.lower().replace(" ", "").replace("/", "") for x in exclude
+        )
         for label in labels:
             norm = label.lower().replace(" ", "").replace("/", "")
             for rlabel, vals in row_data:
                 rnorm = (rlabel or "").lower().replace(" ", "").replace("/", "")
+                # Skip rows that match an explicit exclude pattern. Used to
+                # disambiguate substring collisions like "Capitalization"
+                # vs "Capitalization / Revenue".
+                if any(e in rnorm for e in excl_norms):
+                    continue
                 if norm in rnorm or rnorm in norm:
                     return vals
         return []
@@ -1252,6 +1260,14 @@ def fetch_valuation_multiples(base_company_url: str, cache_key_prefix: str | Non
     ev_ebitda_vals = _row("EV / EBITDA", "EV/EBITDA")
     eps_vals = _row("EPS", "Earnings Per Share")
     dps_vals = _row("Dividend per Share", "DPS")
+    # Capitalization (raw market cap by year) — used as a fallback when
+    # Yahoo doesn't have market_cap (most non-DM tickers). Excluded
+    # from the row search are the ratio rows that contain
+    # "Capitalization" as a substring.
+    cap_vals = _row(
+        "Capitalization",
+        exclude=("Capitalization / Revenue",),
+    )
 
     payload = {
         "source_page": url,
@@ -1261,6 +1277,7 @@ def fetch_valuation_multiples(base_company_url: str, cache_key_prefix: str | Non
         "pe": [_coerce_numeric_or_none(v) for v in pe_vals],
         "pbr": [_coerce_numeric_or_none(v) for v in pbr_vals],
         "peg": [_coerce_numeric_or_none(v) for v in peg_vals],
+        "capitalization": [_coerce_numeric_or_none(v) for v in cap_vals],
         "capitalization_revenue": [_coerce_numeric_or_none(v) for v in cap_rev_vals],
         "ev_revenue": [_coerce_numeric_or_none(v) for v in ev_rev_vals],
         "ev_ebit": [_coerce_numeric_or_none(v) for v in ev_ebit_vals],

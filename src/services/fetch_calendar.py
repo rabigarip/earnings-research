@@ -349,6 +349,24 @@ def _refresh_one(ticker: str, config: CalendarConfig) -> str:
     except Exception:
         company_row = None
 
+    # Auto-resolve the MarketScreener slug if the seed file doesn't carry
+    # one. The `company_master.json` ships with `marketscreener_id`
+    # populated for only ~7 of ~600 tickers; the rest get resolved
+    # lazily via ISIN → MS search → validation. Resolution writes the
+    # slug back to the DB, so subsequent refresh runs skip this step
+    # and just hit MS directly.
+    if company_row and not (
+        (company_row.get("marketscreener_id") or "").strip()
+        or (company_row.get("marketscreener_company_url") or "").strip()
+    ):
+        try:
+            from src.services.entity_resolution import ensure_marketscreener_cached
+            updated = ensure_marketscreener_cached(ticker, company_row)
+            if updated:
+                company_row = updated
+        except Exception as exc:
+            log.info("[calendar] %s slug auto-resolve failed: %s", ticker, exc)
+
     got_any = False
     errored = False
 

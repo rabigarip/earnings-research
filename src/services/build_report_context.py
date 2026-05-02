@@ -197,11 +197,29 @@ def _build_cover(payload: ReportPayload, memo_data: dict | None) -> CoverData:
         )
 
     # ── Market cap ──
+    # Source priority:
+    #   1. Yahoo `marketCap` — best when ticker has Yahoo coverage.
+    #   2. MS /valuation/ "Capitalization" row — published in millions of
+    #      reporting currency. Pick the latest non-None entry.
+    #   3. Derived from MS price × shares outstanding (last resort).
     mcap = _to_float(getattr(q, "market_cap", None) if q else None)
     mcap_source = "yahoo" if mcap is not None else ""
+    if mcap is None and vm:
+        cap_arr = vm.get("capitalization") or []
+        latest_cap = next((c for c in reversed(cap_arr) if c is not None), None)
+        if latest_cap is not None:
+            try:
+                # MS quotes capitalization in millions of reporting ccy.
+                # Multiply back to raw units so the cover formatter shows
+                # "OMR 0.6B" not "OMR 621M" (consistent with Yahoo's raw
+                # market_cap output).
+                mcap = float(latest_cap) * 1e6
+                mcap_source = "marketscreener"
+            except (TypeError, ValueError):
+                mcap = None
     if mcap is None:
-        # Estimate from MS last close × shares outstanding when Yahoo is missing.
-        # Never leak raw price into this slot.
+        # Estimate from MS last close × shares outstanding when neither
+        # source above carries the value. Never leak raw price into this slot.
         ms_price = _to_float(cs.get("last_close_price")) if cs else None
         shares = None
         try:
@@ -271,6 +289,46 @@ def _normalize_fy_label(raw: str | None) -> str | None:
     if len(digits) == 2:
         return f"FY20{digits}"
     return None
+
+
+def _company_relevance_tokens(company_name: str, ticker: str) -> list[str]:
+    """Build a whitelist of tokens that a headline must contain to count
+    as relevant to this company. Used by the Recent Headlines filter to
+    drop fuzzy-match false positives like "National Symphony" appearing
+    in a search for "National Bank of Oman".
+
+    Strategy: keep tokens ≥ 4 chars that aren't structural English
+    stop-words. We deliberately KEEP geographic identifiers (Oman,
+    Saudi, Qatar, etc.) because for many companies the country name is
+    the most distinctive token (e.g. NBOB → "Oman" is the only
+    differentiator from generic banking news). Also include the ticker
+    stem. Returns lower-case tokens; empty list disables filtering.
+    """
+    stop = {
+        # Generic corporate suffixes (carry no semantic meaning).
+        "company", "limited", "ltd", "corp", "corporation",
+        "holding", "holdings", "group", "international",
+        "industries", "industrial",
+        "co", "inc", "plc", "sao", "saog", "psc", "qsc", "psqs",
+        # Generic English connectors.
+        "the", "and", "for",
+        # Generic descriptors that match too many false positives.
+        "bank", "banking", "first", "general", "national",
+        "investment", "investments",
+    }
+    out: list[str] = []
+    name = (company_name or "").strip()
+    if name:
+        for raw in name.split():
+            t = "".join(ch.lower() for ch in raw if ch.isalnum())
+            if len(t) >= 4 and t not in stop:
+                out.append(t)
+    # Always accept the ticker symbol stem (before the exchange suffix).
+    if ticker:
+        stem = ticker.split(".")[0].lower()
+        if len(stem) >= 3 and stem not in out:
+            out.append(stem)
+    return out
 
 
 def _qlab(short: str) -> str:
@@ -969,6 +1027,28 @@ def _build_summary(
     em_revenue = est_row.revenue if est_row else None
     em_ebitda = est_row.ebitda if est_row else None
 
+    # Fall back to the multi-period annual grid when the quarterly est_row
+    # is sparse (e.g. NBOB.OM where MS doesn't publish a quarterly EPS
+    # forecast). The grid carries forward FY EPS from /valuation-dividend/
+    # via the lookup chain in `_build_annual_grid`. Pick the first
+    # estimate column (the next FY) so the card aligns with the cover's
+    # FY-preview framing.
+    grid = snapshot.table.annual_grid
+    if grid and grid.periods:
+        # The first period whose announcement_date is None is the next FY
+        # estimate — same convention the renderer uses for shading.
+        for i, d in enumerate(grid.announcement_dates):
+            if not d and i < len(grid.eps):
+                if ev_eps is None and grid.eps[i] is not None:
+                    ev_eps = grid.eps[i]
+                if rv is None and i < len(grid.revenue) and grid.revenue[i] is not None:
+                    rv = grid.revenue[i]
+                if em_revenue is None and i < len(grid.revenue):
+                    em_revenue = grid.revenue[i]
+                if em_ebitda is None and i < len(grid.ebitda):
+                    em_ebitda = grid.ebitda[i]
+                break
+
     # YoY deltas come from the same yoy_by_metric map the table uses, so the
     # number under each card lines up with the YoY % column on slide 3.
     yoy_map = snapshot.table.yoy_by_metric or {}
@@ -1100,36 +1180,65 @@ def _build_summary(
     # rule: thesis prose refers to *themes* only; specific headlines live
     # here so the deck never stitches news copy mid-paragraph (the
     # "Argaam Volume…" bug from the gold deck).
-    headlines: list[HeadlineRef] = []
+    #
+    # Relevance filter: a headline must mention the ticker OR a
+    # distinctive company-name token (≥4 chars, not a common stop-word).
+    # Without this, fuzzy news APIs (Google News) return false positives
+    # — the "National Symphony" headline on the NBOB deck because the
+    # query was "National Bank of Oman".
+    company_tokens = _company_relevance_tokens(
+        cover.company_name, cover.ticker,
+    )
+
+    def _headline_relevant(h: str) -> bool:
+        if not company_tokens:
+            return True  # no whitelist — accept everything (legacy behaviour)
+        hl = h.lower()
+        return any(tok in hl for tok in company_tokens)
+
     raw_news = list(getattr(payload, "news_items", None) or [])
     # Sort by published_at descending; treat missing dates as oldest.
     raw_news.sort(
         key=lambda n: getattr(n, "published_at", None) or datetime(1970, 1, 1),
         reverse=True,
     )
-    seen_headlines: set[str] = set()
-    for item in raw_news:
-        if len(headlines) >= 4:
-            break
-        h = (getattr(item, "headline", None) or "").strip()
-        if not h or h.lower() in seen_headlines:
-            continue
-        # Cap headline length so the sidebar layout stays clean — 90 chars
-        # fits two lines of the small font we'll use.
-        if len(h) > 90:
-            h = h[:87] + "…"
-        published = getattr(item, "published_at", None)
-        date_iso = (
-            published.date().isoformat()
-            if isinstance(published, datetime) else None
-        )
-        headlines.append(HeadlineRef(
-            headline=h,
-            date=date_iso,
-            source=(getattr(item, "source", None) or "").strip(),
-            url=(getattr(item, "url", None) or "").strip(),
-        ))
-        seen_headlines.add(h.lower())
+
+    def _build_list(filter_fn) -> list[HeadlineRef]:
+        out: list[HeadlineRef] = []
+        seen: set[str] = set()
+        for item in raw_news:
+            if len(out) >= 4:
+                break
+            h = (getattr(item, "headline", None) or "").strip()
+            if not h or h.lower() in seen:
+                continue
+            if not filter_fn(h):
+                continue
+            if len(h) > 90:
+                h = h[:87] + "…"
+            published = getattr(item, "published_at", None)
+            date_iso = (
+                published.date().isoformat()
+                if isinstance(published, datetime) else None
+            )
+            out.append(HeadlineRef(
+                headline=h, date=date_iso,
+                source=(getattr(item, "source", None) or "").strip(),
+                url=(getattr(item, "url", None) or "").strip(),
+            ))
+            seen.add(h.lower())
+        return out
+
+    # Pass 1: strict relevance filter. Drops false-positives like
+    # "National Symphony" matching "National Bank of Oman".
+    headlines = _build_list(_headline_relevant)
+    # Pass 2: if the strict filter rejected EVERY headline (the company
+    # name is too generic to generate a useful whitelist, e.g. names
+    # whose only distinctive token is the ticker abbreviation), fall
+    # back to showing whatever news we have. Better to show roughly-
+    # related items than to leave the sidebar empty.
+    if not headlines and raw_news:
+        headlines = _build_list(lambda _h: True)
 
     return SummaryData(
         period_label=cover.period_label,
