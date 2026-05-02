@@ -704,24 +704,18 @@ def _build_snapshot(
             eps=cn.get("eps"),
         )
         rows = [prior_row, est_row]
+        # Per-metric QoQ fallback. Earlier this was all-or-nothing: when
+        # `memo.yoy_revenue_pct_table` was set but `memo.yoy_eps_pct_table`
+        # was None, the EPS card showed no delta because the all-None
+        # check was false. Now each metric falls back independently to
+        # `_yoy_pct(prior, est)` (which is QoQ in quarterly mode) when
+        # the upstream YoY value is missing.
         yoy_map = {
-            "revenue": memo.get("yoy_revenue_pct_table"),
-            "ebitda":  memo.get("yoy_ebitda_pct_table"),
-            "net_income": memo.get("yoy_ni_pct_table"),
-            "eps":     memo.get("yoy_eps_pct_table"),
+            "revenue":    memo.get("yoy_revenue_pct_table") or _yoy_pct(prior_row.revenue, est_row.revenue),
+            "ebitda":     memo.get("yoy_ebitda_pct_table")  or _yoy_pct(prior_row.ebitda, est_row.ebitda),
+            "net_income": memo.get("yoy_ni_pct_table")      or _yoy_pct(prior_row.net_income, est_row.net_income),
+            "eps":        memo.get("yoy_eps_pct_table")     or _yoy_pct(prior_row.eps, est_row.eps),
         }
-        # QoQ fallback: when the upstream memo didn't supply YoY (BBG bundle
-        # only carries prior + next quarter; same-quarter-prior-year is
-        # absent), compute QoQ from the resolved row pair so slide 3 has a
-        # signed delta to colour. Renderer relabels the column "QoQ %" when
-        # all YoY entries are None.
-        if all(v is None for v in yoy_map.values()):
-            yoy_map = {
-                "revenue":    _yoy_pct(prior_row.revenue, est_row.revenue),
-                "ebitda":     _yoy_pct(prior_row.ebitda, est_row.ebitda),
-                "net_income": _yoy_pct(prior_row.net_income, est_row.net_income),
-                "eps":        _yoy_pct(prior_row.eps, est_row.eps),
-            }
     else:
         mode = "annual"
         prior_label = (

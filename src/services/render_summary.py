@@ -121,13 +121,19 @@ def render(prs, blank_layout, summary: SummaryData, *, tx, rect) -> None:
                    " · ".join(meta_parts), sz=7, rgb=MUTED)
 
     # ── Charts ──
-    chart_row_y = Inches(5.35)
-    chart_row_h = Inches(2.15)
+    # Thesis box ends at y=1.95+3.2 = 5.15", and the optional Recent
+    # Headlines sidebar shares that y-range. Place chart row labels at
+    # y=5.25 (below both) and the chart bodies at y=5.55 so nothing
+    # clips. Earlier the labels were at y=5.0 and the first letter of
+    # "Income Statement Evolution" was hidden behind the thesis box.
+    chart_label_y = Inches(5.25)
+    chart_row_y = Inches(5.55)
+    chart_row_h = Inches(1.95)
     try:
         if summary.income_chart and summary.income_chart.periods and (
             any(summary.income_chart.revenue) or any(summary.income_chart.net_income)
         ):
-            tx(s2, Inches(0.6), Inches(5.0), Inches(3), Inches(0.3),
+            tx(s2, Inches(0.6), chart_label_y, Inches(3), Inches(0.3),
                "Income Statement Evolution", sz=11, bold=True, rgb=MUTED)
             ic = summary.income_chart
             build_revenue_ni_chart(
@@ -144,7 +150,7 @@ def render(prs, blank_layout, summary: SummaryData, *, tx, rect) -> None:
         if summary.pe_chart and summary.pe_chart.periods and any(
             v for v in summary.pe_chart.pe_values if v
         ):
-            tx(s2, Inches(3.95), Inches(5.0), Inches(3), Inches(0.3),
+            tx(s2, Inches(3.95), chart_label_y, Inches(3), Inches(0.3),
                "P/E Multiple", sz=11, bold=True, rgb=MUTED)
             build_pe_chart(
                 s2,
@@ -158,7 +164,7 @@ def render(prs, blank_layout, summary: SummaryData, *, tx, rect) -> None:
             (summary.income_chart.source_label if summary.income_chart else "")
             or "MarketScreener"
         )
-        tx(s2, Inches(5.8), Inches(5.0), Inches(1.2), Inches(0.3),
+        tx(s2, Inches(5.8), chart_label_y, Inches(1.2), Inches(0.3),
            f"Source: {chart_source}", sz=7, rgb=MUTED, al=PP_ALIGN.RIGHT)
     except Exception as exc:
         # Never let chart failures break the rest of the slide. The earlier
