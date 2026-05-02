@@ -424,7 +424,8 @@ def _write_preview_pptx_portrait(
     # passed in via kwargs so each renderer module is standalone (does not
     # import pptx itself except via these helpers + chart_builders).
     def tx(sl, x, y, w, h, t, *, sz=12, bold=False, rgb=RGBColor(0, 0, 0),
-           al=PP_ALIGN.LEFT, word_wrap=True, line_spacing=None):
+           al=PP_ALIGN.LEFT, word_wrap=True, line_spacing=None,
+           hyperlink: str | None = None):
         b = sl.shapes.add_textbox(x, y, w, h)
         tf = b.text_frame
         tf.clear()
@@ -455,6 +456,15 @@ def _write_preview_pptx_portrait(
                 run.font.size = Pt(sz)
                 run.font.bold = bold
                 run.font.color.rgb = rgb
+                # When a hyperlink is supplied, attach it to every run so the
+                # whole textbox is clickable. PPTX hyperlinks live on runs,
+                # not on the text frame, so multi-line links need this for
+                # each paragraph's first run.
+                if hyperlink:
+                    try:
+                        run.hyperlink.address = hyperlink
+                    except Exception:
+                        pass
 
         _set(tf.paragraphs[0], lines[0])
         for ln in lines[1:]:

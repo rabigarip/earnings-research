@@ -97,6 +97,183 @@ def _readable_date(s: str | None) -> str:
     return s
 
 
+def _humanize_period(label: str | None) -> str:
+    """Render a period label for slide-3 table headers.
+
+    The MS scraper normalises "2025 Q4" → "2025Q4" for storage. Slide 3
+    headers read better with the space restored: "2025 Q4 (A)" rather than
+    "2025Q4 (A)". Also handles "Q4 2025" (Bloomberg) and "FY2026" formats.
+    """
+    if not label:
+        return "—"
+    s = str(label).strip()
+    # "2025Q4" → "2025 Q4"
+    import re
+    m = re.match(r"^(20\d{2})Q([1-4])$", s)
+    if m:
+        return f"{m.group(1)} Q{m.group(2)}"
+    # "Q4 2025" (BBG) — already nicely spaced
+    m = re.match(r"^Q([1-4])\s+(20\d{2})$", s)
+    if m:
+        return s
+    # "FY2026" / "FY2026E" — leave as is, just uppercase E to be tidy
+    return s.upper().replace("FY ", "FY") if s.upper().startswith("FY") else s
+
+
+def _render_multi_period(s3, table, grid, *, tbx, tby, rh, tx, rect) -> None:
+    """Multi-period annual grid: 1 metric label column + N year columns.
+
+    Mirrors the gold-standard deck. Each year column shaded `EST_BG` for
+    estimates (no announcement_date) vs WHITE for actuals. Drops any metric
+    whose values are all-None across the grid (so EBITDA disappears for
+    banks, not faked from EBIT).
+    """
+    n_periods = len(grid.periods)
+    if n_periods == 0:
+        return
+    # Layout: portrait slide is 7.5" wide; available width ~6.3".
+    metric_w_in = 1.55
+    metric_w = Inches(metric_w_in)
+    avail_in = 6.3 - metric_w_in
+    col_w = Inches(round(avail_in / max(1, n_periods), 2))
+    # Header row
+    rect(s3, tbx, tby, metric_w, rh, BLACK, BORDER)
+    tx(s3, tbx + Inches(0.08), tby + Inches(0.08),
+       metric_w - Inches(0.16), rh, "Metric",
+       sz=10, bold=True, rgb=WHITE)
+    cx = tbx + metric_w
+    for i, period in enumerate(grid.periods):
+        is_est = (
+            i >= len(grid.announcement_dates)
+            or not grid.announcement_dates[i]
+        )
+        suffix = "(E)" if is_est else "(A)"
+        label = _humanize_period(period)
+        rect(s3, cx, tby, col_w, rh, BLACK, BORDER)
+        tx(s3, cx + Inches(0.04), tby + Inches(0.08),
+           col_w - Inches(0.08), rh, f"{label} {suffix}",
+           sz=8, bold=True, rgb=WHITE, al=PP_ALIGN.CENTER)
+        cx += col_w
+
+    # Data rows — each metric row drops out when all values are None.
+    rendered = 0
+    for metric_key, label_template in (
+        ("revenue",    "Revenue {money}"),
+        ("ebitda",     "EBITDA {money}"),
+        ("ebit",       "EBIT {money}"),
+        ("net_income", "Net Income {money}"),
+        ("eps",        "EPS {per_share}"),
+    ):
+        values = list(getattr(grid, metric_key, []) or [])
+        if not values or all(v is None for v in values):
+            continue
+        row_label = label_template.format(
+            money=table.units_label,
+            per_share=table.units_label_per_share or "",
+        ).strip()
+        y = tby + rh * (rendered + 1)
+        rect(s3, tbx, y, metric_w, rh, WHITE, BORDER)
+        tx(s3, tbx + Inches(0.08), y + Inches(0.08),
+           metric_w - Inches(0.16), rh, row_label,
+           sz=9, bold=True, rgb=BLACK)
+        cx = tbx + metric_w
+        for i in range(n_periods):
+            v = values[i] if i < len(values) else None
+            is_est = (
+                i >= len(grid.announcement_dates)
+                or not grid.announcement_dates[i]
+            )
+            fill = EST_BG if is_est else WHITE
+            rect(s3, cx, y, col_w, rh, fill, BORDER)
+            if v is None:
+                display = "—"
+            elif metric_key == "eps":
+                display = f"{v:.2f}" if isinstance(v, (int, float)) else str(v)
+            else:
+                try:
+                    display = f"{float(v):,.0f}"
+                except (TypeError, ValueError):
+                    display = str(v)
+            tx(s3, cx + Inches(0.04), y + Inches(0.08),
+               col_w - Inches(0.08), rh, display,
+               sz=8, rgb=BLACK, al=PP_ALIGN.CENTER)
+            cx += col_w
+        rendered += 1
+
+
+def _render_prior_est_pair(s3, table, *, tbx, tby, rh, tx, rect) -> None:
+    """Legacy 4-column (Metric | Prior(A) | Est(E) | Δ%) renderer.
+
+    Used only as a fallback when no annual_grid is available — typically a
+    BBG-quarterly-only payload with no FY series. The user's primary view
+    is `_render_multi_period`; this preserves a reasonable display when
+    only thin data is present.
+    """
+    if not table.rows or len(table.rows) < 2:
+        prior_row = table.rows[0] if table.rows else None
+        est_row = None
+    else:
+        prior_row, est_row = table.rows[0], table.rows[1]
+
+    metric_rows: list[tuple[str, object, object, float | None]] = []
+    for metric in ("revenue", "ebitda", "net_income", "eps"):
+        p = getattr(prior_row, metric, None) if prior_row else None
+        e = getattr(est_row, metric, None) if est_row else None
+        if p is None and e is None:
+            continue
+        label = _row_label(
+            metric, table.units_label, table.units_label_per_share or ""
+        )
+        metric_rows.append((label, p, e, table.yoy_by_metric.get(metric)))
+
+    prior_label = _humanize_period(prior_row.label if prior_row else "")
+    est_label = _humanize_period(est_row.label if est_row else "")
+    delta_label = "YoY %"
+    if table.mode == "quarterly" and not any(
+        v is not None for v in table.yoy_by_metric.values()
+    ):
+        delta_label = "QoQ %"
+
+    if table.mode == "quarterly":
+        prior_hdr = (
+            f"{prior_label} (A)" if prior_label and prior_label != "—"
+            and "Q prior" not in prior_label else "Q prior (A)"
+        )
+        est_hdr = (
+            f"{est_label} (E)" if est_label and est_label != "—"
+            and "Q next" not in est_label else "Q next (E)"
+        )
+        hdrs = ["Metric", prior_hdr, est_hdr, delta_label]
+    else:
+        hdrs = [
+            "Metric",
+            f"{prior_label if prior_label != '—' else 'Prior'} (A)",
+            f"{est_label if est_label != '—' else 'Current'} (E)",
+            delta_label,
+        ]
+
+    cws = [Inches(2.0), Inches(1.5), Inches(1.5), Inches(1.3)]
+    x = tbx
+    for j, h in enumerate(hdrs):
+        rect(s3, x, tby, cws[j], rh, BLACK, BORDER)
+        tx(s3, x + Inches(0.1), tby + Inches(0.08),
+           cws[j] - Inches(0.2), rh, h, sz=10, bold=True, rgb=WHITE)
+        x += cws[j]
+
+    for i, (lb, pa, ce, yoy) in enumerate(metric_rows):
+        y = tby + rh * (i + 1)
+        x = tbx
+        cells = [lb, _fmt_num(pa), _fmt_num(ce), _fmt_signed_pct(yoy)]
+        for j, v in enumerate(cells):
+            fill = EST_BG if j == 2 else WHITE
+            rect(s3, x, y, cws[j], rh, fill, BORDER)
+            colour = _delta_color(yoy) if (j == 3 and yoy is not None) else BLACK
+            tx(s3, x + Inches(0.1), y + Inches(0.08),
+               cws[j] - Inches(0.2), rh, str(v),
+               sz=10, bold=(j == 0), rgb=colour)
+            x += cws[j]
+
+
 def render(
     prs, blank_layout, snapshot: FinancialSnapshotData,
     *, tx, rect, quality_flags: list[str] | None = None,
@@ -110,77 +287,23 @@ def render(
        "Financial Snapshot", sz=26, bold=True, rgb=BLACK)
     rect(s3, Inches(0.6), Inches(1.0), Inches(2), Inches(0.06), GOLD)
 
-    # ── Build the (Metric | Prior | Est | YoY) tuples we need to render. ──
-    # Same drop-empty contract as the legacy renderer: rows where both
-    # prior and est are None do not render. EBITDA naturally falls out when
-    # MS doesn't publish it — never a fake EBIT mirror in its place.
     table = snapshot.table
-    if not table.rows or len(table.rows) < 2:
-        prior_row = table.rows[0] if table.rows else None
-        est_row = None
-    else:
-        prior_row, est_row = table.rows[0], table.rows[1]
-
-    def _prior(metric: str):
-        return getattr(prior_row, metric, None) if prior_row else None
-
-    def _est(metric: str):
-        return getattr(est_row, metric, None) if est_row else None
-
-    metric_rows: list[tuple[str, object, object, float | None]] = []
-    for metric in ("revenue", "ebitda", "net_income", "eps"):
-        p, e = _prior(metric), _est(metric)
-        if p is None and e is None:
-            continue
-        label = _row_label(
-            metric, table.units_label, table.units_label_per_share or ""
-        )
-        yoy = table.yoy_by_metric.get(metric)
-        metric_rows.append((label, p, e, yoy))
-
-    # ── Header row ──
-    # When specific labels are known (e.g. "2025 Q4" / "2026 Q1" from the
-    # /finances/ quarterly fallback path) prefer them. Otherwise fall back to
-    # the generic "Q prior (A) / Q next (E)" headers — used by the calendar
-    # source where exact labels are not propagated.
-    prior_label = (prior_row.label if prior_row else "") or ""
-    est_label = (est_row.label if est_row else "") or ""
-    if table.mode == "quarterly":
-        prior_hdr = f"{prior_label} (A)" if prior_label and prior_label != "Q prior" else "Q prior (A)"
-        est_hdr = f"{est_label} (E)" if est_label and est_label != "Q next" else "Q next (E)"
-        hdrs = ["Metric", prior_hdr, est_hdr, "YoY %"]
-    else:
-        hdrs = [
-            "Metric",
-            f"{prior_label or 'Prior'} (A)",
-            f"{est_label or 'Current'} (E)",
-            "YoY %",
-        ]
-
-    cws = [Inches(2.0), Inches(1.5), Inches(1.5), Inches(1.3)]
     tbx = Inches(0.6)
     tby = Inches(1.3)
     rh = Inches(0.42)
-    x = tbx
-    for j, h in enumerate(hdrs):
-        rect(s3, x, tby, cws[j], rh, BLACK, BORDER)
-        tx(s3, x + Inches(0.1), tby + Inches(0.08), cws[j] - Inches(0.2),
-           rh, h, sz=10, bold=True, rgb=WHITE)
-        x += cws[j]
 
-    # ── Data rows ──
-    for i, (lb, pa, ce, yoy) in enumerate(metric_rows):
-        y = tby + rh * (i + 1)
-        x = tbx
-        cells = [lb, _fmt_num(pa), _fmt_num(ce), _fmt_signed_pct(yoy)]
-        for j, v in enumerate(cells):
-            fill = EST_BG if j == 2 else WHITE
-            rect(s3, x, y, cws[j], rh, fill, BORDER)
-            # Sign-aware colour on the YoY column only.
-            colour = _delta_color(yoy) if (j == 3 and yoy is not None) else BLACK
-            tx(s3, x + Inches(0.1), y + Inches(0.08), cws[j] - Inches(0.2),
-               rh, str(v), sz=10, bold=(j == 0), rgb=colour)
-            x += cws[j]
+    # Prefer the multi-period annual grid (matches the gold-standard deck:
+    # 5–6 years of full income statement). Fall back to the (prior, est) pair
+    # only when annual data is unavailable (rare — quarterly-only bundles).
+    if table.annual_grid and table.annual_grid.periods:
+        _render_multi_period(
+            s3, table, table.annual_grid, tbx=tbx, tby=tby, rh=rh,
+            tx=tx, rect=rect,
+        )
+    else:
+        _render_prior_est_pair(
+            s3, table, tbx=tbx, tby=tby, rh=rh, tx=tx, rect=rect,
+        )
 
     # ── Valuation Summary ──
     tx(s3, Inches(0.6), Inches(4.2), Inches(6), Inches(0.4),

@@ -164,12 +164,36 @@ class SummaryData:
 # ── Slide 3: Financial Snapshot ───────────────────────────────────────────
 
 @dataclass(frozen=True)
+class AnnualGrid:
+    """Multi-period income-statement grid for slide 3.
+
+    Mirrors what MarketScreener publishes on /finances/: a row per metric
+    across 5–6 annual periods, with announcement_dates per period to
+    distinguish actuals (A) from estimates (E). When MS lacks a row (e.g.
+    EBITDA for a bank), the metric list is all-None and the renderer
+    drops it. EPS is in display currency units; everything else in
+    `units_label` (e.g. SARM).
+    """
+    periods:             list[str]            # ["2023", "2024", "2025", "2026E", ...]
+    announcement_dates:  list[Optional[str]]  # None for estimate columns
+    revenue:             list[Optional[float]] = field(default_factory=list)
+    ebitda:              list[Optional[float]] = field(default_factory=list)
+    ebit:                list[Optional[float]] = field(default_factory=list)
+    net_income:          list[Optional[float]] = field(default_factory=list)
+    eps:                 list[Optional[float]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class FinancialTable:
     """The financial snapshot table on slide 3.
 
-    Shape contract: `rows` always contains a (prior, est) pair — the legacy
-    deck shows two columns (A) and (E) plus a YoY column. `yoy_by_metric`
-    keys are: "revenue", "ebitda", "net_income", "eps".
+    Two shapes are supported:
+      - `annual_grid`: 5–6 annual periods with full metric rows (preferred —
+        matches the gold-standard deck and shows real multi-year context).
+      - `rows`: legacy (prior, est) pair used when only a quarterly snapshot
+        is available (e.g. a thin BBG bundle with no full annuals).
+
+    The renderer prefers `annual_grid` when set; falls back to `rows`.
     """
     mode:           str                       # "quarterly" | "annual"
     rows:           list[PeriodRow]
@@ -177,6 +201,7 @@ class FinancialTable:
     units_label:    str                       # "(SARM)" — used on money rows
     units_label_per_share: str = ""           # "(SAR)"  — used on EPS row
     yoy_by_metric:  dict[str, Optional[float]] = field(default_factory=dict)
+    annual_grid:    Optional[AnnualGrid] = None
 
     # Footer attribution.
     actuals_source:   str = "Yahoo Finance"   # or "Bloomberg" / "MarketScreener"

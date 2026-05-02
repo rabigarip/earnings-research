@@ -99,10 +99,17 @@ def render(prs, blank_layout, summary: SummaryData, *, tx, rect) -> None:
         tx(s2, sb_x + Inches(0.12), sb_y + Inches(0.08), sb_w - Inches(0.2),
            Inches(0.22), "RECENT HEADLINES", sz=8, bold=True, rgb=MUTED)
         # Each headline gets ~0.7" — title (2 lines max) + date·source line.
+        # Headlines are rendered as PPTX hyperlinks (when a URL exists) so a
+        # reviewer can click through to the source article from inside the
+        # deck. Plain text otherwise.
+        LINK_BLUE = RGBColor(0x1F, 0x6F, 0xEB)
         for i, h in enumerate(summary.headlines[:4]):
             row_y = sb_y + Inches(0.32 + i * 0.7)
+            href = (h.url or "").strip() or None
             tx(s2, sb_x + Inches(0.12), row_y, sb_w - Inches(0.2),
-               Inches(0.42), h.headline, sz=8, rgb=BLACK, line_spacing=1.05)
+               Inches(0.42), h.headline,
+               sz=8, rgb=LINK_BLUE if href else BLACK,
+               line_spacing=1.05, hyperlink=href)
             meta_parts = []
             if h.date:
                 meta_parts.append(h.date)

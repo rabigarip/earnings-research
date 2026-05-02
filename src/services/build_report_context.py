@@ -30,6 +30,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from src.models.report_context import (
+    AnnualGrid,
     ChartSeries,
     CoverData,
     FinancialSnapshotData,
@@ -498,6 +499,125 @@ def _resolve_quarterly_mode(
 
 # ── Slide 3: Financial Snapshot ───────────────────────────────────────────
 
+def _build_annual_grid(
+    payload: ReportPayload,
+    ann: dict,
+    eps_div: dict,
+    vm: dict,
+    currency: str,
+) -> Optional[AnnualGrid]:
+    """Assemble the multi-period income-statement grid for slide 3.
+
+    Source priority:
+      1. payload.bloomberg_bundle.annuals — when the BBG xlsx is on disk we
+         use the full FY series (typically 7+ historical FYs plus Current/LTM
+         and forward estimates).
+      2. payload.ms_annual_forecasts.annual — MS /finances/ annual block.
+      3. None — slide 3 falls back to the (prior, est) PeriodRow pair.
+
+    Slices to the 6 most-recent periods so the table fits the portrait
+    layout's available width without horizontal scrolling. EPS is sourced
+    from /valuation-dividend/ (`eps_div`) when /finances/ doesn't carry it,
+    matching the legacy `_ann_lookup` fallback chain.
+    """
+    bbg = payload.bloomberg_bundle or {}
+    bbg_annuals = (bbg.get("annuals") if isinstance(bbg, dict) else None) or []
+    if bbg_annuals:
+        # Strip Current/LTM rows so we don't double-count alongside the
+        # adjacent FY actual.
+        bbg_clean = [a for a in bbg_annuals if not a.get("is_ltm")]
+        if not bbg_clean:
+            bbg_clean = bbg_annuals
+        slice_ = bbg_clean[-6:] if len(bbg_clean) > 6 else bbg_clean
+        periods = []
+        ann_dates: list[Optional[str]] = []
+        revenue: list[Optional[float]] = []
+        ebitda: list[Optional[float]] = []
+        ebit: list[Optional[float]] = []
+        ni: list[Optional[float]] = []
+        eps: list[Optional[float]] = []
+        for a in slice_:
+            label = str(a.get("period_label") or "")
+            is_est = bool(a.get("is_estimate"))
+            # Normalise BBG labels like "FY 2026 Est" → "FY2026". The
+            # renderer already adds an "(E)" suffix to estimate columns;
+            # carrying "Est" inside the label produced redundant
+            # "FY2026 EST (E)" headers.
+            import re
+            m_fy = re.match(r"\s*FY\s*(\d{4})", label, flags=re.I)
+            if m_fy:
+                label = f"FY{m_fy.group(1)}"
+            periods.append(label)
+            ann_dates.append(None if is_est else (a.get("period_end") or None))
+            metrics = a.get("metrics") or {}
+            revenue.append(_to_millions(metrics.get("revenue")))
+            ebitda.append(_to_millions(metrics.get("ebitda")))
+            ebit.append(_to_millions(metrics.get("ebit")))
+            ni_val = metrics.get("net_income_adj") or metrics.get("net_income_gaap") or metrics.get("net_income")
+            ni.append(_to_millions(ni_val))
+            eps_val = metrics.get("eps_adj") or metrics.get("eps_gaap") or metrics.get("eps")
+            try:
+                eps.append(float(eps_val) if eps_val is not None else None)
+            except (TypeError, ValueError):
+                eps.append(None)
+        return AnnualGrid(
+            periods=periods, announcement_dates=ann_dates,
+            revenue=revenue, ebitda=ebitda, ebit=ebit,
+            net_income=ni, eps=eps,
+        )
+
+    # MS annual path
+    ms_periods = ann.get("periods") or []
+    if not ms_periods:
+        return None
+    n = min(6, len(ms_periods))
+    sl = slice(-n, None)
+    raw_periods = ms_periods[sl]
+    raw_dates = (ann.get("announcement_dates") or [None] * len(ms_periods))[sl]
+    revenue = (ann.get("net_sales") or [None] * len(ms_periods))[sl]
+    ebitda = (ann.get("ebitda") or [None] * len(ms_periods))[sl]
+    ebit = (ann.get("ebit") or [None] * len(ms_periods))[sl]
+    ni = (ann.get("net_income") or [None] * len(ms_periods))[sl]
+    # EPS fallback to /valuation-dividend/ when /finances/ doesn't carry it.
+    eps_from_ann = ann.get("eps") or [None] * len(ms_periods)
+    eps_from_div = eps_div.get("eps") or []
+    div_periods = eps_div.get("periods") or []
+    eps: list[Optional[float]] = []
+    for i, p in enumerate(raw_periods):
+        v = eps_from_ann[sl][i] if i < len(eps_from_ann[sl]) else None
+        if v is None and div_periods:
+            try:
+                j = div_periods.index(p)
+                v = eps_from_div[j] if j < len(eps_from_div) else None
+            except ValueError:
+                v = None
+        try:
+            eps.append(float(v) if v is not None else None)
+        except (TypeError, ValueError):
+            eps.append(None)
+
+    # The renderer adds the "(A)"/"(E)" suffix; we just normalise the period
+    # label itself. MS often returns "2026e" — strip the lowercase "e" so the
+    # header reads "2026 (E)" rather than "2026e (E)".
+    periods_display: list[str] = []
+    ann_dates: list[Optional[str]] = []
+    for i, p in enumerate(raw_periods):
+        d = raw_dates[i] if i < len(raw_dates) else None
+        is_estimate = not d or str(d).strip() in ("", "-", "None")
+        label = str(p).strip()
+        if label.endswith(("e", "E")) and label[:-1].isdigit():
+            label = label[:-1]
+        periods_display.append(label)
+        ann_dates.append(None if is_estimate else d)
+
+    return AnnualGrid(
+        periods=periods_display,
+        announcement_dates=ann_dates,
+        revenue=list(revenue), ebitda=list(ebitda), ebit=list(ebit),
+        net_income=list(ni), eps=eps,
+    )
+
+
 def _build_snapshot(
     payload: ReportPayload, memo_data: dict | None, currency: str
 ) -> FinancialSnapshotData:
@@ -590,6 +710,18 @@ def _build_snapshot(
             "net_income": memo.get("yoy_ni_pct_table"),
             "eps":     memo.get("yoy_eps_pct_table"),
         }
+        # QoQ fallback: when the upstream memo didn't supply YoY (BBG bundle
+        # only carries prior + next quarter; same-quarter-prior-year is
+        # absent), compute QoQ from the resolved row pair so slide 3 has a
+        # signed delta to colour. Renderer relabels the column "QoQ %" when
+        # all YoY entries are None.
+        if all(v is None for v in yoy_map.values()):
+            yoy_map = {
+                "revenue":    _yoy_pct(prior_row.revenue, est_row.revenue),
+                "ebitda":     _yoy_pct(prior_row.ebitda, est_row.ebitda),
+                "net_income": _yoy_pct(prior_row.net_income, est_row.net_income),
+                "eps":        _yoy_pct(prior_row.eps, est_row.eps),
+            }
     else:
         mode = "annual"
         prior_label = (
@@ -717,6 +849,13 @@ def _build_snapshot(
             actuals_source = "Yahoo Finance"
             estimates_source = "Yahoo Finance"
 
+    # ── Multi-period annual grid (slide 3 main table) ──
+    # Show the full MS snapshot — 5–6 years of Revenue / EBITDA / EBIT /
+    # NI / EPS — matching the gold-standard deck. The (prior, est) pair
+    # above remains for slide-2 cards and the QoQ/YoY chip; slide 3 uses
+    # this richer view when annual data is available.
+    annual_grid = _build_annual_grid(payload, ann, eps_div, vm, table_currency)
+
     table = FinancialTable(
         mode=mode,
         rows=rows,
@@ -724,6 +863,7 @@ def _build_snapshot(
         units_label=units_label_money,
         units_label_per_share=units_label_per_share,
         yoy_by_metric=yoy_map,
+        annual_grid=annual_grid,
         actuals_source=actuals_source,
         estimates_source=estimates_source,
         estimates_as_of=datetime.now().strftime("%Y-%m-%d"),
