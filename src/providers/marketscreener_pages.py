@@ -759,10 +759,21 @@ def fetch_financial_forecast_series(base_company_url: str, cache_key_prefix: str
                     warnings.append("Quarterly data from ?type=trimestral (rendered)")
 
     def _row_by_label(rows: list[tuple[str, list[str]]], *labels: str) -> list[str] | None:
+        # Substring match — but guard against the EBIT/EBITDA collision:
+        # "ebit" is a substring of "ebitda", and on the MS finances page
+        # the EBITDA row precedes the EBIT row. A naive substring lookup
+        # for "EBIT" hits the EBITDA row first, populating the EBIT field
+        # with EBITDA values (rendered as identical EBITDA / EBIT rows on
+        # slide 3 of the deck — the bug we shipped earlier).
         for label in labels:
+            ll = label.lower()
             for rlabel, vals in rows:
-                if label.lower() in rlabel.lower():
-                    return vals
+                rl = (rlabel or "").lower()
+                if ll not in rl:
+                    continue
+                if ll == "ebit" and "ebitda" in rl:
+                    continue  # skip — that's an EBITDA row, not EBIT
+                return vals
         return None
 
     def _parse_row(vals: list[str] | None, periods: list[str]) -> list[float | None]:
