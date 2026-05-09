@@ -80,12 +80,23 @@ def build_revenue_ni_chart(
     if not periods or (not any(revenues) and not any(net_incomes)):
         return
 
+    # Preserve None so missing periods render as no-bar instead of a
+    # misleading zero-bar (see comment on build_quarterly_income_chart).
     def _to_display(arr):
-        return [_safe_float(v) for v in (arr or [])]
+        out = []
+        for v in (arr or []):
+            if v is None:
+                out.append(None)
+                continue
+            try:
+                out.append(float(v))
+            except (TypeError, ValueError):
+                out.append(None)
+        return out
 
     rev_vals = _to_display(revenues)
     ni_vals = _to_display(net_incomes)
-    ebit_vals = _to_display(ebit_values) if ebit_values is not None else [0.0] * len(periods)
+    ebit_vals = _to_display(ebit_values) if ebit_values is not None else [None] * len(periods)
 
     chart_data = CategoryChartData()
     labels = [p.replace("FY", "").strip() for p in periods]
@@ -543,8 +554,23 @@ def build_quarterly_income_chart(
     from pptx.chart.data import CategoryChartData
     from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
 
+    # CRITICAL: preserve None as None (NOT _safe_float which returned
+    # 0.0). MS commonly leaves quarterly EBIT empty for older quarters
+    # — converting those to 0 produced misleading zero-bars in the
+    # chart, which a reviewer caught on 2026-05 ("operating profit 0
+    # for 24Q3, 25Q1, 25Q2 …" — those quarters had real earnings; the
+    # chart should show no-bar for missing data, not a fake zero).
     def _vals(arr):
-        return [_safe_float(v) for v in (arr or [])]
+        out = []
+        for v in (arr or []):
+            if v is None:
+                out.append(None)
+                continue
+            try:
+                out.append(float(v))
+            except (TypeError, ValueError):
+                out.append(None)
+        return out
 
     chart_data = CategoryChartData()
     # Compact category labels: "21Q2", "21Q3", ... so a wide chart fits
@@ -639,8 +665,19 @@ def build_surprise_chart(
     from pptx.chart.data import CategoryChartData
     from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
 
+    # Preserve None as None — missing actuals/estimates render as
+    # no-bar (correct) instead of zero-bar (misleading).
     def _vals(arr):
-        return [_safe_float(v) for v in (arr or [])]
+        out = []
+        for v in (arr or []):
+            if v is None:
+                out.append(None)
+                continue
+            try:
+                out.append(float(v))
+            except (TypeError, ValueError):
+                out.append(None)
+        return out
 
     # Compact labels
     import re as _r

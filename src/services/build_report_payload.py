@@ -268,23 +268,31 @@ def _compute_memo(
     if not out.get("preview_quarter_short"):
         out["preview_quarter_short"] = "1Q26"
     # Carry-forward override (NBOB.OM-shaped tickers): when MS hasn't yet
-    # published a forward quarterly consensus, the cover should still call
-    # itself the NEXT quarter, not the last-reported one. Roll the display
-    # labels forward by one quarter while leaving `next_quarter_label`
-    # alone — the lookups below need to hit the last-reported row to keep
-    # the YoY chips meaningful.
+    # published a forward quarterly consensus, label the deck after the
+    # LAST REPORTED quarter ("Q1 2026 Update") rather than pretending it
+    # previews a future quarter. Reviewer feedback (2026-05): the
+    # "Q2 2026 Earnings Preview" cover with Q1 actuals underneath was
+    # the deck's biggest framing problem — the data is a Q1 recap, not
+    # a Q2 preview.
+    #
+    # Two outputs:
+    #   preview_quarter_short — last-reported quarter (e.g. "1Q26")
+    #   cover_period_label    — "Q1 2026 Update" (replaces the
+    #                            "Earnings Preview — 2Q26" pattern when
+    #                            carry-forward is in effect)
     if out.get("quarterly_consensus_unavailable") and next_quarter_label:
         import re as _rqc
         mc = _rqc.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})", next_quarter_label, _rqc.I)
         if mc:
             yrc = int(mc.group(1) or mc.group(4))
             qnc = int(mc.group(2) or mc.group(3))
-            roll_q = qnc + 1 if qnc < 4 else 1
-            roll_yr = yrc if qnc < 4 else yrc + 1
-            out["preview_quarter_short"] = f"{roll_q}Q{str(roll_yr)[-2:]}"
-            out["preview_quarter_label"] = f"Earnings Preview — {out['preview_quarter_short']}"
+            # last-reported quarter (used as the cover frame)
+            out["preview_quarter_short"] = f"{qnc}Q{str(yrc)[-2:]}"
+            out["preview_quarter_label"] = f"Earnings Update — {out['preview_quarter_short']}"
+            out["cover_period_label"] = f"Q{qnc} {yrc} Update"
         else:
-            out["preview_quarter_label"] = f"Earnings Preview — {out.get('preview_quarter_short')}"
+            out["preview_quarter_label"] = f"Earnings Update — {out.get('preview_quarter_short')}"
+            out["cover_period_label"] = f"Earnings Update"
     else:
         out["preview_quarter_label"] = f"Earnings Preview — {out.get('preview_quarter_short', '1Q26')}"
     # Prior quarter and prior-year same quarter labels (for table headers and consistency)

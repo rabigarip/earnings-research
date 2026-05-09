@@ -211,10 +211,12 @@ class TestCarryForwardWhenAllReleased:
         assert memo["next_quarter_label"] == "2026Q1"
         assert memo["last_reported_quarter_label"] == "2026Q1"
         assert memo["quarterly_consensus_unavailable"] is True
-        # Display labels rolled forward to Q2 2026 — the cover and slide
-        # 2 header read off these.
-        assert memo["preview_quarter_short"] == "2Q26"
-        assert memo["preview_quarter_label"] == "Earnings Preview — 2Q26"
+        # Cover labels frame this as a "Q1 2026 Update" (recap of the
+        # most recently reported quarter), not a misleading "Q2 2026
+        # Earnings Preview" — the data anchor is Q1 26 actuals.
+        assert memo["preview_quarter_short"] == "1Q26"
+        assert memo["preview_quarter_label"] == "Earnings Update — 1Q26"
+        assert memo["cover_period_label"] == "Q1 2026 Update"
 
     def test_carry_forward_keeps_consensus_lookup_on_last_released(self):
         """The whole point of keeping `next_quarter_label` on the released
@@ -245,7 +247,8 @@ class TestCarryForwardWhenAllReleased:
         # ms_calendar_events block).
 
     def test_carry_forward_year_wrap_q4_to_q1(self):
-        """Q4 → Q1 of next year. Edge case for the rolling logic."""
+        """Q4 already reported (Jan 2026 release). Cover frames the deck
+        as a "Q4 2025 Update" — anchored on the last released quarter."""
         periods = ["2025Q1", "2025Q2", "2025Q3", "2025Q4"]
         dates = ["4/27/25", "7/27/25", "10/26/25", "1/13/26"]
         sales = [10, 11, 12, 13]
@@ -258,7 +261,8 @@ class TestCarryForwardWhenAllReleased:
             yahoo_earnings_date=None, derived=None,
         )
         assert memo["quarterly_consensus_unavailable"] is True
-        assert memo["preview_quarter_short"] == "1Q26"  # rolled Q4 25 → Q1 26
+        assert memo["preview_quarter_short"] == "4Q25"  # last reported Q4 25
+        assert memo["cover_period_label"] == "Q4 2025 Update"
         assert memo["last_reported_quarter_label"] == "2025Q4"
 
     def test_no_carry_forward_when_estimate_present(self):

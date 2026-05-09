@@ -142,7 +142,15 @@ def _build_cover(payload: ReportPayload, memo_data: dict | None) -> CoverData:
             break
     has_quarterly, _, _ = _resolve_quarterly_mode(payload, memo)
 
-    if has_quarterly:
+    # Carry-forward decks (MS hasn't yet published forward quarterly
+    # consensus, so the data anchor is the LAST REPORTED quarter)
+    # carry an explicit `cover_period_label` from _compute_memo:
+    # "Q1 2026 Update" instead of the misleading "Q2 2026 Earnings
+    # Preview". When set, that label wins.
+    cover_period_override = memo.get("cover_period_label") if memo else None
+    if cover_period_override:
+        period_label = str(cover_period_override)
+    elif has_quarterly:
         pshort = (
             (memo_data or {}).get("preview_short")
             or memo.get("preview_quarter_short")
@@ -631,16 +639,75 @@ def _resolve_quarterly_mode(
         arr = qb.get(key) or []
         return arr[idx] if 0 <= idx < len(arr) and arr[idx] is not None else None
 
+    # MS frequently leaves the quarterly EPS row empty even when net
+    # income IS published (NBOB.OM is a clean example: NI populated for
+    # every quarter, EPS column entirely empty). The cards on slide 2
+    # then fell back to FY-est EPS, which is the bug a reviewer caught
+    # on 2026-05 (deck showed Q1 26 "EPS 0.03" — actually FY 26E —
+    # against MS's actual Q1 EPS of 0.012). Compute quarterly EPS from
+    # quarterly NI / shares-outstanding when MS leaves the row empty.
+    # Shares come from market_cap / last_close, both already in payload.
+    shares: Optional[float] = None
+    cs_payload = payload.consensus_summary or {}
+    last_close = (
+        cs_payload.get("last_close_price") if isinstance(cs_payload, dict) else None
+    )
+    mcap_units: Optional[float] = None
+    vm = (payload.ms_valuation_multiples or {}) if hasattr(payload, "ms_valuation_multiples") else {}
+    if isinstance(vm, dict):
+        # vm.capitalization is in millions of currency, ordered FY-asc
+        # (oldest → newest). Walk BACKWARDS to pick the most recent
+        # non-None value (typically the FY-est cap MS published most
+        # recently). The earlier "first non-None" version picked the
+        # oldest cap, which produced wrong shares-outstanding (e.g.
+        # NBOB.OM FY21 cap 318.7M → 762M shares vs the actual 1.626B).
+        for cap_v in reversed(vm.get("capitalization") or []):
+            if cap_v is not None:
+                try:
+                    mcap_units = float(cap_v) * 1e6
+                except (TypeError, ValueError):
+                    mcap_units = None
+                break
+    # Fallback to Yahoo's market_cap on QuoteSnapshot.
+    if mcap_units is None and getattr(payload, "quote", None):
+        q_mcap = getattr(payload.quote, "market_cap", None)
+        if q_mcap:
+            try:
+                mcap_units = float(q_mcap)
+            except (TypeError, ValueError):
+                pass
+    if last_close and mcap_units and float(last_close) > 0:
+        try:
+            shares = mcap_units / float(last_close)
+        except (TypeError, ValueError, ZeroDivisionError):
+            shares = None
+
+    def _eps_or_compute(idx: int) -> Optional[float]:
+        """Return MS-published quarterly EPS if available; otherwise
+        compute it from NI / shares so slide-2 cards don't fall back
+        to the FY-est EPS for tickers where MS leaves the row empty."""
+        v = _v("eps", idx)
+        if v is not None:
+            return v
+        ni = _v("net_income", idx)
+        if ni is None or shares is None or shares == 0:
+            return None
+        # MS NI is in millions of currency; shares are raw units.
+        try:
+            return round((float(ni) * 1e6) / float(shares), 4)
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
+
     cp_fb = {
         "net_sales": _v("net_sales", pi), "ebitda": _v("ebitda", pi),
         "ebit": _v("ebit", pi), "net_income": _v("net_income", pi),
-        "eps": _v("eps", pi),
+        "eps": _eps_or_compute(pi),
         "_period_label": str(qp[pi]),
     }
     cn_fb = {
         "net_sales": _v("net_sales", ei), "ebitda": _v("ebitda", ei),
         "ebit": _v("ebit", ei), "net_income": _v("net_income", ei),
-        "eps": _v("eps", ei),
+        "eps": _eps_or_compute(ei),
         "_period_label": str(qp[ei]),
     }
     if cp_fb.get("net_sales") and cn_fb.get("net_sales"):
@@ -1367,7 +1434,13 @@ def _build_summary(
 
 def _format_card_value(v: Any, *, is_eps: bool) -> str:
     """Mirror legacy `pn()` card formatting: `12,359` for revenue,
-    `10.18` for EPS, `—` for None."""
+    `10.18` for EPS, `—` for None.
+
+    EPS precision mirrors the slide-3 grid: 3 decimals for sub-0.5
+    values (Oman / Bangladesh / India sub-rial EPS), 2 decimals
+    otherwise. Two decimals on Q1 26 EPS = 0.012 collapsed to "0.01"
+    which a reviewer flagged on 2026-05 as misleading vs the actual
+    MS-reported value."""
     if v is None:
         return "—"
     try:
@@ -1375,6 +1448,8 @@ def _format_card_value(v: Any, *, is_eps: bool) -> str:
     except (TypeError, ValueError):
         return str(v)
     if is_eps:
+        if abs(x) < 0.5 and x != 0:
+            return f"{x:,.3f}"
         return f"{x:,.2f}" if x != int(x) else f"{int(x):,}"
     if abs(x) >= 1e6:
         return f"{x:,.0f}"
