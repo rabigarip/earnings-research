@@ -90,10 +90,10 @@ def render(prs, blank_layout, sector: SectorComparisonData, *, tx, rect,
 
     # ── Peer table ──
     tbl_x = Inches(0.6)
-    tbl_y = Inches(2.0)
+    tbl_y = Inches(1.80)
     tbl_w = Inches(6.3)
-    row_h = Inches(0.36)
-    header_h = Inches(0.42)
+    row_h = Inches(0.32)
+    header_h = Inches(0.36)
 
     # Column widths (sum = tbl_w = 6.3")
     col_widths = {

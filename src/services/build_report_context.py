@@ -294,6 +294,29 @@ def _build_cover(payload: ReportPayload, memo_data: dict | None) -> CoverData:
                 if pe_fy_e is not None and div_yield_pct is not None:
                     break
 
+    # Performance row — fill the cover's lower band with real
+    # multi-period price moves, sourced from the ms_price_performance
+    # block we already fetch. None entries cause the cover renderer to
+    # show a "—" cell rather than collapsing the row.
+    pp = (payload.ms_price_performance or {}) if hasattr(payload, "ms_price_performance") else {}
+    perf_dict = (pp.get("performance") or {}) if isinstance(pp, dict) else {}
+    def _pp(key: str) -> Optional[float]:
+        v = perf_dict.get(key)
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    # Top strengths — pulled from ms_ratings when MS has them. Capped at
+    # 3 because the cover band can fit ~3 short bullet lines without
+    # forcing aggressive truncation. Strings are taken verbatim from MS.
+    rt = (payload.ms_ratings or {}) if hasattr(payload, "ms_ratings") else {}
+    raw_strengths = (rt.get("strengths") or []) if isinstance(rt, dict) else []
+    top_strengths = [
+        s.strip() for s in raw_strengths
+        if isinstance(s, str) and s.strip()
+    ][:3]
+
     return CoverData(
         company_name=company_name,
         ticker=ticker,
@@ -309,6 +332,13 @@ def _build_cover(payload: ReportPayload, memo_data: dict | None) -> CoverData:
         n_analysts=n_analysts,
         pe_fy_e=pe_fy_e,
         div_yield_pct=div_yield_pct,
+        perf_1d_pct=_pp("perf_1d_pct"),
+        perf_1w_pct=_pp("perf_1w_pct"),
+        perf_1m_pct=_pp("perf_1m_pct"),
+        perf_3m_pct=_pp("perf_3m_pct"),
+        perf_6m_pct=_pp("perf_6m_pct"),
+        perf_ytd_pct=_pp("perf_ytd_pct"),
+        top_strengths=top_strengths,
         rating_source=rating_source,
         target_price_source=target_source,
         market_cap_source=mcap_source,

@@ -87,6 +87,18 @@ class CoverData:
     pe_fy_e:        Optional[float] = None    # forward P/E
     div_yield_pct:  Optional[float] = None    # already in % (e.g. 4.8)
 
+    # Performance row + analyst highlights — fill the cover bottom with
+    # real data rather than a generic "About this report" abstract.
+    # Sourced from ms_price_performance and ms_ratings; the renderer
+    # drops each row when its inputs are all None.
+    perf_1d_pct:    Optional[float] = None
+    perf_1w_pct:    Optional[float] = None
+    perf_1m_pct:    Optional[float] = None
+    perf_3m_pct:    Optional[float] = None
+    perf_6m_pct:    Optional[float] = None
+    perf_ytd_pct:   Optional[float] = None
+    top_strengths:  list[str] = field(default_factory=list)
+
     # Provenance — used for the footer "Source: …" line.
     rating_source:        str = ""            # "marketscreener" | "yahoo" | ""
     target_price_source:  str = ""
@@ -350,6 +362,11 @@ class RatingsData:
     weaknesses:       list[str] = field(default_factory=list)
     composites:       list[CompositeRating] = field(default_factory=list)
     esg_msci:         Optional[str] = None
+    # Peer-level ESG MSCI + Investor rating mini-table — used to fill the
+    # bottom band of slide 5 with comparison context. Each entry shape:
+    # {"name": str, "market_cap": str|None, "esg_msci": str|None,
+    #  "rating_pct": int|None}
+    peer_esg:         list[dict] = field(default_factory=list)
     has_data:         bool = False
 
 
@@ -422,6 +439,11 @@ class PriceActionData:
     course_extremes:    list[CourseRange] = field(default_factory=list)
     broker_actions:     list[BrokerAction] = field(default_factory=list)
     covering_brokers:   list[str] = field(default_factory=list)
+    # Recent quotes from MS — used as a fallback content source when MS
+    # has no broker-actions for the ticker. Each entry: {date, price,
+    # change_pct, volume}. Renderer drops the panel if both broker
+    # actions AND recent quotes are empty.
+    recent_quotes:      list[dict] = field(default_factory=list)
     has_data:           bool = False
 
 

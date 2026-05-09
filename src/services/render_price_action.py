@@ -135,53 +135,117 @@ def render(prs, blank_layout, price_action: PriceActionData, *, tx, rect,
                        currency, sz=8, rgb=MUTED, al=PP_ALIGN.CENTER)
 
     # ── Recent broker actions ──
+    # Auto-sized to content. Previous fixed 5.2-inch panel left a huge
+    # white box on tickers MS hasn't published broker actions for
+    # (NBOB.OM, smaller listings) and the empty space wasn't pulling
+    # any informational weight.
     actions_y = ext_y + ext_h + Inches(0.25)
-    actions_h = Inches(5.2)
     actions = price_action.broker_actions
-    rect(s, Inches(0.6), actions_y, panel_w, actions_h, WHITE, CARD_BORDER)
-    rect(s, Inches(0.6), actions_y, Inches(0.06), actions_h, GOLD)
-    tx(s, Inches(0.78), actions_y + Inches(0.1),
-       Inches(4.5), Inches(0.25),
-       "RECENT BROKER ACTIONS", sz=10, bold=True, rgb=MUTED)
+    H = prs.slide_height
+    available_to_footer = H - actions_y - Inches(0.55)  # reserve footer space
 
     if actions:
-        cursor = actions_y + Inches(0.5)
-        row_h = Inches(0.7)
+        # Estimate panel height from the rows we'll actually render.
+        row_heights_in = []
         for action in actions[:6]:
-            # Date column (small, muted)
-            tx(s, Inches(0.8), cursor,
-               Inches(0.9), Inches(0.3),
+            line_count = max(1, (len(action.headline or "") // 60) + 1)
+            row_heights_in.append(0.22 * line_count + 0.18)
+        body_h_in = sum(row_heights_in)
+        cov_h_in = 0.55 if price_action.covering_brokers else 0.0
+        actions_h = Inches(0.50 + body_h_in + cov_h_in)
+        actions_h = min(actions_h, available_to_footer)
+
+        rect(s, Inches(0.6), actions_y, panel_w, actions_h, WHITE, CARD_BORDER)
+        rect(s, Inches(0.6), actions_y, Inches(0.06), actions_h, GOLD)
+        tx(s, Inches(0.78), actions_y + Inches(0.10),
+           Inches(4.5), Inches(0.22),
+           "RECENT BROKER ACTIONS", sz=9, bold=True, rgb=MUTED)
+        cursor = actions_y + Inches(0.40)
+        for i, action in enumerate(actions[:6]):
+            row_h = Inches(row_heights_in[i])
+            tx(s, Inches(0.80), cursor,
+               Inches(0.9), Inches(0.25),
                action.date or "—", sz=9, bold=True, rgb=MUTED)
-            # Headline (main content, wraps)
-            line_count = max(1, (len(action.headline) // 60) + 1)
-            wrap_h = Inches(0.22) * line_count + Inches(0.05)
             tx(s, Inches(1.75), cursor,
-               panel_w - Inches(1.3), wrap_h,
+               panel_w - Inches(1.30), row_h - Inches(0.05),
                action.headline or "—", sz=10, rgb=BLACK, line_spacing=1.15)
-            # Source chip
             if action.source:
-                tx(s, Inches(0.8), cursor + Inches(0.32),
+                tx(s, Inches(0.80), cursor + Inches(0.30),
                    Inches(0.9), Inches(0.22),
                    action.source, sz=7, rgb=MUTED)
-            # advance cursor and break if we'd overflow
-            cursor = cursor + max(row_h, wrap_h + Inches(0.1))
-            if cursor > actions_y + actions_h - Inches(0.6):
+            cursor = cursor + row_h
+            if cursor > actions_y + actions_h - Inches(0.50):
                 break
+
+        if price_action.covering_brokers:
+            cov_y = actions_y + actions_h - Inches(0.50)
+            tx(s, Inches(0.78), cov_y, panel_w - Inches(0.30), Inches(0.18),
+               "COVERAGE", sz=8, bold=True, rgb=MUTED)
+            brokers_str = "  ·  ".join(price_action.covering_brokers[:8])
+            tx(s, Inches(0.78), cov_y + Inches(0.20),
+               panel_w - Inches(0.30), Inches(0.25),
+               brokers_str, sz=9, rgb=BLACK)
+    elif price_action.recent_quotes:
+        # When MS hasn't published broker actions, fall back to the
+        # recent-quotes table — a richer use of the same vertical band.
+        # Each row carries date, price, change, volume.
+        quotes = price_action.recent_quotes[:8]
+        actions_h = Inches(0.40 + 0.30 * len(quotes) + 0.20)
+        rect(s, Inches(0.6), actions_y, panel_w, actions_h, WHITE, CARD_BORDER)
+        rect(s, Inches(0.6), actions_y, Inches(0.06), actions_h, GOLD)
+        tx(s, Inches(0.78), actions_y + Inches(0.10),
+           Inches(4.5), Inches(0.22),
+           "RECENT TRADING ACTIVITY", sz=9, bold=True, rgb=MUTED)
+
+        # Header row
+        head_y = actions_y + Inches(0.40)
+        cols = [
+            ("Date",   Inches(0.78), Inches(1.20), PP_ALIGN.LEFT),
+            ("Price",  Inches(2.00), Inches(1.50), PP_ALIGN.RIGHT),
+            ("Change", Inches(3.55), Inches(1.20), PP_ALIGN.RIGHT),
+            ("Volume", Inches(4.85), Inches(1.95), PP_ALIGN.RIGHT),
+        ]
+        for label, cx, cw, al in cols:
+            tx(s, cx, head_y, cw, Inches(0.18),
+               label, sz=8, bold=True, rgb=MUTED, al=al)
+
+        cy = head_y + Inches(0.22)
+        for q in quotes:
+            for label, cx, cw, al in cols:
+                value = ""
+                if label == "Date":
+                    value = q.get("date") or "—"
+                elif label == "Price":
+                    value = q.get("price") or "—"
+                elif label == "Change":
+                    cp = q.get("change_pct")
+                    value = (f"+{cp:.2f}%" if isinstance(cp, (int, float)) and cp >= 0
+                             else (f"{cp:.2f}%" if isinstance(cp, (int, float)) else "—"))
+                elif label == "Volume":
+                    value = q.get("volume") or "—"
+                color = BLACK
+                if label == "Change":
+                    cp = q.get("change_pct")
+                    color = (GREEN if isinstance(cp, (int, float)) and cp > 0
+                             else (RED if isinstance(cp, (int, float)) and cp < 0
+                                   else BLACK))
+                tx(s, cx, cy, cw, Inches(0.22),
+                   value, sz=9, rgb=color, al=al,
+                   bold=(label == "Price"))
+            cy = cy + Inches(0.28)
     else:
-        tx(s, Inches(0.78), actions_y + Inches(0.5),
-           panel_w - Inches(0.3), Inches(0.4),
+        # Genuinely no data: small unobtrusive note instead of a 5-inch panel.
+        actions_h = Inches(0.80)
+        rect(s, Inches(0.6), actions_y, panel_w, actions_h,
+             RGBColor(0xFA, 0xF8, 0xF3), CARD_BORDER)
+        rect(s, Inches(0.6), actions_y, Inches(0.06), actions_h, GOLD)
+        tx(s, Inches(0.78), actions_y + Inches(0.10),
+           Inches(4.5), Inches(0.22),
+           "BROKER ACTIVITY", sz=9, bold=True, rgb=MUTED)
+        tx(s, Inches(0.78), actions_y + Inches(0.40),
+           panel_w - Inches(0.30), Inches(0.30),
            "No recent broker actions on file.",
            sz=10, rgb=MUTED)
-
-    # Covering brokers chip strip (bottom of actions panel)
-    if price_action.covering_brokers:
-        tx(s, Inches(0.78), actions_y + actions_h - Inches(0.5),
-           panel_w - Inches(0.3), Inches(0.2),
-           "COVERAGE", sz=8, bold=True, rgb=MUTED)
-        brokers_str = "  ·  ".join(price_action.covering_brokers[:8])
-        tx(s, Inches(0.78), actions_y + actions_h - Inches(0.3),
-           panel_w - Inches(0.3), Inches(0.25),
-           brokers_str, sz=9, rgb=BLACK)
 
     # ── Source ──
     tx(s, Inches(0.6), prs.slide_height - Inches(0.4),

@@ -161,49 +161,125 @@ def render(prs, blank_layout, ratings: RatingsData, *, tx, rect,
             )
 
     # ── Strengths / Weaknesses split ──
-    # Pulled up to fill the room freed by the compacted ratings strip.
+    # Auto-sized to actual content. Previous fixed 8.5-inch panels left
+    # ~5 inches of empty cream-coloured background below short bullet
+    # lists (NBOB.OM has just 5 strengths and 3 weaknesses). Now each
+    # bullet-list height is computed from its content; the renderer
+    # caps the visible panel just below the last bullet so the panels
+    # don't sprawl past their data.
     list_y = Inches(3.30)
-    list_h = Inches(8.5)
     half_w = Inches(3.05)
     gap = Inches(0.2)
-
-    # Strengths box
     sx = Inches(0.6)
-    rect(s, sx, list_y, half_w, list_h, STRENGTH_BG, CARD_BORDER)
-    rect(s, sx, list_y, Inches(0.06), list_h, STRENGTH_BAR)
-    tx(s, sx + Inches(0.2), list_y + Inches(0.15),
-       half_w - Inches(0.3), Inches(0.3),
-       "STRENGTHS", sz=11, bold=True, rgb=STRENGTH_BAR)
-
-    cursor = list_y + Inches(0.55)
-    for bullet in ratings.strengths:
-        tx(s, sx + Inches(0.25), cursor, Inches(0.2), Inches(0.3),
-           "•", sz=11, bold=True, rgb=STRENGTH_BAR)
-        # Estimate height via crude char-per-line (renders robustly even
-        # without actual font metrics).
-        line_count = max(1, (len(bullet) // 50) + 1)
-        h = Inches(0.22) * line_count + Inches(0.08)
-        tx(s, sx + Inches(0.45), cursor, half_w - Inches(0.6), h,
-           bullet, sz=10, rgb=BLACK, line_spacing=1.15)
-        cursor = cursor + h + Inches(0.05)
-
-    # Weaknesses box
     wx = sx + half_w + gap
-    rect(s, wx, list_y, half_w, list_h, WEAKNESS_BG, CARD_BORDER)
-    rect(s, wx, list_y, Inches(0.06), list_h, WEAKNESS_BAR)
-    tx(s, wx + Inches(0.2), list_y + Inches(0.15),
-       half_w - Inches(0.3), Inches(0.3),
-       "WEAKNESSES", sz=11, bold=True, rgb=WEAKNESS_BAR)
 
-    cursor = list_y + Inches(0.55)
-    for bullet in ratings.weaknesses:
-        tx(s, wx + Inches(0.25), cursor, Inches(0.2), Inches(0.3),
-           "•", sz=11, bold=True, rgb=WEAKNESS_BAR)
-        line_count = max(1, (len(bullet) // 50) + 1)
-        h = Inches(0.22) * line_count + Inches(0.08)
-        tx(s, wx + Inches(0.45), cursor, half_w - Inches(0.6), h,
-           bullet, sz=10, rgb=BLACK, line_spacing=1.15)
-        cursor = cursor + h + Inches(0.05)
+    def _bullet_height(text: str) -> float:
+        """Approximate height in inches for a wrapped bullet at sz=10
+        body width 2.45". Empirical: ~50 chars/line, 0.22"/line."""
+        n = max(1, (len(text) // 50) + 1)
+        return 0.22 * n + 0.08
+
+    s_content = sum(_bullet_height(b) for b in ratings.strengths)
+    w_content = sum(_bullet_height(b) for b in ratings.weaknesses)
+    panel_top_pad = 0.55
+    panel_bot_pad = 0.20
+    s_h_in = max(panel_top_pad + s_content + panel_bot_pad, 2.5)
+    w_h_in = max(panel_top_pad + w_content + panel_bot_pad, 2.5)
+    panel_h_in = max(s_h_in, w_h_in)
+    list_h = Inches(panel_h_in)
+
+    def _draw_bullet_panel(x, label, label_color, bg_color, bar_color,
+                           bullets):
+        rect(s, x, list_y, half_w, list_h, bg_color, CARD_BORDER)
+        rect(s, x, list_y, Inches(0.06), list_h, bar_color)
+        tx(s, x + Inches(0.20), list_y + Inches(0.16),
+           half_w - Inches(0.30), Inches(0.28),
+           label, sz=11, bold=True, rgb=label_color)
+        cursor = list_y + Inches(0.55)
+        for bullet in bullets:
+            tx(s, x + Inches(0.25), cursor,
+               Inches(0.18), Inches(0.30),
+               "•", sz=11, bold=True, rgb=bar_color)
+            h = Inches(_bullet_height(bullet))
+            tx(s, x + Inches(0.45), cursor,
+               half_w - Inches(0.60), h,
+               bullet, sz=10, rgb=BLACK, line_spacing=1.15)
+            cursor = cursor + h + Inches(0.05)
+
+    _draw_bullet_panel(sx, "STRENGTHS", STRENGTH_BAR, STRENGTH_BG, STRENGTH_BAR,
+                       ratings.strengths)
+    _draw_bullet_panel(wx, "WEAKNESSES", WEAKNESS_BAR, WEAKNESS_BG, WEAKNESS_BAR,
+                       ratings.weaknesses)
+
+    # ── Peer ESG mini-table — fills the bottom band ──
+    # Surfaces the cross-peer ESG comparison from /ratings/ as a compact
+    # 6-row mini table. Different from slide 6 which shows full sector
+    # peers with multi-period performance — this one focuses on rating
+    # composition (Investor rating % + ESG letter) for the same group.
+    peer_esg = list(ratings.peer_esg) if hasattr(ratings, "peer_esg") else []
+    panel_bottom = list_y + list_h
+    table_y = panel_bottom + Inches(0.30)
+    if peer_esg and table_y < prs.slide_height - Inches(2.0):
+        avail_h_in = (prs.slide_height - table_y) / Inches(1) - 0.8
+        max_rows = max(1, int(avail_h_in / 0.30))
+        rows_to_show = peer_esg[:min(max_rows, 10)]
+
+        tx(s, Inches(0.6), table_y, Inches(6.3), Inches(0.25),
+           "PEER COMPARISON — INVESTOR RATING & ESG MSCI",
+           sz=8, bold=True, rgb=MUTED)
+
+        head_y = table_y + Inches(0.32)
+        row_h = Inches(0.30)
+
+        # Column layout: name (3.6"), Investor rating (1.4"), ESG (1.0")
+        col_x = {
+            "name":     Inches(0.6),
+            "rating":   Inches(0.6) + Inches(3.6),
+            "esg":      Inches(0.6) + Inches(5.0),
+        }
+        col_w = {
+            "name":     Inches(3.6),
+            "rating":   Inches(1.4),
+            "esg":      Inches(1.3),
+        }
+        # Header
+        rect(s, Inches(0.6), head_y, Inches(6.3), Inches(0.28),
+             RGBColor(0xF1, 0xF3, 0xF5))
+        tx(s, col_x["name"] + Inches(0.10), head_y + Inches(0.06),
+           col_w["name"], Inches(0.20),
+           "Company", sz=8, bold=True, rgb=MUTED)
+        tx(s, col_x["rating"], head_y + Inches(0.06),
+           col_w["rating"] - Inches(0.10), Inches(0.20),
+           "Investor Rating", sz=8, bold=True, rgb=MUTED, al=PP_ALIGN.RIGHT)
+        tx(s, col_x["esg"], head_y + Inches(0.06),
+           col_w["esg"], Inches(0.20),
+           "ESG MSCI", sz=8, bold=True, rgb=MUTED, al=PP_ALIGN.CENTER)
+
+        cy = head_y + Inches(0.30)
+        for i, peer in enumerate(rows_to_show):
+            bg = WHITE if i % 2 == 0 else RGBColor(0xFA, 0xFB, 0xFC)
+            rect(s, Inches(0.6), cy, Inches(6.3), row_h, bg)
+            name = peer.get("name") or "—"
+            if len(name) > 36:
+                name = name[:34].rstrip() + "…"
+            rating_pct = peer.get("rating_pct")
+            esg = peer.get("esg_msci") or "—"
+            tx(s, col_x["name"] + Inches(0.10), cy + Inches(0.06),
+               col_w["name"], Inches(0.22),
+               name, sz=9, rgb=BLACK)
+            rating_txt = f"{rating_pct}%" if rating_pct is not None else "—"
+            tx(s, col_x["rating"], cy + Inches(0.06),
+               col_w["rating"] - Inches(0.10), Inches(0.22),
+               rating_txt, sz=9, bold=True,
+               rgb=GREEN if (rating_pct or 0) >= 70 else
+                   (BLACK if (rating_pct or 0) >= 40 else MUTED),
+               al=PP_ALIGN.RIGHT)
+            tx(s, col_x["esg"], cy + Inches(0.06),
+               col_w["esg"], Inches(0.22),
+               esg, sz=9, bold=True,
+               rgb=GREEN if (esg or "").startswith("A") else BLACK,
+               al=PP_ALIGN.CENTER)
+            cy = cy + row_h
 
     # ── Source chip (bottom) ──
     tx(s, Inches(0.6), prs.slide_height - Inches(0.4),

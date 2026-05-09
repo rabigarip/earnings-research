@@ -137,9 +137,12 @@ class TestBuildSector:
         assert out.rows[1].esg_msci is None
 
     def test_peer_table_capped_with_subject_preserved(self):
-        rows = [{"name": f"COMPANY {i}", "market_cap_usd": "1B"} for i in range(20)]
+        # Cap was raised from 11 to 22 (2026-05) so the slide-6 peer
+        # table fills the available vertical real estate without leaving
+        # a 6-inch white band below the table.
+        rows = [{"name": f"COMPANY {i}", "market_cap_usd": "1B"} for i in range(30)]
         out = build_sector({"rows": rows}, None)
-        assert len(out.rows) == 11  # _PEER_TABLE_LIMIT
+        assert len(out.rows) == 22  # _PEER_TABLE_LIMIT
         # Subject (row 0) is always present.
         assert out.rows[0].is_subject is True
         assert out.rows[0].name == "COMPANY 0"

@@ -77,11 +77,26 @@ def build_ratings(ms_ratings: dict | None) -> RatingsData:
     if esg_clean in {"", "-", "N/A"}:
         esg_clean = None
 
+    # Pass through the peer ESG list verbatim — slide 5's renderer uses
+    # it to draw the bottom mini-table. Cap at 10 to fit the visible
+    # band; subject row (always first) is preserved.
+    raw_peer_esg = ms_ratings.get("peer_esg") or []
+    peer_esg = [
+        {
+            "name": (r.get("name") or "").strip(),
+            "market_cap": r.get("market_cap"),
+            "esg_msci": r.get("esg_msci"),
+            "rating_pct": r.get("rating_pct"),
+        }
+        for r in raw_peer_esg if isinstance(r, dict) and (r.get("name") or "").strip()
+    ][:10]
+
     return RatingsData(
         strengths=strengths,
         weaknesses=weaknesses,
         composites=composites,
         esg_msci=esg_clean,
+        peer_esg=peer_esg,
         has_data=has_data,
     )
 
@@ -90,8 +105,12 @@ def build_ratings(ms_ratings: dict | None) -> RatingsData:
 # Slide 5: Sector Comparison
 # ─────────────────────────────────────────────────────────────────────────────
 
-_PEER_TABLE_LIMIT = 11  # subject + top 10 peers; PDF page 4 shows ~16 but
-                       # vertical real estate caps us at ~12 readable rows
+_PEER_TABLE_LIMIT = 22  # subject + ~21 peers; tighter row height (0.32")
+                        # in render_peers fits ~22 rows plus a header
+                        # in the available vertical (2.0–9.5"). Was 11
+                        # which left 6+ inches of empty whitespace below
+                        # the table — adding more peers fills that with
+                        # actual sector context.
 
 
 def _to_float(v: Any) -> Optional[float]:
@@ -259,6 +278,19 @@ def build_price_action(
             if isinstance(name, str) and name.strip():
                 covering_brokers.append(name.strip())
 
+    # Recent quotes — surfaced as a fallback panel on slide 6 when
+    # broker actions are absent (NBOB.OM-shaped tickers).
+    recent_quotes: list[dict] = []
+    if isinstance(ms_price_performance, dict):
+        for q in (ms_price_performance.get("recent_quotes") or [])[:8]:
+            if isinstance(q, dict) and (q.get("date") or q.get("price")):
+                recent_quotes.append({
+                    "date": q.get("date"),
+                    "price": q.get("price"),
+                    "change_pct": q.get("change_pct"),
+                    "volume": q.get("volume"),
+                })
+
     has_perf = any(c.value_pct is not None for c in perf_cells)
     has_actions = bool(broker_actions)
     has_extremes = any(r.low is not None or r.high is not None for r in extremes)
@@ -268,6 +300,7 @@ def build_price_action(
         course_extremes=extremes,
         broker_actions=broker_actions,
         covering_brokers=covering_brokers,
+        recent_quotes=recent_quotes,
         has_data=has_perf or has_actions or has_extremes,
     )
 
