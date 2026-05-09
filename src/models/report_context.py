@@ -276,17 +276,33 @@ class QuarterlyIncomeSeries:
 
 @dataclass(frozen=True)
 class QuarterlySurpriseSeries:
-    """Quarterly revenue actual-vs-estimate series — the "Rate of Surprise"
-    chart from MS /consensus/.
+    """Quarterly actual-vs-estimate series — the "Rate of Surprise" data
+    from MS /calendar/ Quarterly results.
 
-    Each list aligns to `periods`. `surprise_pct` may differ from
+    The chart on slide 4 visualises the SALES line. The Net income series
+    is surfaced as a summary chip alongside, since MS often publishes both
+    on the same page (and the Net income story is frequently more nuanced
+    than the Sales story — e.g. NBOB.OM 2025 Q4 had a Sales beat but a
+    -1.93% Net income miss). EBIT is included for tickers where MS
+    publishes it (industrials etc.).
+
+    Each list aligns to `periods`. `*_surprise_pct` may differ from
     `(actual - estimate) / estimate * 100` when MS publishes a revised
     surprise figure; we surface MS's value when present.
     """
     periods:        list[str] = field(default_factory=list)
+    # Sales (primary chart series)
     actual:         list[Optional[float]] = field(default_factory=list)
     estimate:       list[Optional[float]] = field(default_factory=list)
     surprise_pct:   list[Optional[float]] = field(default_factory=list)
+    # Net income (summary chip + secondary series)
+    net_income_actual:        list[Optional[float]] = field(default_factory=list)
+    net_income_estimate:      list[Optional[float]] = field(default_factory=list)
+    net_income_surprise_pct:  list[Optional[float]] = field(default_factory=list)
+    # EBIT (sparse — surfaced when present, hidden otherwise)
+    ebit_actual:        list[Optional[float]] = field(default_factory=list)
+    ebit_estimate:      list[Optional[float]] = field(default_factory=list)
+    ebit_surprise_pct:  list[Optional[float]] = field(default_factory=list)
     units_label:    str = ""
 
 

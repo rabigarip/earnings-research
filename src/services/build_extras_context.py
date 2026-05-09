@@ -363,42 +363,83 @@ def build_income_evolution(
             )
 
     # ── Quarterly surprise chart ──
+    # Pull surprise data for all three metrics MS publishes on /calendar/:
+    # net_sales (primary chart), net_income (secondary summary chip), and
+    # EBIT (sparse — only some industrials have it). Quarters are aligned
+    # against the SALES row so the periods axis stays consistent; missing
+    # values for net_income/EBIT in a given quarter just mean that
+    # metric's chip is blank for that period.
     if isinstance(ms_calendar_events, dict):
         qr = ms_calendar_events.get("quarterly_results") or {}
         if isinstance(qr, dict):
             quarters = list(qr.get("quarters") or [])
             rows = qr.get("rows") or []
-            sales_row = next(
-                (r for r in rows
-                 if isinstance(r, dict) and r.get("metric_key") == "net_sales"),
-                None,
-            )
+
+            def _row_by_key(key: str) -> dict | None:
+                return next(
+                    (r for r in rows
+                     if isinstance(r, dict) and r.get("metric_key") == key),
+                    None,
+                )
+
+            sales_row = _row_by_key("net_sales")
+            ni_row = _row_by_key("net_income")
+            ebit_row = _row_by_key("ebit")
+
             if quarters and sales_row:
-                by_quarter = sales_row.get("by_quarter") or []
-                actuals: list[Optional[float]] = []
-                estimates: list[Optional[float]] = []
-                surprise: list[Optional[float]] = []
-                kept_periods: list[str] = []
-                for i, q in enumerate(quarters):
-                    cell = by_quarter[i] if i < len(by_quarter) else None
+                def _extract(row: dict | None, idx: int) -> tuple[Optional[float], Optional[float], Optional[float]]:
+                    """Return (actual, estimate, surprise_pct) for one quarter."""
+                    if not row:
+                        return (None, None, None)
+                    cells = row.get("by_quarter") or []
+                    cell = cells[idx] if idx < len(cells) else None
                     if not isinstance(cell, dict):
-                        continue
-                    a = cell.get("released")
-                    e = cell.get("forecast")
-                    sp = cell.get("spread_pct")
-                    # Skip quarters with neither side populated.
-                    if a is None and e is None:
+                        return (None, None, None)
+                    return (cell.get("released"), cell.get("forecast"), cell.get("spread_pct"))
+
+                kept_periods: list[str] = []
+                s_act: list[Optional[float]] = []
+                s_est: list[Optional[float]] = []
+                s_sp: list[Optional[float]] = []
+                ni_act: list[Optional[float]] = []
+                ni_est: list[Optional[float]] = []
+                ni_sp: list[Optional[float]] = []
+                eb_act: list[Optional[float]] = []
+                eb_est: list[Optional[float]] = []
+                eb_sp: list[Optional[float]] = []
+
+                for i, q in enumerate(quarters):
+                    sa, se, ssp = _extract(sales_row, i)
+                    # Skip quarters where Sales (the anchor metric) has
+                    # no data on either side; they would render as empty
+                    # bars and confuse the chart.
+                    if sa is None and se is None:
                         continue
                     kept_periods.append(str(q))
-                    actuals.append(a)
-                    estimates.append(e)
-                    surprise.append(sp)
+                    s_act.append(sa)
+                    s_est.append(se)
+                    s_sp.append(ssp)
+                    na, ne, nsp = _extract(ni_row, i)
+                    ni_act.append(na)
+                    ni_est.append(ne)
+                    ni_sp.append(nsp)
+                    ea, ee, esp = _extract(ebit_row, i)
+                    eb_act.append(ea)
+                    eb_est.append(ee)
+                    eb_sp.append(esp)
+
                 if kept_periods:
                     quarterly_surprise = QuarterlySurpriseSeries(
                         periods=kept_periods,
-                        actual=actuals,
-                        estimate=estimates,
-                        surprise_pct=surprise,
+                        actual=s_act,
+                        estimate=s_est,
+                        surprise_pct=s_sp,
+                        net_income_actual=ni_act,
+                        net_income_estimate=ni_est,
+                        net_income_surprise_pct=ni_sp,
+                        ebit_actual=eb_act,
+                        ebit_estimate=eb_est,
+                        ebit_surprise_pct=eb_sp,
                         units_label=units_label,
                     )
 

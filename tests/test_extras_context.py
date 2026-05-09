@@ -321,6 +321,68 @@ class TestBuildIncomeEvolution:
         # Most recent 18 — the last entry should be the last in the input.
         assert qi.revenue[-1] == sales[-1]
 
+    def test_surprise_includes_net_income_and_ebit(self):
+        """MS publishes surprise data for three metrics on /calendar/:
+        net_sales (anchor for the chart), net_income (rendered as a
+        secondary chip), and EBIT (sparse — surfaced when present).
+
+        Reference: NBOB.OM 2025 Q4 had a Sales beat (+0.02%) alongside
+        a Net income miss (-1.93%). Collapsing both into one Sales-only
+        chip would hide the divergence — which is exactly the kind of
+        signal a reader needs from an earnings preview."""
+        cal = {"quarterly_results": {
+            "quarters": ["2025 Q3", "2025 Q4", "2026 Q1"],
+            "rows": [
+                {"metric_key": "net_sales", "by_quarter": [
+                    {"released": 41.66, "forecast": 39.0, "spread_pct": 6.8},
+                    {"released": 42.4,  "forecast": 42.4, "spread_pct": 0.02},
+                    {"released": 46.24, "forecast": 43.84, "spread_pct": 5.5},
+                ]},
+                {"metric_key": "net_income", "by_quarter": [
+                    {"released": 17.77, "forecast": 16.2, "spread_pct": 9.84},
+                    {"released": 18.4,  "forecast": 18.8, "spread_pct": -1.93},
+                    {"released": 19.47, "forecast": 18.9, "spread_pct": 3.01},
+                ]},
+                {"metric_key": "ebit", "by_quarter": [
+                    {"released": None, "forecast": None, "spread_pct": None},
+                    {"released": 25.2, "forecast": 25.1, "spread_pct": 0.4},
+                    {"released": None, "forecast": None, "spread_pct": None},
+                ]},
+            ],
+        }}
+        out = build_income_evolution(None, cal)
+        qs = out.quarterly_surprise
+        assert qs is not None
+        # Sales row anchors the periods list.
+        assert qs.periods == ["2025 Q3", "2025 Q4", "2026 Q1"]
+        # Net income data flows through with the right sign.
+        assert qs.net_income_actual == [17.77, 18.4, 19.47]
+        assert qs.net_income_surprise_pct == [9.84, -1.93, 3.01]
+        # EBIT is sparse but the populated cell came through.
+        assert qs.ebit_surprise_pct[1] == pytest.approx(0.4)
+        assert qs.ebit_surprise_pct[0] is None
+        assert qs.ebit_surprise_pct[2] is None
+
+    def test_surprise_alignment_when_net_income_row_missing(self):
+        """Tickers MS thinly covers may publish only the Sales row.
+        The Net income / EBIT lists must still align to periods (all
+        Nones) so the renderer can index into them safely."""
+        cal = {"quarterly_results": {
+            "quarters": ["2025 Q3", "2025 Q4"],
+            "rows": [
+                {"metric_key": "net_sales", "by_quarter": [
+                    {"released": 100.0, "forecast": 95.0, "spread_pct": 5.3},
+                    {"released": 110.0, "forecast": 105.0, "spread_pct": 4.8},
+                ]},
+            ],
+        }}
+        out = build_income_evolution(None, cal)
+        qs = out.quarterly_surprise
+        assert qs is not None
+        assert len(qs.net_income_actual) == len(qs.periods)
+        assert all(v is None for v in qs.net_income_actual)
+        assert all(v is None for v in qs.net_income_surprise_pct)
+
     def test_safe_div_handles_zero_revenue(self):
         """A ticker reporting zero revenue (rare for upstream/oil-bust
         scenarios) must not divide-by-zero on margin calc — the

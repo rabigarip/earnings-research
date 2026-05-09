@@ -136,28 +136,42 @@ def render(prs, blank_layout, income: IncomeEvolutionData, *, tx, rect,
             units_label=qs.units_label,
         )
 
-        # Beat-rate + average surprise chip.
-        beats = sum(1 for sp in qs.surprise_pct
-                    if isinstance(sp, (int, float)) and sp > 0)
-        misses = sum(1 for sp in qs.surprise_pct
-                     if isinstance(sp, (int, float)) and sp < 0)
-        n = beats + misses + sum(1 for sp in qs.surprise_pct
-                                  if isinstance(sp, (int, float)) and sp == 0)
-        avg_sp = _avg(qs.surprise_pct)
-        chip_parts = []
-        if n > 0:
-            chip_parts.append(f"Beat: {beats}/{n}")
-            if misses:
-                chip_parts.append(f"Miss: {misses}/{n}")
-        if avg_sp is not None:
-            sign = "+" if avg_sp >= 0 else ""
-            chip_parts.append(f"Avg surprise: {sign}{avg_sp:.1f}%")
-        chip_text = "   |   ".join(chip_parts)
-        chip_y = p2_y + p2_h - Inches(0.5)
-        if chip_text:
-            tx(s, Inches(0.78), chip_y, Inches(6.0), Inches(0.25),
-               chip_text, sz=9, bold=True,
-               rgb=GREEN if (avg_sp or 0) >= 0 else RED)
+        # Beat-rate + average surprise chip — one line per metric so the
+        # reader can compare Sales vs Net Income at a glance. MS often
+        # publishes a Sales beat alongside a Net income miss (or vice
+        # versa); collapsing them into one chip would hide the divergence.
+        def _fmt_chip(label: str, surprises: list) -> tuple[str, "RGBColor"]:
+            beats = sum(1 for sp in surprises
+                        if isinstance(sp, (int, float)) and sp > 0)
+            misses = sum(1 for sp in surprises
+                         if isinstance(sp, (int, float)) and sp < 0)
+            zeros = sum(1 for sp in surprises
+                        if isinstance(sp, (int, float)) and sp == 0)
+            total = beats + misses + zeros
+            avg = _avg(surprises)
+            parts = [label]
+            if total > 0:
+                parts.append(f"Beat {beats}/{total}")
+                if misses:
+                    parts.append(f"Miss {misses}/{total}")
+            if avg is not None:
+                sign = "+" if avg >= 0 else ""
+                parts.append(f"Avg {sign}{avg:.1f}%")
+            color = GREEN if (avg or 0) >= 0 else RED
+            return ("   ·   ".join(parts), color)
+
+        chip_y = p2_y + p2_h - Inches(0.65)
+        sales_chip, sales_color = _fmt_chip("SALES", qs.surprise_pct)
+        if any(isinstance(sp, (int, float)) for sp in qs.surprise_pct):
+            tx(s, Inches(0.78), chip_y, Inches(6.0), Inches(0.22),
+               sales_chip, sz=9, bold=True, rgb=sales_color)
+        # Net income chip: only render when MS published it (banks +
+        # most industrials publish; some thinly-covered tickers don't).
+        if any(isinstance(sp, (int, float)) for sp in qs.net_income_surprise_pct):
+            ni_chip, ni_color = _fmt_chip("NET INCOME", qs.net_income_surprise_pct)
+            tx(s, Inches(0.78), chip_y + Inches(0.25),
+               Inches(6.0), Inches(0.22),
+               ni_chip, sz=9, bold=True, rgb=ni_color)
 
     # ── Source chip ──
     tx(s, Inches(0.6), H - Inches(0.4), Inches(6.3), Inches(0.3),
