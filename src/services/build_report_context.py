@@ -1304,6 +1304,28 @@ def build(
     summary = _build_summary(
         payload, memo_data, cover, snapshot, iv_text=iv_text, watch=watch
     )
+
+    # MS-extras slides — each builder is no-op-safe when its section is None.
+    from src.services.build_extras_context import (
+        build_ratings as _build_ratings,
+        build_sector as _build_sector,
+        build_price_action as _build_price_action,
+    )
+    ratings = _build_ratings(getattr(payload, "ms_ratings", None))
+    sector_label = (
+        _company_attr(payload.company, "sector", "") or
+        _company_attr(payload.company, "industry", "") or ""
+    )
+    sector = _build_sector(
+        getattr(payload, "ms_sector_peers", None),
+        getattr(payload, "ms_ratings", None),
+        sector_label=sector_label,
+    )
+    price_action = _build_price_action(
+        getattr(payload, "ms_price_performance", None),
+        getattr(payload, "ms_analyst_recommendations", None),
+    )
+
     return ReportContext(
         run_id=payload.run_id,
         generated_at=payload.generated_at,
@@ -1313,6 +1335,9 @@ def build(
         cover=cover,
         summary=summary,
         snapshot=snapshot,
+        ratings=ratings,
+        sector=sector,
+        price_action=price_action,
         quality_flags=list(
             quality_flags
             if quality_flags is not None

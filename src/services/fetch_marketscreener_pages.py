@@ -91,6 +91,10 @@ def run(ticker: str, company: CompanyMaster) -> StepResult:
             "ms_valuation_multiples": None,
             "ms_calendar_events": None,
             "ms_quarterly_results_table": None,
+            "ms_ratings": None,
+            "ms_sector_peers": None,
+            "ms_price_performance": None,
+            "ms_analyst_recommendations": None,
             "ms_finances_sections": None,
             "ms_lineage": {
                 "source_ticker": ticker,
@@ -214,12 +218,58 @@ def run(ticker: str, company: CompanyMaster) -> StepResult:
         except Exception as e:
             errors.append(f"calendar_events: {e}")
 
+        # 9. Ratings (/ratings/) — strengths/weaknesses + composite ratings + peer ESG
+        try:
+            ms._delay_between_requests()
+            payload_r, status_r = ms.fetch_ratings_page(base, cache_key_prefix=cache_prefix)
+            out["ms_ratings"] = deepcopy(payload_r) if payload_r else None
+            if status_r.record_count:
+                record_count += status_r.record_count
+            if status_r.errors:
+                errors.extend(status_r.errors)
+        except Exception as e:
+            errors.append(f"ratings_page: {e}")
+
+        # 10. Sector peers (/sector/) — peer comparison table
+        try:
+            ms._delay_between_requests()
+            payload_sp, status_sp = ms.fetch_sector_peers(base, cache_key_prefix=cache_prefix)
+            out["ms_sector_peers"] = deepcopy(payload_sp) if payload_sp else None
+            if status_sp.record_count:
+                record_count += status_sp.record_count
+            if status_sp.errors:
+                errors.extend(status_sp.errors)
+        except Exception as e:
+            errors.append(f"sector_peers: {e}")
+
+        # 11. Price performance (/{SLUG}/) — re-uses cached summary HTML
+        try:
+            payload_pp, status_pp = ms.fetch_price_performance(base, cache_key_prefix=cache_prefix)
+            out["ms_price_performance"] = deepcopy(payload_pp) if payload_pp else None
+            if status_pp.record_count:
+                record_count += status_pp.record_count
+            if status_pp.errors:
+                errors.extend(status_pp.errors)
+        except Exception as e:
+            errors.append(f"price_performance: {e}")
+
+        # 12. Analyst recommendations (/consensus/) — re-uses cached consensus HTML
+        try:
+            payload_ar, status_ar = ms.fetch_analyst_recommendations(base, cache_key_prefix=cache_prefix)
+            out["ms_analyst_recommendations"] = deepcopy(payload_ar) if payload_ar else None
+            if status_ar.record_count:
+                record_count += status_ar.record_count
+            if status_ar.errors:
+                errors.extend(status_ar.errors)
+        except Exception as e:
+            errors.append(f"analyst_recommendations: {e}")
+
         status = Status.FAILED if errors and not any([out["consensus_summary"], out["ms_annual_forecasts"], out["ms_eps_dividend_forecasts"]]) else (Status.PARTIAL if errors else Status.SUCCESS)
         return StepResult(
             step_name=STEP,
             status=status,
             source="marketscreener",
-            message=f"Page-specific fetch: summary, consensus, finances, valuation, calendar" + (" with errors" if errors else ""),
+            message=f"Page-specific fetch: summary, consensus, finances, valuation, calendar, ratings, sector, perf, recommendations" + (" with errors" if errors else ""),
             error_detail="; ".join(errors[:5]) if errors else None,
             record_count=record_count or None,
             data=out,

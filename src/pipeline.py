@@ -162,6 +162,10 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> tuple[str, list[StepR
         ms_valuation_multiples=ms_blocks.get("ms_valuation_multiples"),
         ms_calendar_events=ms_blocks.get("ms_calendar_events"),
         ms_quarterly_results_table=ms_blocks.get("ms_quarterly_results_table"),
+        ms_ratings=ms_blocks.get("ms_ratings"),
+        ms_sector_peers=ms_blocks.get("ms_sector_peers"),
+        ms_price_performance=ms_blocks.get("ms_price_performance"),
+        ms_analyst_recommendations=ms_blocks.get("ms_analyst_recommendations"),
         derived=derived, news_items=news_items, news_summary=summary,
         # Memo-only fallback (Yahoo calendar)
         yahoo_earnings_date=ms_blocks.get("yahoo_earnings_date"),

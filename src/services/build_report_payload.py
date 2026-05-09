@@ -524,6 +524,10 @@ def run(
     ms_valuation_multiples:     dict | None = None,
     ms_calendar_events:         dict | None = None,
     ms_quarterly_results_table: dict | None = None,
+    ms_ratings:                 dict | None = None,
+    ms_sector_peers:            dict | None = None,
+    ms_price_performance:       dict | None = None,
+    ms_analyst_recommendations: dict | None = None,
     derived:                    DerivedMetrics | None,
     news_items:                 list[NewsItem],
     news_summary:               NewsSummary | None,
@@ -607,6 +611,10 @@ def run(
             ms_valuation_multiples = None
             ms_calendar_events = None
             ms_quarterly_results_table = None
+            ms_ratings = None
+            ms_sector_peers = None
+            ms_price_performance = None
+            ms_analyst_recommendations = None
         else:
             # Explicit rebuild: no shared mutable refs; each section is a fresh copy
             ms_summary = _rebuild_ms_section(ms_summary)
@@ -617,6 +625,10 @@ def run(
             ms_valuation_multiples = _rebuild_ms_section(ms_valuation_multiples)
             ms_calendar_events = _rebuild_ms_section(ms_calendar_events)
             ms_quarterly_results_table = _rebuild_ms_section(ms_quarterly_results_table)
+            ms_ratings = _rebuild_ms_section(ms_ratings)
+            ms_sector_peers = _rebuild_ms_section(ms_sector_peers)
+            ms_price_performance = _rebuild_ms_section(ms_price_performance)
+            ms_analyst_recommendations = _rebuild_ms_section(ms_analyst_recommendations)
             consensus_summary = _rebuild_ms_section(consensus_summary) if consensus_summary else None
 
             # Automatic fingerprint check: flag identical MS payloads across unrelated tickers
@@ -630,6 +642,10 @@ def run(
                 ms_valuation_multiples=ms_valuation_multiples,
                 ms_calendar_events=ms_calendar_events,
                 ms_quarterly_results_table=ms_quarterly_results_table,
+                ms_ratings=ms_ratings,
+                ms_sector_peers=ms_sector_peers,
+                ms_price_performance=ms_price_performance,
+                ms_analyst_recommendations=ms_analyst_recommendations,
             )
             if ms_fingerprint:
                 fp_cross, fp_identical = check_fingerprint(
@@ -649,6 +665,10 @@ def run(
                     ms_valuation_multiples = None
                     ms_calendar_events = None
                     ms_quarterly_results_table = None
+                    ms_ratings = None
+                    ms_sector_peers = None
+                    ms_price_performance = None
+                    ms_analyst_recommendations = None
                     ms_fingerprint = ""
                 else:
                     identical_to_previous_ticker_payload = fp_identical
@@ -669,6 +689,10 @@ def run(
             ms_valuation_multiples = None
             ms_calendar_events = None
             ms_quarterly_results_table = None
+            ms_ratings = None
+            ms_sector_peers = None
+            ms_price_performance = None
+            ms_analyst_recommendations = None
             ms_fingerprint = ""
 
         # Price sanity: suppress consensus_summary if MS price diverges >3x from Yahoo
@@ -773,6 +797,10 @@ def run(
             ms_valuation_multiples=ms_valuation_multiples,
             ms_calendar_events=ms_calendar_events,
             ms_quarterly_results_table=ms_quarterly_results_table,
+            ms_ratings=ms_ratings,
+            ms_sector_peers=ms_sector_peers,
+            ms_price_performance=ms_price_performance,
+            ms_analyst_recommendations=ms_analyst_recommendations,
             bloomberg_bundle=bloomberg_bundle,
             derived=derived,
             news_items=list(news_items),

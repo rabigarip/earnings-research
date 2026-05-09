@@ -492,6 +492,9 @@ def _write_preview_pptx_portrait(
     from src.services.render_cover import render as _render_cover
     from src.services.render_summary import render as _render_summary
     from src.services.render_snapshot import render as _render_snapshot
+    from src.services.render_ratings import render as _render_ratings
+    from src.services.render_peers import render as _render_peers
+    from src.services.render_price_action import render as _render_price_action
     _ctx = _build_ctx(
         payload, memo_data,
         iv_text=iv_text, watch=watch,
@@ -503,6 +506,30 @@ def _write_preview_pptx_portrait(
         prs, blank, _ctx.snapshot, tx=tx, rect=rect,
         quality_flags=_ctx.quality_flags,
     )
+
+    # MS-extras slides — each renders only when its `has_data` flag is set.
+    # Keeping them gated here (rather than inside the renderer) makes the
+    # slide order explicit and avoids surfacing partially-empty slides on
+    # tickers MarketScreener has thin coverage for.
+    if _ctx.ratings and _ctx.ratings.has_data:
+        _render_ratings(
+            prs, blank, _ctx.ratings,
+            tx=tx, rect=rect,
+            company_name=_ctx.company_name,
+        )
+    if _ctx.sector and _ctx.sector.has_data:
+        _render_peers(
+            prs, blank, _ctx.sector,
+            tx=tx, rect=rect,
+            company_name=_ctx.company_name,
+        )
+    if _ctx.price_action and _ctx.price_action.has_data:
+        _render_price_action(
+            prs, blank, _ctx.price_action,
+            tx=tx, rect=rect,
+            company_name=_ctx.company_name,
+            currency=_ctx.currency,
+        )
 
     # ── Slide 4: Important Disclosures (dark, portrait) ───────
     s4 = prs.slides.add_slide(blank)

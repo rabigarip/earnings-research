@@ -69,6 +69,14 @@ class ReportPayload(BaseModel):
     ms_calendar_events:        dict | None = None   # Source: /calendar/
     ms_quarterly_results_table: dict | None = None  # Source: /calendar/ (metrics-dict shape: quarters, metrics)
 
+    # Additional MS pages added 2026-05 to close the PDF-vs-pipeline gap.
+    # Each carries source_page lineage and may be None on entity-mismatch /
+    # fetch failure. The deck builder treats these as optional sections.
+    ms_ratings:                dict | None = None   # Source: /ratings/  (strengths, weaknesses, composite ratings, peer ESG)
+    ms_sector_peers:           dict | None = None   # Source: /sector/   (peer comparison: multi-period % + USD market cap)
+    ms_price_performance:      dict | None = None   # Source: /{SLUG}/   (perf grid, course extremes, recent quotes)
+    ms_analyst_recommendations: dict | None = None  # Source: /consensus/ (recent broker actions, covering brokers)
+
     # Bloomberg manual export (dict-of-dataclasses as JSON). Present only when
     # data/bloomberg/<TICKER>_cons_q.xlsx and/or _FA.xlsx exist. Shape:
     #   {"ticker", "bbg_ticker", "company_name", "currency",

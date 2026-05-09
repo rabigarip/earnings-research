@@ -26,6 +26,10 @@ def compute_fingerprint(
     ms_valuation_multiples: dict | None = None,
     ms_calendar_events: dict | None = None,
     ms_quarterly_results_table: dict | None = None,
+    ms_ratings: dict | None = None,
+    ms_sector_peers: dict | None = None,
+    ms_price_performance: dict | None = None,
+    ms_analyst_recommendations: dict | None = None,
 ) -> str:
     """SHA256 hex digest of all MS-derived sections. Empty string if no MS data."""
     parts = [
@@ -33,6 +37,7 @@ def compute_fingerprint(
         ms_quarterly_forecasts, ms_eps_dividend_forecasts,
         ms_income_statement_actuals, ms_valuation_multiples,
         ms_calendar_events, ms_quarterly_results_table,
+        ms_ratings, ms_sector_peers, ms_price_performance, ms_analyst_recommendations,
     ]
     if all(p is None or (isinstance(p, dict) and len(p) == 0) for p in parts):
         return ""
@@ -46,6 +51,10 @@ def compute_fingerprint(
         "ms_valuation_multiples": ms_valuation_multiples,
         "ms_calendar_events": ms_calendar_events,
         "ms_quarterly_results_table": ms_quarterly_results_table,
+        "ms_ratings": ms_ratings,
+        "ms_sector_peers": ms_sector_peers,
+        "ms_price_performance": ms_price_performance,
+        "ms_analyst_recommendations": ms_analyst_recommendations,
     })
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 

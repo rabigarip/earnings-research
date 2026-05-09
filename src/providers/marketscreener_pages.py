@@ -819,6 +819,14 @@ def fetch_financial_forecast_series(base_company_url: str, cache_key_prefix: str
     annual_net_sales = _parse_row(_row_by_label(annual_rows, "Net sales"), period_headers_annual)
     annual_ebitda = _parse_row(_row_by_label(annual_rows, "EBITDA"), period_headers_annual)
     annual_ebit = _parse_row(_row_by_label(annual_rows, "EBIT"), period_headers_annual)
+    # MS publishes interest paid as a negative number; we keep the sign as-is.
+    annual_interest_paid = _parse_row(_row_by_label(annual_rows, "Interest Paid"), period_headers_annual)
+    # EBT = Earnings Before Tax. Use the longer label first to avoid the
+    # "EBT" three-letter substring matching elsewhere in the table.
+    annual_ebt = _parse_row(
+        _row_by_label(annual_rows, "Earnings before Tax", "EBT"),
+        period_headers_annual,
+    )
     annual_net_income = _parse_row(_row_by_label(annual_rows, "Net income"), period_headers_annual)
     annual_announcement_raw = _row_by_label(annual_rows, "Announcement Date")  # keep as strings
     annual_announcement = (annual_announcement_raw or [])[: len(period_headers_annual)]
@@ -920,6 +928,8 @@ def fetch_financial_forecast_series(base_company_url: str, cache_key_prefix: str
             "net_sales": annual_net_sales,
             "ebitda": annual_ebitda,
             "ebit": annual_ebit,
+            "interest_paid": annual_interest_paid,
+            "ebt": annual_ebt,
             "net_income": annual_net_income,
             "announcement_dates": annual_announcement,
         },
@@ -953,7 +963,7 @@ def _empty_forecast_payload(source_page: str, source_type: str, status: PageStep
         "source_page": source_page,
         "source_type": source_type,
         "extracted_at": datetime.now(timezone.utc).isoformat(),
-        "annual": {"periods": [], "net_sales": [], "ebitda": [], "ebit": [], "net_income": [], "announcement_dates": []},
+        "annual": {"periods": [], "net_sales": [], "ebitda": [], "ebit": [], "interest_paid": [], "ebt": [], "net_income": [], "announcement_dates": []},
         "quarterly": {
             "periods": [], "net_sales": [], "ebitda": [], "ebit": [],
             "net_income": [], "eps": [], "announcement_dates": [],
@@ -1705,3 +1715,713 @@ def fetch_quarterly_results_table(base_company_url: str, cache_key_prefix: str |
         "warnings": list(parsed.get("warnings", [])),
     }
     return out, status
+
+
+# ─── H. fetch_ratings_page (source: /ratings/) ──────────────────────────────
+#
+# Adds three new blocks to the report payload:
+#   1. composite_ratings    — Trader / Investor / Global / Quality / ESG MSCI
+#   2. strengths            — bulleted "Highlights:" list
+#   3. weaknesses           — bulleted "Weaknesses:" list
+#   4. peer_esg             — peer ESG MSCI ratings table (rows include
+#                              the company itself + sector peers)
+#
+# Layout reference (probed against live MS HTML, May 2026):
+#   * Composite ratings sit at the top of the page as a horizontal strip of
+#     four <span class="star star--sizeN" title="93%"></span> elements,
+#     each with a percentage in the title attribute. Star order is fixed:
+#     Trader, Investor, Global, Quality. ESG MSCI follows separately and
+#     is rendered as a letter (CCC..AAA) or "-".
+#   * Strengths/Weaknesses appear as two <ul class="my-0"> blocks directly
+#     after card-headers titled "Highlights: <name>" and "Weaknesses: <name>".
+#   * Peer ESG table sits at the bottom; each <tr> has a peer name cell, a
+#     market cap cell, and a star cell whose title carries the rating %.
+#     ESG letter rating shows up as plain text in the second-to-last cell
+#     (e.g. "AAA", "BB", "-").
+
+def _parse_strengths_weaknesses(soup: BeautifulSoup) -> tuple[list[str], list[str], list[str]]:
+    """Return (strengths_bullets, weaknesses_bullets, headline_bullets).
+
+    Headline bullets are the introductory <p>/<li> sentences MS shows above
+    the Highlights/Weaknesses sections (e.g. "The company has strong
+    fundamentals..."). Useful for the deck's executive summary.
+    """
+    strengths: list[str] = []
+    weaknesses: list[str] = []
+    headline: list[str] = []
+
+    def _bullets_after(heading_pattern: re.Pattern) -> list[str]:
+        node = soup.find(string=heading_pattern)
+        if not node:
+            return []
+        parent = node.parent
+        if parent is None:
+            return []
+        sibling = parent.find_next_sibling(["ul", "ol"])
+        if sibling is None:
+            block = parent.parent
+            sibling = block.find("ul") if block else None
+        if sibling is None:
+            return []
+        out: list[str] = []
+        for li in sibling.find_all("li"):
+            text = li.get_text(" ", strip=True)
+            if text:
+                out.append(text)
+        return out
+
+    strengths = _bullets_after(re.compile(r"^Highlights\s*:\s*", re.I))
+    weaknesses = _bullets_after(re.compile(r"^Weaknesses\s*:\s*", re.I))
+
+    summary_node = soup.find(string=re.compile(r"Strengths and Weaknesses", re.I))
+    if summary_node and summary_node.parent:
+        block = summary_node.parent.parent
+        if block is not None:
+            for p in block.find_all(["p", "li"]):
+                text = p.get_text(" ", strip=True)
+                if not text or len(text) < 30:
+                    continue
+                if text.lower().startswith(("highlights", "weaknesses")):
+                    continue
+                headline.append(text)
+                if len(headline) >= 3:
+                    break
+
+    return strengths, weaknesses, headline
+
+
+_COMPOSITE_RATING_LABELS = ["Trader", "Investor", "Global", "Quality"]
+
+
+def _parse_composite_ratings(soup: BeautifulSoup) -> dict[str, int | None]:
+    """Trader/Investor/Global/Quality composite ratings (0..100).
+
+    The four scores live in the first four <span class="star"> elements on
+    the page — they always appear above the peer table, and the peer table
+    is the only other source of "star" elements. To stay robust if MS adds
+    a fifth header rating we walk only the stars whose closest <table>
+    ancestor is None (i.e. not yet inside the peer table).
+    """
+    out: dict[str, int | None] = {label: None for label in _COMPOSITE_RATING_LABELS}
+    header_stars: list[str | None] = []
+    for star in soup.find_all(class_="star"):
+        if star.find_parent("table") is not None:
+            continue
+        title = (star.get("title") or "").strip().rstrip("%")
+        try:
+            header_stars.append(int(round(float(title))))
+        except (TypeError, ValueError):
+            header_stars.append(None)
+        if len(header_stars) >= len(_COMPOSITE_RATING_LABELS):
+            break
+    for i, label in enumerate(_COMPOSITE_RATING_LABELS):
+        if i < len(header_stars):
+            out[label] = header_stars[i]
+    return out
+
+
+_PEER_ESG_VALID_LETTERS = {"AAA", "AA", "A", "BBB", "BB", "B", "CCC", "-"}
+
+
+def _parse_peer_esg_table(soup: BeautifulSoup) -> list[dict[str, Any]]:
+    """Peer ESG / sector comparison table on /ratings/.
+
+    Each peer row has: name, market cap (USD), Investor rating (star %),
+    ESG MSCI letter, and additional sub-rating columns (Fundamentals,
+    Financial revisions, Global Valuation) that may be empty for thinly
+    covered companies. The table is identified by a header containing
+    both 'Capi.($)' and 'ESG MSCI' — that disambiguates it from the
+    sub-rating breakdown tables (which lack those headers).
+    """
+    rows_out: list[dict[str, Any]] = []
+    target_table = None
+    target_headers: list[str] = []
+    for table in soup.find_all("table"):
+        if not table.find(class_="star"):
+            continue
+        rows = table.find_all("tr")
+        if len(rows) < 2:
+            continue
+        head = [c.get_text(" ", strip=True) for c in rows[0].find_all(["td", "th"])]
+        head_str = " ".join(head)
+        if "Capi" in head_str and "ESG MSCI" in head_str:
+            target_table = table
+            target_headers = head
+            break
+    if target_table is None:
+        return rows_out
+
+    # Map column header → index; strict equality on stripped header text.
+    col_idx: dict[str, int] = {}
+    for i, h in enumerate(target_headers):
+        h_norm = (h or "").strip()
+        if h_norm in {"Capi.($)", "ESG MSCI", "Investor", "Fundamentals", "Financial revisions", "Global Valuation"}:
+            col_idx[h_norm] = i
+
+    seen_names: set[str] = set()
+    for tr in target_table.find_all("tr")[1:]:  # skip header row
+        cells = tr.find_all(["td", "th"])
+        if not cells:
+            continue
+        text_cells = [c.get_text(" ", strip=True) for c in cells]
+        # name lives in the first cell that's a real company name (regex
+        # matches all-caps multi-word entity names).
+        name = ""
+        for tok in text_cells:
+            t = (tok or "").strip()
+            if not t or "Add to a list" in t:
+                continue
+            if re.match(r"^[A-Z][A-Z0-9 .,&'\-/()À-ÿ]{2,}$", t):
+                name = t
+                break
+        if not name or name in seen_names:
+            continue
+        seen_names.add(name)
+
+        def _cell_text(key: str) -> str:
+            idx = col_idx.get(key)
+            if idx is None or idx >= len(cells):
+                return ""
+            return cells[idx].get_text(" ", strip=True)
+
+        market_cap = _cell_text("Capi.($)") or None
+        esg_raw = (_cell_text("ESG MSCI") or "").strip()
+        esg_letter: str | None = esg_raw if esg_raw in _PEER_ESG_VALID_LETTERS else None
+
+        # Investor rating star sits inside the Investor column cell.
+        rating_pct: int | None = None
+        inv_idx = col_idx.get("Investor")
+        if inv_idx is not None and inv_idx < len(cells):
+            star = cells[inv_idx].find(class_="star")
+            if star is not None:
+                title = (star.get("title") or "").strip().rstrip("%")
+                try:
+                    rating_pct = int(round(float(title)))
+                except (TypeError, ValueError):
+                    rating_pct = None
+
+        rows_out.append({
+            "name": name,
+            "market_cap": market_cap,
+            "esg_msci": esg_letter,
+            "rating_pct": rating_pct,
+        })
+    return rows_out
+
+
+def fetch_ratings_page(base_company_url: str, cache_key_prefix: str | None = None) -> tuple[dict[str, Any], PageStepStatus]:
+    """Strengths/Weaknesses bullets + Surperformance composite ratings + peer ESG.
+
+    Source: /ratings/. Adds the analyst-grade narrative MS surfaces on its
+    Ratings page so the deck can render a real Strengths/Weaknesses panel
+    (PDF page 6 in the reference report) instead of an LLM substitute.
+    """
+    url = base_company_url.rstrip("/") + "/ratings/"
+    status = PageStepStatus(step="fetch_ratings_page", message="")
+    start = time.perf_counter() * 1000
+
+    soup, errors = _fetch_page(url, _cache_slug(url, "ratings", cache_key_prefix))
+    if soup is None:
+        status.status = "failed"
+        status.errors = errors
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        log.info("[MarketScreener] Fetching /ratings/ page... FAILED")
+        return _empty_ratings_payload(url, status), status
+    log.info("[MarketScreener] Fetching /ratings/ page... SUCCESS")
+
+    # Strip nav/footer/script chrome before parsing — keeps composite-rating
+    # star detection from picking up unrelated stars in the page chrome.
+    for sel in ("header", "footer", "nav", "script", "style", "aside"):
+        for el in soup.find_all(sel):
+            el.decompose()
+
+    strengths, weaknesses, headline = _parse_strengths_weaknesses(soup)
+    composite = _parse_composite_ratings(soup)
+    peer_esg = _parse_peer_esg_table(soup)
+
+    # ESG MSCI letter for the company itself: appears either above the peer
+    # table as text near "ESG MSCI" or in the first peer row (own row).
+    esg_msci: str | None = None
+    if peer_esg:
+        esg_msci = peer_esg[0].get("esg_msci")
+    if not esg_msci:
+        body_text = soup.get_text(" ", strip=True)
+        m = re.search(r"ESG MSCI[^A-Z\-]+(CCC|BB|BBB|AA|AAA|A|B|-)\b", body_text)
+        if m:
+            esg_msci = m.group(1)
+
+    payload = {
+        "source_page": url,
+        "source_type": "ratings_page",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "strengths": strengths,
+        "weaknesses": weaknesses,
+        "headline_bullets": headline,
+        "composite_ratings": composite,           # {Trader: 70, Investor: 93, Global: 77, Quality: 91}
+        "esg_msci_rating": esg_msci,              # "AAA"/"BB"/.../"-"/None
+        "peer_esg": peer_esg,                     # [{name, market_cap, esg_msci, rating_pct}, ...]
+        "warnings": [],
+    }
+
+    has_any = bool(strengths or weaknesses or any(v is not None for v in composite.values()) or peer_esg)
+    if not has_any:
+        status.status = "partial"
+        status.message = "Ratings page: no recognized blocks parsed"
+        payload["warnings"].append("No strengths/weaknesses/composite ratings parsed")
+    else:
+        status.status = "success"
+        status.message = (
+            f"Ratings page: {len(strengths)} strengths, {len(weaknesses)} weaknesses, "
+            f"{sum(1 for v in composite.values() if v is not None)} composite ratings, "
+            f"{len(peer_esg)} peer ESG rows"
+        )
+    status.record_count = len(strengths) + len(weaknesses) + len(peer_esg)
+    status.elapsed_ms = (time.perf_counter() * 1000) - start
+    return payload, status
+
+
+def _empty_ratings_payload(source_page: str, status: PageStepStatus) -> dict[str, Any]:
+    return {
+        "source_page": source_page,
+        "source_type": "ratings_page",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "strengths": [],
+        "weaknesses": [],
+        "headline_bullets": [],
+        "composite_ratings": {label: None for label in _COMPOSITE_RATING_LABELS},
+        "esg_msci_rating": None,
+        "peer_esg": [],
+        "warnings": status.errors,
+    }
+
+
+# ─── I. fetch_sector_peers (source: /sector/) ───────────────────────────────
+#
+# The /sector/ page exposes the canonical peer comparison table that
+# MarketScreener uses on PDF page 4 (Sector and Competitors). It is much
+# richer than yfinance peer medians: each row has 5d / 1m / 3m / YTD /
+# 1y / 3y / 5y / 10y price changes and market cap in USD, ordered by
+# market cap. The first row is the subject company itself, which makes
+# it trivial to render the PDF-style "subject-vs-peers" table.
+
+_SECTOR_PEER_HEADERS = [
+    ("Change", "change_1d_pct"),
+    ("5d. change", "change_5d_pct"),
+    ("1 months change", "change_1m_pct"),
+    ("3 months change", "change_3m_pct"),
+    ("Varia. Jan 1.", "change_ytd_pct"),
+    ("1-year change", "change_1y_pct"),
+    ("3-years change", "change_3y_pct"),
+    ("5-years change", "change_5y_pct"),
+    ("10-years change", "change_10y_pct"),
+    ("Capi.($)", "market_cap_usd"),
+]
+
+
+def _coerce_pct_or_none(value: str) -> float | None:
+    """Parse '+12.34%', '-1.50%', '0.00%' into float; '-' / '' → None."""
+    if not value:
+        return None
+    raw = value.strip().replace(",", ".").replace("%", "").replace("+", "").strip()
+    if raw in ("-", "", "N/A"):
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def fetch_sector_peers(base_company_url: str, cache_key_prefix: str | None = None) -> tuple[dict[str, Any], PageStepStatus]:
+    """Sector peer comparison table from /sector/.
+
+    Returns the subject company's row plus all peer rows with multi-period
+    performance and USD market cap. Order matches MS (subject first, then
+    peers descending by market cap).
+    """
+    url = base_company_url.rstrip("/") + "/sector/"
+    status = PageStepStatus(step="fetch_sector_peers", message="")
+    start = time.perf_counter() * 1000
+
+    soup, errors = _fetch_page(url, _cache_slug(url, "sector", cache_key_prefix))
+    if soup is None:
+        status.status = "failed"
+        status.errors = errors
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        log.info("[MarketScreener] Fetching /sector/ page... FAILED")
+        return _empty_sector_payload(url, status), status
+    log.info("[MarketScreener] Fetching /sector/ page... SUCCESS")
+
+    for sel in ("header", "footer", "nav", "script", "style", "aside"):
+        for el in soup.find_all(sel):
+            el.decompose()
+
+    target_table = None
+    target_headers: list[str] = []
+    for table in soup.find_all("table"):
+        rows = table.find_all("tr")
+        if len(rows) < 4:
+            continue
+        head_cells = [c.get_text(" ", strip=True) for c in rows[0].find_all(["td", "th"])]
+        head_str = " ".join(head_cells)
+        # the canonical peer table contains both "1-year change" and "Capi.($)"
+        if "1-year change" in head_str and "Capi" in head_str:
+            target_table = table
+            target_headers = head_cells
+            break
+
+    if target_table is None:
+        status.status = "partial"
+        status.message = "No sector peer table found"
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        return _empty_sector_payload(url, status), status
+
+    # Map header text -> column index (only for the columns we expose).
+    col_index: dict[str, int] = {}
+    for header_text, key in _SECTOR_PEER_HEADERS:
+        for idx, cell in enumerate(target_headers):
+            if cell.strip() == header_text:
+                col_index[key] = idx
+                break
+
+    rows_out: list[dict[str, Any]] = []
+    rows = target_table.find_all("tr")
+    # find the column index of the company name (the only cell that's not a
+    # %/cap value or "Add to a list" boilerplate).
+    name_col = None
+    for tr in rows[1:]:
+        cells = tr.find_all(["td", "th"])
+        for idx, cell in enumerate(cells):
+            text = cell.get_text(" ", strip=True)
+            if not text or "Add to a list" in text:
+                continue
+            if re.match(r"^[A-Z][A-Z0-9 .,&'\-/()À-ÿ]{2,}$", text):
+                name_col = idx
+                break
+        if name_col is not None:
+            break
+
+    if name_col is None:
+        status.status = "partial"
+        status.message = "Sector peer table missing name column"
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        return _empty_sector_payload(url, status), status
+
+    # MS appends two summary rows after the real peers — "Average" and
+    # "Weighted average by Cap." — both useful for the deck but not
+    # peers. Surface them on a separate key so renderers can handle
+    # them distinctly without polluting the peer count.
+    summary_rows: dict[str, dict[str, Any]] = {}
+    for tr in rows[1:]:
+        cells = tr.find_all(["td", "th"])
+        if len(cells) <= name_col:
+            continue
+        name = cells[name_col].get_text(" ", strip=True)
+        if not name or "Add to a list" in name:
+            continue
+        row: dict[str, Any] = {"name": name}
+        for key, idx in col_index.items():
+            if idx >= len(cells):
+                row[key] = None
+                continue
+            raw = cells[idx].get_text(" ", strip=True)
+            if key == "market_cap_usd":
+                row[key] = raw or None
+            else:
+                row[key] = _coerce_pct_or_none(raw)
+        # Pull the two MS summary rows out of the peer list.
+        if name.strip().lower() in {"average", "weighted average by cap."}:
+            summary_rows[name.strip().lower()] = row
+            continue
+        rows_out.append(row)
+
+    payload = {
+        "source_page": url,
+        "source_type": "sector_peers",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "subject_name": rows_out[0]["name"] if rows_out else None,
+        "rows": rows_out,
+        "summary_rows": summary_rows,  # {"average": {...}, "weighted average by cap.": {...}}
+        "warnings": [],
+    }
+
+    if rows_out:
+        status.status = "success"
+        status.message = f"Sector peers: {len(rows_out)} rows"
+    else:
+        status.status = "partial"
+        status.message = "Sector peer table parsed but no rows"
+    status.record_count = len(rows_out)
+    status.elapsed_ms = (time.perf_counter() * 1000) - start
+    return payload, status
+
+
+def _empty_sector_payload(source_page: str, status: PageStepStatus) -> dict[str, Any]:
+    return {
+        "source_page": source_page,
+        "source_type": "sector_peers",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "subject_name": None,
+        "rows": [],
+        "summary_rows": {},
+        "warnings": status.errors,
+    }
+
+
+# ─── J. fetch_price_performance (source: summary page) ──────────────────────
+#
+# Performance grid (1d / 1w / MTD / 1m / 3m / 6m / YTD), course extremes
+# (1w / 1m / YTD / 1y / 3y / 5y high-low ranges), and recent quotes table
+# all live on the summary page. Parsed by walking the HTML tables that
+# follow the headings "Quotes and Performance", "Course Extremes", and
+# "Quotes". Surfaced as a dedicated payload block so the report doesn't
+# bloat fetch_summary_page's contract.
+
+_PERFORMANCE_LABEL_KEYS = {
+    "1 day": "perf_1d_pct",
+    "1 week": "perf_1w_pct",
+    "Current month": "perf_mtd_pct",
+    "1 month": "perf_1m_pct",
+    "3 months": "perf_3m_pct",
+    "6 months": "perf_6m_pct",
+    "Current year": "perf_ytd_pct",
+    "1 year": "perf_1y_pct",
+}
+
+_RANGE_LABEL_KEYS = {
+    "1 week": "range_1w",
+    "1 month": "range_1m",
+    "Current year": "range_ytd",
+    "1 year": "range_1y",
+    "3 years": "range_3y",
+    "5 years": "range_5y",
+}
+
+
+def _find_table_after_heading(soup: BeautifulSoup, heading_pattern: re.Pattern):
+    """Return the first <table> following a heading whose text matches the pattern.
+
+    Skips matches inside <title> / <meta> / non-content tags so a page title
+    that happens to contain the heading text does not steer us to an
+    unrelated table at the top of the page.
+    """
+    for el in soup.find_all(string=heading_pattern):
+        node = el.parent
+        if node is None:
+            continue
+        # Skip page-level metadata where the same text appears in <title>.
+        if node.find_parent("title") is not None:
+            continue
+        if node.name in {"title", "meta"}:
+            continue
+        # MS section headings live inside <a>/<h3>/<h4> tags within a
+        # card-header div. Anything else is likely a body sentence and
+        # should not anchor a table lookup.
+        if node.name not in {"a", "h1", "h2", "h3", "h4", "h5", "h6", "span"}:
+            continue
+        candidate = node.find_next("table")
+        if candidate is not None:
+            return candidate
+    return None
+
+
+def fetch_price_performance(base_company_url: str, cache_key_prefix: str | None = None) -> tuple[dict[str, Any], PageStepStatus]:
+    """Performance grid + course extremes + recent quotes from /{SLUG}/.
+
+    The same fetch pulls all three blocks since they share one HTML page.
+    Designed to be called alongside fetch_summary_page (and shares its
+    cached HTML).
+    """
+    url = (base_company_url or "").rstrip("/") + "/"
+    status = PageStepStatus(step="fetch_price_performance", message="")
+    start = time.perf_counter() * 1000
+
+    soup, errors = _fetch_page(url, _cache_slug(url, "summary", cache_key_prefix))
+    if soup is None:
+        status.status = "failed"
+        status.errors = errors
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        log.info("[MarketScreener] Fetching summary page (price perf)... FAILED")
+        return _empty_price_perf_payload(url, status), status
+    log.info("[MarketScreener] Fetching summary page (price perf)... SUCCESS")
+
+    for sel in ("header", "footer", "nav", "script", "style", "aside"):
+        for el in soup.find_all(sel):
+            el.decompose()
+
+    # ─ Performance grid ─
+    performance: dict[str, float | None] = {v: None for v in _PERFORMANCE_LABEL_KEYS.values()}
+    perf_table = _find_table_after_heading(soup, re.compile(r"Quotes and Performance", re.I))
+    if perf_table is not None:
+        for tr in perf_table.find_all("tr"):
+            cells = [c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])]
+            if len(cells) < 2:
+                continue
+            label = (cells[0] or "").strip()
+            value = next((c for c in cells[1:] if c), "")
+            key = _PERFORMANCE_LABEL_KEYS.get(label)
+            if key:
+                performance[key] = _coerce_pct_or_none(value)
+
+    # ─ Course extremes (high/low ranges) ─
+    extremes: dict[str, dict[str, float | None] | None] = {v: None for v in _RANGE_LABEL_KEYS.values()}
+    extremes_table = _find_table_after_heading(soup, re.compile(r"Course Extremes", re.I))
+    if extremes_table is not None:
+        for tr in extremes_table.find_all("tr"):
+            cells = [c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])]
+            if len(cells) < 2:
+                continue
+            label = (cells[0] or "").strip()
+            key = _RANGE_LABEL_KEYS.get(label)
+            if not key:
+                continue
+            numeric_cells = [c for c in cells[1:] if c]
+            low_val = _coerce_numeric_or_none(numeric_cells[0]) if numeric_cells else None
+            high_val = _coerce_numeric_or_none(numeric_cells[1]) if len(numeric_cells) >= 2 else None
+            extremes[key] = {"low": low_val, "high": high_val}
+
+    # ─ Recent quotes table (Date / Price / Change / Volume) ─
+    quotes: list[dict[str, Any]] = []
+    quotes_table = None
+    # multiple tables can match — pick the one whose first row has Date/Price headers
+    for tab in soup.find_all("table"):
+        rows = tab.find_all("tr")
+        if not rows:
+            continue
+        head_cells = [c.get_text(" ", strip=True) for c in rows[0].find_all(["td", "th"])]
+        if head_cells[:2] == ["Date", "Price"]:
+            quotes_table = tab
+            break
+    if quotes_table is not None:
+        for tr in quotes_table.find_all("tr")[1:11]:  # cap at 10
+            cells = [c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])]
+            if len(cells) < 4:
+                continue
+            quotes.append({
+                "date": cells[0] or None,
+                "price": cells[1] or None,
+                "change_pct": _coerce_pct_or_none(cells[2]),
+                "volume": cells[3] or None,
+            })
+
+    payload = {
+        "source_page": url,
+        "source_type": "price_performance",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "performance": performance,
+        "course_extremes": extremes,
+        "recent_quotes": quotes,
+        "warnings": [],
+    }
+
+    has_any = (
+        any(v is not None for v in performance.values())
+        or any(v is not None for v in extremes.values())
+        or bool(quotes)
+    )
+    status.status = "success" if has_any else "partial"
+    status.message = (
+        f"Price perf: {sum(1 for v in performance.values() if v is not None)} bands, "
+        f"{sum(1 for v in extremes.values() if v is not None)} ranges, {len(quotes)} quotes"
+    )
+    status.record_count = sum(1 for v in performance.values() if v is not None) + len(quotes)
+    status.elapsed_ms = (time.perf_counter() * 1000) - start
+    return payload, status
+
+
+def _empty_price_perf_payload(source_page: str, status: PageStepStatus) -> dict[str, Any]:
+    return {
+        "source_page": source_page,
+        "source_type": "price_performance",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "performance": {v: None for v in _PERFORMANCE_LABEL_KEYS.values()},
+        "course_extremes": {v: None for v in _RANGE_LABEL_KEYS.values()},
+        "recent_quotes": [],
+        "warnings": status.errors,
+    }
+
+
+# ─── K. fetch_analyst_recommendations (source: /consensus/ or summary) ──────
+#
+# The analyst-recommendations table on /consensus/ lists recent broker
+# actions: date + headline + source code (e.g. "MT" = MT Newswires).
+# Adds the "Recent broker actions" panel to the deck — a list users
+# expect on PDF page 3 of the reference report.
+
+def fetch_analyst_recommendations(base_company_url: str, cache_key_prefix: str | None = None) -> tuple[dict[str, Any], PageStepStatus]:
+    """Recent analyst recommendations / broker actions list.
+
+    Lives on the /consensus/ page (also surfaced on summary). One row per
+    broker action, ordered most-recent first.
+    """
+    url = base_company_url.rstrip("/") + "/consensus/"
+    status = PageStepStatus(step="fetch_analyst_recommendations", message="")
+    start = time.perf_counter() * 1000
+
+    soup, errors = _fetch_page(url, _cache_slug(url, "consensus", cache_key_prefix))
+    if soup is None:
+        status.status = "failed"
+        status.errors = errors
+        status.elapsed_ms = (time.perf_counter() * 1000) - start
+        log.info("[MarketScreener] Fetching /consensus/ (recommendations)... FAILED")
+        return _empty_recommendations_payload(url, status), status
+    log.info("[MarketScreener] Fetching /consensus/ (recommendations)... SUCCESS")
+
+    for sel in ("header", "footer", "nav", "script", "style", "aside"):
+        for el in soup.find_all(sel):
+            el.decompose()
+
+    # Anchor the regex to the start of the *stripped* text (text nodes
+    # often have leading whitespace from the HTML indentation). We use
+    # \s* prefix so the match still hits even when MS prepends newlines.
+    table = _find_table_after_heading(soup, re.compile(r"^\s*Analysts'?\s*recommendations", re.I))
+    items: list[dict[str, str]] = []
+    if table is not None:
+        for tr in table.find_all("tr"):
+            cells = [c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])]
+            if len(cells) < 2:
+                continue
+            date = (cells[0] or "").strip()
+            headline = (cells[1] or "").strip()
+            source = (cells[2] or "").strip() if len(cells) >= 3 else ""
+            if not headline:
+                continue
+            if not date or len(date) > 20:
+                continue
+            items.append({"date": date, "headline": headline, "source": source or None})
+
+    # Brokers covering the company — separate table on /consensus/.
+    brokers: list[str] = []
+    coverage_table = _find_table_after_heading(soup, re.compile(r"Analysts covering the company", re.I))
+    if coverage_table is not None:
+        for tr in coverage_table.find_all("tr"):
+            cells = [c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])]
+            if not cells:
+                continue
+            name = (cells[0] or "").strip()
+            if name and name not in brokers:
+                brokers.append(name)
+
+    payload = {
+        "source_page": url,
+        "source_type": "analyst_recommendations",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "items": items,
+        "covering_brokers": brokers,
+        "warnings": [],
+    }
+    status.status = "success" if (items or brokers) else "partial"
+    status.message = f"Analyst recommendations: {len(items)} items, {len(brokers)} brokers"
+    status.record_count = len(items) + len(brokers)
+    status.elapsed_ms = (time.perf_counter() * 1000) - start
+    return payload, status
+
+
+def _empty_recommendations_payload(source_page: str, status: PageStepStatus) -> dict[str, Any]:
+    return {
+        "source_page": source_page,
+        "source_type": "analyst_recommendations",
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "items": [],
+        "covering_brokers": [],
+        "warnings": status.errors,
+    }

@@ -231,6 +231,107 @@ class FinancialSnapshotData:
     price_history:   Optional[PriceHistorySeries]
 
 
+# ── Slide 4: Ratings & Sentiment ──────────────────────────────────────────
+
+@dataclass(frozen=True)
+class CompositeRating:
+    """One Surperformance composite rating (Trader/Investor/Global/Quality).
+
+    `score` is on 0-100. `score` may be None when MS hasn't computed the
+    rating (thinly covered tickers); the renderer shows a dash bar.
+    """
+    label:  str
+    score:  Optional[int] = None
+
+
+@dataclass(frozen=True)
+class RatingsData:
+    """Slide 4 — Strengths/Weaknesses bullets + composite ratings strip.
+
+    Sourced exclusively from `payload.ms_ratings` (which mirrors the MS
+    /ratings/ page). Slide is suppressed when both bullet lists AND every
+    composite score are missing. ESG MSCI letter (CCC..AAA / "-") is
+    surfaced separately because MS lays it out as a letter, not a %.
+    """
+    strengths:        list[str] = field(default_factory=list)
+    weaknesses:       list[str] = field(default_factory=list)
+    composites:       list[CompositeRating] = field(default_factory=list)
+    esg_msci:         Optional[str] = None
+    has_data:         bool = False
+
+
+# ── Slide 5: Sector Comparison ────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class PeerRow:
+    """One row in the peer table. Subject company is rendered first and
+    visually highlighted by the renderer.
+    """
+    name:               str
+    market_cap_usd:     Optional[str] = None  # MS-formatted, e.g. "1.14B"
+    change_ytd_pct:     Optional[float] = None
+    change_1y_pct:      Optional[float] = None
+    change_3y_pct:      Optional[float] = None
+    esg_msci:           Optional[str] = None  # from peer-ESG cross-reference
+    is_subject:         bool = False
+
+
+@dataclass(frozen=True)
+class SectorComparisonData:
+    """Slide 5 — peer comparison table.
+
+    Pulled from `payload.ms_sector_peers` and joined with ESG letters from
+    `payload.ms_ratings.peer_esg`. Capped at the top 12 peers by market
+    cap to keep the slide readable; the subject company always appears
+    even if it would fall below the cap.
+    """
+    sector_label:        str = ""
+    rows:                list[PeerRow] = field(default_factory=list)
+    average_ytd_pct:     Optional[float] = None  # MS-published "Average" row
+    has_data:            bool = False
+
+
+# ── Slide 6: Price Action & Broker Activity ──────────────────────────────
+
+@dataclass(frozen=True)
+class PerformanceCell:
+    """One band in the performance grid (1d / 1w / MTD / 1m / 3m / 6m / YTD)."""
+    label:     str
+    value_pct: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class CourseRange:
+    """Low/high pair for one of the course-extreme buckets (1w/1m/YTD/1y/3y/5y)."""
+    label:  str
+    low:    Optional[float] = None
+    high:   Optional[float] = None
+
+
+@dataclass(frozen=True)
+class BrokerAction:
+    """One row in the recent broker actions list."""
+    date:      str = ""
+    headline:  str = ""
+    source:    str = ""
+
+
+@dataclass(frozen=True)
+class PriceActionData:
+    """Slide 6 — price-action grid + recent broker actions.
+
+    Pulled from `payload.ms_price_performance` (perf grid + course extremes)
+    and `payload.ms_analyst_recommendations` (broker actions + covering
+    brokers list). Either source alone is enough to render the slide;
+    each panel suppresses independently when its source is empty.
+    """
+    performance:        list[PerformanceCell] = field(default_factory=list)
+    course_extremes:    list[CourseRange] = field(default_factory=list)
+    broker_actions:     list[BrokerAction] = field(default_factory=list)
+    covering_brokers:   list[str] = field(default_factory=list)
+    has_data:           bool = False
+
+
 # ── The whole context ─────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -252,6 +353,12 @@ class ReportContext:
     cover:                CoverData
     summary:              SummaryData
     snapshot:             FinancialSnapshotData
+
+    # Optional MS-extras slides (added 2026-05). Each carries a `has_data`
+    # flag — the deck builder skips its slide entirely when that's False.
+    ratings:              Optional[RatingsData] = None
+    sector:               Optional[SectorComparisonData] = None
+    price_action:         Optional[PriceActionData] = None
 
     # Quality flags surfaced on slide 3 footer (e.g. "MS captcha — estimates
     # from Yahoo only"). Empty list = no banner.
