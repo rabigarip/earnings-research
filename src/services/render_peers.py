@@ -81,8 +81,8 @@ def render(prs, blank_layout, sector: SectorComparisonData, *, tx, rect,
     tx(s, Inches(0.6), Inches(0.4), Inches(6.3), Inches(0.3),
        head, sz=12, bold=True, rgb=BLACK)
     tx(s, Inches(0.6), Inches(0.85), Inches(6), Inches(0.5),
-       "Sector Comparison", sz=26, bold=True, rgb=BLACK)
-    rect(s, Inches(0.6), Inches(1.35), Inches(2), Inches(0.06), GOLD)
+       "Sector Comparison", sz=22, bold=True, rgb=BLACK)
+    rect(s, Inches(0.6), Inches(1.32), Inches(0.9), Inches(0.04), GOLD)
 
     if sector.sector_label:
         tx(s, Inches(0.6), Inches(1.5), Inches(6.3), Inches(0.3),

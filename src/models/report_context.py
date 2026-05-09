@@ -79,6 +79,14 @@ class CoverData:
     target_price:   Optional[float]
     upside_pct:     Optional[float]           # signed %, e.g. -13.3
 
+    # Quick-stats strip (added 2026-05 for the redesigned cover). Each is
+    # optional — the renderer drops the cell when None rather than
+    # stretching others to fill the gap.
+    last_close:     Optional[float] = None    # in `currency`, raw units
+    n_analysts:     Optional[int] = None
+    pe_fy_e:        Optional[float] = None    # forward P/E
+    div_yield_pct:  Optional[float] = None    # already in % (e.g. 4.8)
+
     # Provenance — used for the footer "Source: …" line.
     rating_source:        str = ""            # "marketscreener" | "yahoo" | ""
     target_price_source:  str = ""

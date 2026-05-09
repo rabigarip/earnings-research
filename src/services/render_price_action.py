@@ -77,7 +77,7 @@ def render(prs, blank_layout, price_action: PriceActionData, *, tx, rect,
        head, sz=12, bold=True, rgb=BLACK)
     tx(s, Inches(0.6), Inches(0.85), Inches(6), Inches(0.5),
        "Price Action & Broker Activity", sz=22, bold=True, rgb=BLACK)
-    rect(s, Inches(0.6), Inches(1.35), Inches(2), Inches(0.06), GOLD)
+    rect(s, Inches(0.6), Inches(1.32), Inches(0.9), Inches(0.04), GOLD)
 
     # ── Performance grid ──
     perf_y = Inches(1.7)

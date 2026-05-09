@@ -247,6 +247,53 @@ def _build_cover(payload: ReportPayload, memo_data: dict | None) -> CoverData:
             tgt = None
             target_source = ""
 
+    # Quick-stats strip on the redesigned cover — pulled from the same
+    # MS sources the rest of the deck uses, so the cover stays in sync.
+    # Each value is optional; the renderer drops the cell when None.
+    last_close: Optional[float] = None
+    if cs and isinstance(cs, dict) and cs.get("last_close_price") is not None:
+        try:
+            last_close = float(cs["last_close_price"])
+        except (TypeError, ValueError):
+            pass
+    if last_close is None and q is not None and getattr(q, "price", None):
+        try:
+            last_close = float(q.price)
+        except (TypeError, ValueError):
+            pass
+
+    n_analysts: Optional[int] = None
+    if cs and isinstance(cs, dict) and cs.get("analyst_count") is not None:
+        try:
+            n_analysts = int(cs["analyst_count"])
+        except (TypeError, ValueError):
+            pass
+
+    # Forward P/E + Div Yield — sourced from the valuation grid. Picks
+    # the FIRST estimate column (next FY) so the cover aligns with
+    # the slide-3 Valuation Summary.
+    vm = (payload.ms_valuation_multiples or {}) if hasattr(payload, "ms_valuation_multiples") else {}
+    pe_fy_e: Optional[float] = None
+    div_yield_pct: Optional[float] = None
+    if isinstance(vm, dict):
+        v_periods = vm.get("periods") or []
+        v_pe = vm.get("pe") or []
+        v_yield = vm.get("yield_pct") or []
+        # First period whose label looks like an estimate (current/next year)
+        cy = datetime.now().year
+        ny = cy + 1
+        for i, p in enumerate(v_periods):
+            ps = str(p)
+            if str(cy) in ps or str(ny) in ps:
+                if pe_fy_e is None and i < len(v_pe) and v_pe[i] is not None:
+                    try: pe_fy_e = float(v_pe[i])
+                    except (TypeError, ValueError): pass
+                if div_yield_pct is None and i < len(v_yield) and v_yield[i] is not None:
+                    try: div_yield_pct = float(v_yield[i])
+                    except (TypeError, ValueError): pass
+                if pe_fy_e is not None and div_yield_pct is not None:
+                    break
+
     return CoverData(
         company_name=company_name,
         ticker=ticker,
@@ -258,6 +305,10 @@ def _build_cover(payload: ReportPayload, memo_data: dict | None) -> CoverData:
         rating=rating_str,
         target_price=tgt,
         upside_pct=upside_pct,
+        last_close=last_close,
+        n_analysts=n_analysts,
+        pe_fy_e=pe_fy_e,
+        div_yield_pct=div_yield_pct,
         rating_source=rating_source,
         target_price_source=target_source,
         market_cap_source=mcap_source,

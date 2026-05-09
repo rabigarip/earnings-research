@@ -117,52 +117,53 @@ def render(prs, blank_layout, ratings: RatingsData, *, tx, rect,
     tx(s, Inches(0.6), Inches(0.4), Inches(6.3), Inches(0.3),
        head, sz=12, bold=True, rgb=BLACK)
     tx(s, Inches(0.6), Inches(0.85), Inches(6), Inches(0.5),
-       "Ratings & Sentiment", sz=26, bold=True, rgb=BLACK)
-    rect(s, Inches(0.6), Inches(1.35), Inches(2), Inches(0.06), GOLD)
+       "Ratings & Sentiment", sz=22, bold=True, rgb=BLACK)
+    rect(s, Inches(0.6), Inches(1.32), Inches(0.9), Inches(0.04), GOLD)
 
-    # ── Composite ratings panel ──
+    # ── Composite ratings panel — single horizontal row ──
+    # Was a 2x2 grid taking 2.4" of vertical real estate. Single row of
+    # 4 columns plus a right-aligned ESG cell halves that and matches
+    # the institutional convention of putting the rating ladder in one
+    # eye-level scan.
     panel_x = Inches(0.6)
-    panel_y = Inches(1.7)
+    panel_y = Inches(1.65)
     panel_w = Inches(6.3)
-    panel_h = Inches(2.4)
+    panel_h = Inches(1.45)
     rect(s, panel_x, panel_y, panel_w, panel_h, CARD_BG, CARD_BORDER)
-    rect(s, panel_x, panel_y, Inches(0.06), panel_h, GOLD)
-    tx(s, panel_x + Inches(0.18), panel_y + Inches(0.10),
-       panel_w - Inches(0.3), Inches(0.3),
-       "SURPERFORMANCE RATINGS", sz=10, bold=True, rgb=MUTED)
+    rect(s, panel_x, panel_y, Inches(0.04), panel_h, GOLD)
+    tx(s, panel_x + Inches(0.16), panel_y + Inches(0.10),
+       panel_w - Inches(0.3), Inches(0.22),
+       "SURPERFORMANCE RATINGS", sz=8, bold=True, rgb=MUTED)
+    # ESG MSCI on the same eyebrow line, right-aligned.
+    esg_str = ratings.esg_msci or "—"
+    esg_color = GREEN if (ratings.esg_msci or "").startswith("A") else BLACK
+    tx(s, panel_x + panel_w - Inches(2.0), panel_y + Inches(0.10),
+       Inches(1.4), Inches(0.22),
+       "ESG MSCI", sz=8, bold=True, rgb=MUTED, al=PP_ALIGN.RIGHT)
+    tx(s, panel_x + panel_w - Inches(0.6), panel_y + Inches(0.10),
+       Inches(0.4), Inches(0.22),
+       esg_str, sz=10, bold=True, rgb=esg_color, al=PP_ALIGN.RIGHT)
 
-    # Lay out the four composite bars in a 2x2 grid (fits portrait better
-    # than a single 4-wide row).
+    # 4 composite bars across the panel, each 1.40" wide with 0.10" gap
+    # totalling 1.50" × 4 = 6.00" plus margins.
     composites = list(ratings.composites)
     if composites:
-        col_w = (panel_w - Inches(0.6)) / 2  # left/right columns with gap
-        row_h = Inches(0.7)
-        gx = panel_x + Inches(0.2)
-        gy = panel_y + Inches(0.45)
+        bar_y = panel_y + Inches(0.42)
+        bar_h = Inches(0.85)
+        gx = panel_x + Inches(0.16)
+        col_w = (panel_w - Inches(0.32) - Inches(0.30)) / 4  # 4 cols, 3 gaps × 0.10"
+        gap = Inches(0.10)
         for i, comp in enumerate(composites[:4]):
-            col = i % 2
-            row = i // 2
-            cx = gx + (col_w + Inches(0.2)) * col
-            cy = gy + row_h * row + Inches(0.1) * row
+            cx = gx + (col_w + gap) * i
             _render_composite_bar(
-                s, x=cx, y=cy, w=col_w, h=row_h,
+                s, x=cx, y=bar_y, w=col_w, h=bar_h,
                 label=comp.label, score=comp.score, tx=tx, rect=rect,
             )
 
-    # ESG MSCI line at bottom of panel
-    esg_y = panel_y + panel_h - Inches(0.4)
-    esg_str = ratings.esg_msci or "—"
-    tx(s, panel_x + Inches(0.2), esg_y,
-       Inches(2.0), Inches(0.3),
-       "ESG MSCI:", sz=10, bold=True, rgb=MUTED)
-    tx(s, panel_x + Inches(1.4), esg_y,
-       Inches(2.0), Inches(0.3),
-       esg_str, sz=11, bold=True,
-       rgb=GREEN if (ratings.esg_msci or "").startswith("A") else BLACK)
-
     # ── Strengths / Weaknesses split ──
-    list_y = Inches(4.3)
-    list_h = Inches(7.5)
+    # Pulled up to fill the room freed by the compacted ratings strip.
+    list_y = Inches(3.30)
+    list_h = Inches(8.5)
     half_w = Inches(3.05)
     gap = Inches(0.2)
 

@@ -316,8 +316,8 @@ def render(
     s3 = prs.slides.add_slide(blank_layout)
     rect(s3, 0, 0, W, H, WHITE)
     tx(s3, Inches(0.6), Inches(0.5), Inches(6), Inches(0.5),
-       "Financial Snapshot", sz=26, bold=True, rgb=BLACK)
-    rect(s3, Inches(0.6), Inches(1.0), Inches(2), Inches(0.06), GOLD)
+       "Financial Snapshot", sz=22, bold=True, rgb=BLACK)
+    rect(s3, Inches(0.6), Inches(0.97), Inches(0.9), Inches(0.04), GOLD)
 
     table = snapshot.table
     tbx = Inches(0.6)
@@ -337,10 +337,12 @@ def render(
             s3, table, tbx=tbx, tby=tby, rh=rh, tx=tx, rect=rect,
         )
 
-    # ── Valuation Summary ──
-    tx(s3, Inches(0.6), Inches(4.2), Inches(6), Inches(0.4),
-       "Valuation Summary", sz=22, bold=True, rgb=BLACK)
-    rect(s3, Inches(0.6), Inches(4.6), Inches(2), Inches(0.05), GOLD)
+    # ── Valuation Summary — single horizontal row of 4 compact cards ──
+    # Was a 2x2 grid taking ~2.2" vertical. Compact horizontal strip
+    # halves that and reads more like an institutional research note.
+    tx(s3, Inches(0.6), Inches(4.25), Inches(6), Inches(0.35),
+       "Valuation Summary", sz=14, bold=True, rgb=BLACK)
+    rect(s3, Inches(0.6), Inches(4.62), Inches(0.9), Inches(0.04), GOLD)
 
     val = snapshot.valuation
     bank_disclaimer = val.bank_disclaimer_needed
@@ -351,45 +353,54 @@ def render(
         ("P/B", _fmt_multiple(val.pb)),
         ("Div. Yield", _fmt_pct(val.div_yield)),
     ]
-    vbw = Inches(3.05)
+    vbw = Inches(1.50)  # 4 cards × 1.5" + 3 gaps × 0.10" = 6.30"
+    vbh = Inches(0.85)
+    vby = Inches(4.85)
+    val_gap = Inches(0.10)
     for i, (lbl, value) in enumerate(boxes):
-        x = Inches(0.6) + (Inches(3.2) if i % 2 else 0)
-        y = Inches(4.85) + (Inches(1.1) if i >= 2 else 0)
-        rect(s3, x, y, vbw, Inches(0.95), WHITE, BORDER)
-        rect(s3, x, y, Inches(0.06), Inches(0.95), GOLD)
-        tx(s3, x + Inches(0.18), y + Inches(0.12), vbw - Inches(0.3),
-           Inches(0.2), lbl, sz=10, rgb=MUTED)
-        tx(s3, x + Inches(0.18), y + Inches(0.4), vbw - Inches(0.3),
-           Inches(0.35), value, sz=22, bold=True, rgb=GOLD)
+        x = Inches(0.6) + (vbw + val_gap) * i
+        rect(s3, x, vby, vbw, vbh, WHITE, BORDER)
+        rect(s3, x, vby, Inches(0.04), vbh, GOLD)
+        tx(s3, x + Inches(0.12), vby + Inches(0.10),
+           vbw - Inches(0.20), Inches(0.20),
+           lbl, sz=8, bold=True, rgb=MUTED, al=PP_ALIGN.LEFT)
+        tx(s3, x + Inches(0.12), vby + Inches(0.36),
+           vbw - Inches(0.20), Inches(0.40),
+           value, sz=18, bold=True, rgb=BLACK, al=PP_ALIGN.LEFT)
 
     # ── 1-Year Price chart ──
-    footer_y = Inches(7.3)
+    footer_y = Inches(6.20)
     if snapshot.price_history and len(snapshot.price_history.dates) >= 10:
         try:
-            tx(s3, Inches(0.6), Inches(7.15), Inches(4), Inches(0.3),
-               "1-Year Price", sz=14, bold=True, rgb=BLACK)
+            tx(s3, Inches(0.6), Inches(6.05), Inches(4), Inches(0.3),
+               "1-Year Price", sz=12, bold=True, rgb=BLACK)
             build_price_chart(
                 s3,
-                Inches(0.6), Inches(7.55), Inches(6.3), Inches(2.4),
+                Inches(0.6), Inches(6.40), Inches(6.3), Inches(2.4),
                 snapshot.price_history.dates, snapshot.price_history.prices,
             )
-            footer_y = Inches(10.15)
+            footer_y = Inches(9.00)
         except Exception as exc:
             import logging
             logging.getLogger(__name__).warning("Price chart failed: %s", exc)
 
-    # ── Footer attribution ──
+    # ── Footer attribution — consolidated single block ──
+    # Previously rendered as 3 stacked lines (sources / bank disclaimer /
+    # data quality flags) consuming ~0.9" of vertical. Now flows as a
+    # tighter trio of muted lines, each only rendered when relevant.
     as_of = _readable_date(table.estimates_as_of) if table.estimates_as_of else (
         datetime.now().strftime("%d %b %Y")
     )
-    tx(s3, Inches(0.6), footer_y, Inches(6), Inches(0.3),
-       f"Actuals: {table.actuals_source}  |  Estimates: {table.estimates_source} as of {as_of}",
-       sz=9, rgb=MUTED)
+    tx(s3, Inches(0.6), footer_y, Inches(6.3), Inches(0.22),
+       f"Actuals: {table.actuals_source}  ·  Estimates: {table.estimates_source} as of {as_of}",
+       sz=8, rgb=MUTED)
+    fy = footer_y + Inches(0.22)
     if bank_disclaimer:
-        tx(s3, Inches(0.6), footer_y + Inches(0.2), Inches(6), Inches(0.3),
+        tx(s3, Inches(0.6), fy, Inches(6.3), Inches(0.22),
            "* EBITDA / EV-EBITDA not applicable for banks and financial institutions",
-           sz=8, rgb=MUTED)
+           sz=7, rgb=MUTED)
+        fy = fy + Inches(0.20)
     if quality_flags:
-        tx(s3, Inches(0.6), footer_y + Inches(0.4), Inches(6), Inches(0.3),
+        tx(s3, Inches(0.6), fy, Inches(6.3), Inches(0.22),
            "Data Quality: " + "; ".join(quality_flags[:4]),
-           sz=9, rgb=MUTED)
+           sz=7, rgb=MUTED)

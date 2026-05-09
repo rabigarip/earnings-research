@@ -67,8 +67,8 @@ def render(prs, blank_layout, summary: SummaryData, *, tx, rect) -> None:
     tx(s2, Inches(0.6), Inches(0.4), Inches(6.3), Inches(0.3),
        head_text, sz=12, bold=True, rgb=BLACK)
     tx(s2, Inches(0.6), Inches(0.85), Inches(6), Inches(0.5),
-       "Executive Summary", sz=26, bold=True, rgb=BLACK)
-    rect(s2, Inches(0.6), Inches(1.35), Inches(2), Inches(0.06), GOLD)
+       "Executive Summary", sz=22, bold=True, rgb=BLACK)
+    rect(s2, Inches(0.6), Inches(1.32), Inches(0.9), Inches(0.04), GOLD)
 
     # ── Investment Thesis box ──
     # When the Recent Headlines sidebar has content, the thesis box shrinks
