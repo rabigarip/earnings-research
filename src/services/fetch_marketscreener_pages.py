@@ -57,7 +57,10 @@ def run(ticker: str, company: CompanyMaster) -> StepResult:
             if slug:
                 try:
                     from src.services.entity_resolution import validate_candidate_page
-                    from src.storage.db import reject_marketscreener_candidate as _reject
+                    from src.storage.db import (
+                        reject_marketscreener_candidate as _reject,
+                        update_company_marketscreener as _persist_slug,
+                    )
                     vr = validate_candidate_page(
                         company.model_dump(),
                         slug,
@@ -67,6 +70,29 @@ def run(ticker: str, company: CompanyMaster) -> StepResult:
                     if not vr.valid:
                         _reject(ticker, reason=vr.rejection_reason or "search_candidate_validation_failed", status="needs_review")
                         slug = ""
+                    else:
+                        # Persist a successfully-validated search slug so
+                        # subsequent runs skip the search+validate round-trip
+                        # entirely. Without this, every run for tickers whose
+                        # ISIN-based candidate path fails (e.g. some non-US
+                        # exchanges) re-pays 2 MS requests per ticker — and
+                        # those extra requests are exactly what trips MS's
+                        # rate-limiter on heavy back-to-back use, which is
+                        # what regressed 1010.SR / 2020.SR on 2026-05-09.
+                        try:
+                            from datetime import datetime as _dt, timezone as _tz
+                            _persist_slug(
+                                ticker=ticker,
+                                marketscreener_company_url=_base_url(slug).rstrip("/") + "/",
+                                marketscreener_symbol=ticker,
+                                marketscreener_status="ok",
+                                last_verified=_dt.now(_tz.utc).isoformat(),
+                                marketscreener_id=slug,
+                            )
+                        except Exception:
+                            # Best-effort: a DB write failure shouldn't
+                            # abort the rest of the run.
+                            pass
                 except Exception:
                     pass
             if not slug:

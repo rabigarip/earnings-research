@@ -593,14 +593,33 @@ def run(payload: ReportPayload, memo_data: dict | None = None, qa_audit: dict | 
             iv_text, watch = _iv_text_and_watch(payload, memo_data, iv_style)
             quality_flags: list[str] = []
             if qa_audit:
-                if not qa_audit.get("payload_entity_match", True):
-                    quality_flags.append("MS entity mismatch suppressed")
-                if qa_audit.get("ms_section_suppressed_due_to_missing_current_data"):
-                    quality_flags.append("MS suppressed: missing current data")
-                if qa_audit.get("ms_section_suppressed_due_to_entity_mismatch"):
-                    quality_flags.append("MS suppressed: entity mismatch")
-                if qa_audit.get("ms_section_suppressed_due_to_contamination"):
-                    quality_flags.append("MS suppressed: contamination")
+                # The legacy flags are too granular and overlap — for tickers
+                # where MS was rate-limited or unreachable mid-run, the deck
+                # rendered "MS entity mismatch suppressed; MS suppressed:
+                # missing current data; MS suppressed: entity mismatch" which
+                # made it look like a data-quality problem with the ticker
+                # rather than a transient outage. Collapse those into one
+                # honest message based on whether MS data was FETCHED at all
+                # (no lineage = unavailable) vs FETCHED-BUT-REJECTED (lineage
+                # present but entity check failed).
+                no_lineage = qa_audit.get(
+                    "ms_section_suppressed_due_to_missing_current_data", False
+                )
+                entity_mismatch = (
+                    qa_audit.get("ms_section_suppressed_due_to_entity_mismatch", False)
+                    or not qa_audit.get("payload_entity_match", True)
+                )
+                contamination = qa_audit.get("ms_section_suppressed_due_to_contamination", False)
+                if contamination:
+                    quality_flags.append("MarketScreener data flagged as cross-company duplicate")
+                elif no_lineage:
+                    # Most common cause: MS was unavailable (rate limit / network /
+                    # captcha) when this run executed. NOT a data-correctness issue.
+                    quality_flags.append("MarketScreener data unavailable for this run — falling back to Yahoo Finance")
+                elif entity_mismatch:
+                    # MS data WAS fetched but lineage failed entity validation —
+                    # genuine wrong-entity case that needs the ticker mapping fixed.
+                    quality_flags.append("MarketScreener data rejected (entity mismatch)")
                 if qa_audit.get("reused_default_payload_detected"):
                     quality_flags.append("Default payload reused")
             # Add automated data validation warnings
