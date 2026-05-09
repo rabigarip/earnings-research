@@ -173,8 +173,25 @@ def render(prs, blank_layout, summary: SummaryData, *, tx, rect) -> None:
         logging.getLogger(__name__).warning("Chart rendering failed: %s", exc)
 
     # ── Key Expectations cards ──
+    # When MS hasn't published a forward quarterly consensus yet (NBOB.OM-
+    # shaped tickers), the cards show LAST-REPORTED actuals rather than
+    # forecasts. Re-label the section so the reader doesn't mistake a
+    # released number for a consensus expectation. The deck-wide quality
+    # flag on slide 3 footer carries the same context for cross-slide
+    # consistency.
+    if summary.consensus_unavailable and summary.last_reported_quarter_label:
+        # Render labels like "2026 Q1" → "Q1 2026" for visual consistency
+        import re as _rqlbl
+        m_lbl = _rqlbl.search(r"(\d{4})\s*Q(\d)", summary.last_reported_quarter_label)
+        if m_lbl:
+            pretty = f"Q{m_lbl.group(2)} {m_lbl.group(1)}"
+        else:
+            pretty = summary.last_reported_quarter_label
+        cards_header = f"Last Reported · {pretty}A"
+    else:
+        cards_header = "Key Expectations"
     tx(s2, Inches(0.6), Inches(7.65), Inches(4), Inches(0.3),
-       "Key Expectations", sz=14, bold=True, rgb=BLACK)
+       cards_header, sz=14, bold=True, rgb=BLACK)
     cw = Inches(2.0)
     cg = Inches(0.15)
     for i, card in enumerate(summary.cards[:3]):

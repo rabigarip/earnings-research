@@ -166,3 +166,116 @@ class TestNextQuarterFromFinancesFallback:
         # MS emits "2026Q2" but our normaliser produces "2026 Q2".
         assert memo["next_quarter_label"] == "2026 Q2"
         assert " Q" in memo["next_quarter_label"]
+
+
+class TestCarryForwardWhenAllReleased:
+    """When every quarter in the MS /finances/ grid carries an
+    announcement_date (no forward consensus), the fallback used to label
+    the deck after the last RELEASED quarter — calling it a "preview" of
+    a quarter that already reported. NBOB.OM (May 2026) hit this: MS
+    quarterly grid ended at 2026Q1 with date 4/14/26.
+
+    The carry-forward fix:
+      * keeps `next_quarter_label` pointing at the last released quarter
+        so YoY/QoQ lookups still find prior-year same quarter and produce
+        meaningful deltas (Q1 26A vs Q1 25A = +15.3%);
+      * sets `quarterly_consensus_unavailable=True` and
+        `last_reported_quarter_label` so the deck builder can flip the
+        slide-2 chip from "Key Expectations" to "Last Reported · Q1 26A";
+      * rolls `preview_quarter_short` and `preview_quarter_label` ONE
+        quarter forward so the cover reads "Q2 2026 Earnings Preview"
+        instead of mis-labelling a recap as a preview.
+    """
+
+    def test_carry_forward_rolls_preview_label_forward(self):
+        """NBOB.OM-shape: last grid period 2026Q1 already released."""
+        periods = [
+            "2025Q1", "2025Q2", "2025Q3", "2025Q4",
+            "2026Q1",
+        ]
+        dates = [
+            "4/14/25", "7/14/25", "10/14/25", "1/13/26",
+            "4/14/26",
+        ]
+        sales = [40.13, 39.31, 41.66, 42.4, 46.24]
+        memo = _compute_memo(
+            company=_company(), quote=_quote(),
+            quarterly=[], consensus=[], consensus_summary=None,
+            ms_annual_forecasts=_ms_q(periods, dates, sales),
+            ms_quarterly_forecasts=_ms_q(periods, dates, sales),
+            ms_eps_dividend_forecasts={}, ms_calendar_events=None,
+            yahoo_earnings_date=None, derived=None,
+        )
+        # next_quarter_label keeps the last released quarter — needed so
+        # the YoY lookup hits Q1 25 (40.13) for a meaningful chip.
+        assert memo["next_quarter_label"] == "2026Q1"
+        assert memo["last_reported_quarter_label"] == "2026Q1"
+        assert memo["quarterly_consensus_unavailable"] is True
+        # Display labels rolled forward to Q2 2026 — the cover and slide
+        # 2 header read off these.
+        assert memo["preview_quarter_short"] == "2Q26"
+        assert memo["preview_quarter_label"] == "Earnings Preview — 2Q26"
+
+    def test_carry_forward_keeps_consensus_lookup_on_last_released(self):
+        """The whole point of keeping `next_quarter_label` on the released
+        quarter is that downstream lookups still find a value — without
+        it, slide 2 cards would render "—" for everything."""
+        periods = [
+            "2025Q1", "2025Q2", "2025Q3", "2025Q4",
+            "2026Q1",
+        ]
+        dates = [
+            "4/14/25", "7/14/25", "10/14/25", "1/13/26",
+            "4/14/26",
+        ]
+        # NBOB.OM live values: Q1 26 46.24M.
+        sales = [40.13, 39.31, 41.66, 42.4, 46.24]
+        memo = _compute_memo(
+            company=_company(), quote=_quote(),
+            quarterly=[], consensus=[], consensus_summary=None,
+            ms_annual_forecasts=_ms_q(periods, dates, sales),
+            ms_quarterly_forecasts=_ms_q(periods, dates, sales),
+            ms_eps_dividend_forecasts={}, ms_calendar_events=None,
+            yahoo_earnings_date=None, derived=None,
+        )
+        # Lookups hit the last-released quarter so the cards have data.
+        assert memo["next_quarter_consensus_revenue"] == 46.24
+        # YoY chip itself depends on the calendar quarterly_results table
+        # (tested in the live render, not unit-mockable without a real
+        # ms_calendar_events block).
+
+    def test_carry_forward_year_wrap_q4_to_q1(self):
+        """Q4 → Q1 of next year. Edge case for the rolling logic."""
+        periods = ["2025Q1", "2025Q2", "2025Q3", "2025Q4"]
+        dates = ["4/27/25", "7/27/25", "10/26/25", "1/13/26"]
+        sales = [10, 11, 12, 13]
+        memo = _compute_memo(
+            company=_company(), quote=_quote(),
+            quarterly=[], consensus=[], consensus_summary=None,
+            ms_annual_forecasts=_ms_q(periods, dates, sales),
+            ms_quarterly_forecasts=_ms_q(periods, dates, sales),
+            ms_eps_dividend_forecasts={}, ms_calendar_events=None,
+            yahoo_earnings_date=None, derived=None,
+        )
+        assert memo["quarterly_consensus_unavailable"] is True
+        assert memo["preview_quarter_short"] == "1Q26"  # rolled Q4 25 → Q1 26
+        assert memo["last_reported_quarter_label"] == "2025Q4"
+
+    def test_no_carry_forward_when_estimate_present(self):
+        """The 2020.SR shape (forward forecasts present) must NOT trigger
+        carry-forward — that would regress the prior fix."""
+        periods = ["2026Q1", "2026Q2", "2026Q3", "2026Q4"]
+        dates = ["4/23/26", "-", "-", "-"]
+        sales = [2874, 3097, 3227, 2715]
+        memo = _compute_memo(
+            company=_company(), quote=_quote(),
+            quarterly=[], consensus=[], consensus_summary=None,
+            ms_annual_forecasts=_ms_q(periods, dates, sales),
+            ms_quarterly_forecasts=_ms_q(periods, dates, sales),
+            ms_eps_dividend_forecasts={}, ms_calendar_events=None,
+            yahoo_earnings_date=None, derived=None,
+        )
+        # Estimate present → carry-forward NOT triggered.
+        assert memo.get("quarterly_consensus_unavailable") is not True
+        assert memo["next_quarter_label"] == "2026 Q2"
+        assert memo["preview_quarter_short"] == "2Q26"

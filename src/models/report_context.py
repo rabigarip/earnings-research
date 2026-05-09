@@ -160,6 +160,15 @@ class SummaryData:
     catalysts:           list[str]            # 0–3
     risks:               list[str]            # 0–3
 
+    # Carry-forward state — set when MS has not yet published a forward
+    # quarterly consensus (e.g. NBOB.OM in May 26 has only Q1 26A and no
+    # Q2 26E forecast yet). The renderer flips the cards header from
+    # "Key Expectations" to "Last Reported · {quarter}" and surfaces a
+    # quality flag on slide 3 so a reader doesn't mistake released
+    # actuals for an active consensus.
+    consensus_unavailable:        bool = False
+    last_reported_quarter_label:  str = ""
+
 
 # ── Slide 3: Financial Snapshot ───────────────────────────────────────────
 

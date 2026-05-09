@@ -240,9 +240,22 @@ def _compute_memo(
             else:
                 next_quarter_label = raw
         elif periods:
-            # Fallback to the original behaviour only when every quarter
-            # has an announcement_date (everything reported, none upcoming).
+            # Carry-forward case (e.g. NBOB.OM, 2026-05): MarketScreener has
+            # NO forward quarterly forecasts — every period in the grid is
+            # released. Falling back to `periods[-1]` would label a deck
+            # "Q1 2026 Earnings Preview" while showing Q1 2026 actuals, which
+            # is misleading framing.
+            #
+            # Strategy: use the last released quarter as the comparison
+            # anchor so YoY/QoQ lookups stay meaningful (cards show real
+            # numbers with real deltas), but flag this as "consensus
+            # unavailable" so the cover and slide-2 chip can roll forward
+            # to the next calendar quarter and the renderer can label the
+            # cards as "Last Reported · Q1 26A" instead of pretending it's
+            # a preview.
             next_quarter_label = periods[-1]
+            out["quarterly_consensus_unavailable"] = True
+            out["last_reported_quarter_label"] = periods[-1]
     out["next_quarter_label"] = next_quarter_label
     # Short form e.g. 1Q26
     if next_quarter_label:
@@ -254,7 +267,26 @@ def _compute_memo(
             out["preview_quarter_short"] = f"{qn}Q{yr[-2:]}" if yr and qn else None
     if not out.get("preview_quarter_short"):
         out["preview_quarter_short"] = "1Q26"
-    out["preview_quarter_label"] = f"Earnings Preview — {out.get('preview_quarter_short', '1Q26')}"
+    # Carry-forward override (NBOB.OM-shaped tickers): when MS hasn't yet
+    # published a forward quarterly consensus, the cover should still call
+    # itself the NEXT quarter, not the last-reported one. Roll the display
+    # labels forward by one quarter while leaving `next_quarter_label`
+    # alone — the lookups below need to hit the last-reported row to keep
+    # the YoY chips meaningful.
+    if out.get("quarterly_consensus_unavailable") and next_quarter_label:
+        import re as _rqc
+        mc = _rqc.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})", next_quarter_label, _rqc.I)
+        if mc:
+            yrc = int(mc.group(1) or mc.group(4))
+            qnc = int(mc.group(2) or mc.group(3))
+            roll_q = qnc + 1 if qnc < 4 else 1
+            roll_yr = yrc if qnc < 4 else yrc + 1
+            out["preview_quarter_short"] = f"{roll_q}Q{str(roll_yr)[-2:]}"
+            out["preview_quarter_label"] = f"Earnings Preview — {out['preview_quarter_short']}"
+        else:
+            out["preview_quarter_label"] = f"Earnings Preview — {out.get('preview_quarter_short')}"
+    else:
+        out["preview_quarter_label"] = f"Earnings Preview — {out.get('preview_quarter_short', '1Q26')}"
     # Prior quarter and prior-year same quarter labels (for table headers and consistency)
     if next_quarter_label:
         import re as _r2

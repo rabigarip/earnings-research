@@ -1253,6 +1253,8 @@ def _build_summary(
         what_to_watch=what_to_watch,
         catalysts=catalysts,
         risks=risks,
+        consensus_unavailable=bool(memo.get("quarterly_consensus_unavailable")),
+        last_reported_quarter_label=str(memo.get("last_reported_quarter_label") or ""),
     )
 
 
@@ -1326,6 +1328,33 @@ def build(
         getattr(payload, "ms_analyst_recommendations", None),
     )
 
+    resolved_flags = list(
+        quality_flags
+        if quality_flags is not None
+        else ((memo_data or {}).get("data_quality_flags") or [])
+    )
+    # Surface carry-forward state as a deck-wide quality flag so slide 3's
+    # footer banner names it explicitly. Reader sees one unambiguous line:
+    # "Q2 2026 quarterly consensus pending — Key Expectations show Q1 2026
+    # actuals." instead of having to infer it from chip wording.
+    if summary.consensus_unavailable and summary.last_reported_quarter_label:
+        import re as _rqlbl2
+        m_last = _rqlbl2.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})",
+                                summary.last_reported_quarter_label)
+        if m_last:
+            last_yr = m_last.group(1) or m_last.group(4)
+            last_q = m_last.group(2) or m_last.group(3)
+            last = f"Q{last_q} {last_yr}"
+        else:
+            last = summary.last_reported_quarter_label
+        rolled = cover.period_label.replace(" Earnings Preview", "").strip() or "next quarter"
+        flag = (
+            f"{rolled} quarterly consensus pending — Key Expectations show "
+            f"{last} actuals"
+        )
+        if flag not in resolved_flags:
+            resolved_flags.append(flag)
+
     return ReportContext(
         run_id=payload.run_id,
         generated_at=payload.generated_at,
@@ -1338,9 +1367,5 @@ def build(
         ratings=ratings,
         sector=sector,
         price_action=price_action,
-        quality_flags=list(
-            quality_flags
-            if quality_flags is not None
-            else ((memo_data or {}).get("data_quality_flags") or [])
-        ),
+        quality_flags=resolved_flags,
     )
