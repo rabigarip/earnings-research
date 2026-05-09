@@ -360,6 +360,18 @@ def _yoy_pct(prior: Any, est: Any) -> Optional[float]:
     return round((est - prior) / abs(prior) * 100, 1)
 
 
+def _yoy_chain(series: list[Optional[float]]) -> list[Optional[float]]:
+    """Element-wise YoY % over a series. First entry is always None
+    (no prior to compare); subsequent entries are signed % vs the
+    previous non-None value. Used to populate the "Change" rows on
+    the slide-3 financial table that mirror what MS shows on its
+    /finances/ page (PDF page 2 reference)."""
+    out: list[Optional[float]] = [None]
+    for i in range(1, len(series)):
+        out.append(_yoy_pct(series[i - 1], series[i]))
+    return out
+
+
 def _to_millions(v: Any) -> Optional[float]:
     """Yahoo returns values in raw units (e.g. 5e8 for 500M); MS returns in
     millions already. Apply a magnitude heuristic: only divide when the input
@@ -622,6 +634,11 @@ def _build_annual_grid(
             periods=periods, announcement_dates=ann_dates,
             revenue=revenue, ebitda=ebitda, ebit=ebit,
             net_income=ni, eps=eps,
+            revenue_yoy=_yoy_chain(revenue),
+            ebitda_yoy=_yoy_chain(ebitda),
+            ebit_yoy=_yoy_chain(ebit),
+            net_income_yoy=_yoy_chain(ni),
+            eps_yoy=_yoy_chain(eps),
         )
 
     # MS annual path
@@ -668,11 +685,20 @@ def _build_annual_grid(
         periods_display.append(label)
         ann_dates.append(None if is_estimate else d)
 
+    rev_l = list(revenue)
+    ebitda_l = list(ebitda)
+    ebit_l = list(ebit)
+    ni_l = list(ni)
     return AnnualGrid(
         periods=periods_display,
         announcement_dates=ann_dates,
-        revenue=list(revenue), ebitda=list(ebitda), ebit=list(ebit),
-        net_income=list(ni), eps=eps,
+        revenue=rev_l, ebitda=ebitda_l, ebit=ebit_l,
+        net_income=ni_l, eps=eps,
+        revenue_yoy=_yoy_chain(rev_l),
+        ebitda_yoy=_yoy_chain(ebitda_l),
+        ebit_yoy=_yoy_chain(ebit_l),
+        net_income_yoy=_yoy_chain(ni_l),
+        eps_yoy=_yoy_chain(eps),
     )
 
 
@@ -1312,8 +1338,15 @@ def build(
         build_ratings as _build_ratings,
         build_sector as _build_sector,
         build_price_action as _build_price_action,
+        build_income_evolution as _build_income_evolution,
     )
     ratings = _build_ratings(getattr(payload, "ms_ratings", None))
+    income_evolution = _build_income_evolution(
+        getattr(payload, "ms_quarterly_forecasts", None)
+        or getattr(payload, "ms_annual_forecasts", None),
+        getattr(payload, "ms_calendar_events", None),
+        units_label=cover.currency,
+    )
     sector_label = (
         _company_attr(payload.company, "sector", "") or
         _company_attr(payload.company, "industry", "") or ""
@@ -1364,6 +1397,7 @@ def build(
         cover=cover,
         summary=summary,
         snapshot=snapshot,
+        income_evolution=income_evolution,
         ratings=ratings,
         sector=sector,
         price_action=price_action,

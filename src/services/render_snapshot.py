@@ -156,15 +156,22 @@ def _render_multi_period(s3, table, grid, *, tbx, tby, rh, tx, rect) -> None:
         cx += col_w
 
     # Data rows — each metric row drops out when all values are None.
+    # Each cell now stacks the value (top) and the YoY % chip (bottom)
+    # mirroring the italic "Change" row MS publishes under each metric.
+    # The chip is small + sign-coloured so the eye picks up trends without
+    # adding a separate row that would consume vertical real estate.
+    YOY_GREEN = RGBColor(0x1A, 0x7F, 0x37)
+    YOY_RED   = RGBColor(0xCF, 0x22, 0x22)
     rendered = 0
-    for metric_key, label_template in (
-        ("revenue",    "Revenue {money}"),
-        ("ebitda",     "EBITDA {money}"),
-        ("ebit",       "EBIT {money}"),
-        ("net_income", "Net Income {money}"),
-        ("eps",        "EPS {per_share}"),
+    for metric_key, yoy_key, label_template in (
+        ("revenue",    "revenue_yoy",    "Revenue {money}"),
+        ("ebitda",     "ebitda_yoy",     "EBITDA {money}"),
+        ("ebit",       "ebit_yoy",       "EBIT {money}"),
+        ("net_income", "net_income_yoy", "Net Income {money}"),
+        ("eps",        "eps_yoy",        "EPS {per_share}"),
     ):
         values = list(getattr(grid, metric_key, []) or [])
+        yoy_values = list(getattr(grid, yoy_key, []) or [])
         if not values or all(v is None for v in values):
             continue
         row_label = label_template.format(
@@ -208,9 +215,20 @@ def _render_multi_period(s3, table, grid, *, tbx, tby, rh, tx, rect) -> None:
                     display = f"{float(v):,.0f}"
                 except (TypeError, ValueError):
                     display = str(v)
-            tx(s3, cx + Inches(0.04), y + Inches(0.08),
-               col_w - Inches(0.08), rh, display,
+            tx(s3, cx + Inches(0.04), y + Inches(0.04),
+               col_w - Inches(0.08), Inches(0.22), display,
                sz=8, rgb=BLACK, al=PP_ALIGN.CENTER)
+            # YoY chip — only when the prior period had a value to
+            # compare against. The first column always shows blank
+            # (no prior). Negative deltas render red; positive green.
+            yoy_v = yoy_values[i] if i < len(yoy_values) else None
+            if isinstance(yoy_v, (int, float)):
+                sign = "+" if yoy_v >= 0 else ""
+                chip_color = YOY_GREEN if yoy_v >= 0 else YOY_RED
+                tx(s3, cx + Inches(0.04), y + Inches(0.24),
+                   col_w - Inches(0.08), Inches(0.18),
+                   f"{sign}{yoy_v:.1f}%",
+                   sz=6, bold=True, rgb=chip_color, al=PP_ALIGN.CENTER)
             cx += col_w
         rendered += 1
 

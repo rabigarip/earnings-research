@@ -492,6 +492,7 @@ def _write_preview_pptx_portrait(
     from src.services.render_cover import render as _render_cover
     from src.services.render_summary import render as _render_summary
     from src.services.render_snapshot import render as _render_snapshot
+    from src.services.render_income_evolution import render as _render_income_evolution
     from src.services.render_ratings import render as _render_ratings
     from src.services.render_peers import render as _render_peers
     from src.services.render_price_action import render as _render_price_action
@@ -511,6 +512,12 @@ def _write_preview_pptx_portrait(
     # Keeping them gated here (rather than inside the renderer) makes the
     # slide order explicit and avoids surfacing partially-empty slides on
     # tickers MarketScreener has thin coverage for.
+    if _ctx.income_evolution and _ctx.income_evolution.has_data:
+        _render_income_evolution(
+            prs, blank, _ctx.income_evolution,
+            tx=tx, rect=rect,
+            company_name=_ctx.company_name,
+        )
     if _ctx.ratings and _ctx.ratings.has_data:
         _render_ratings(
             prs, blank, _ctx.ratings,

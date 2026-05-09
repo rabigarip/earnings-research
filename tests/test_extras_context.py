@@ -20,6 +20,7 @@ from __future__ import annotations
 import pytest
 
 from src.services.build_extras_context import (
+    build_income_evolution,
     build_price_action,
     build_ratings,
     build_sector,
@@ -221,3 +222,118 @@ class TestBuildPriceAction:
         assert len(out.broker_actions) == 2
         assert out.broker_actions[0].headline == "Real action"
         assert out.broker_actions[1].headline == "Another"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# build_income_evolution
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestBuildIncomeEvolution:
+    """The new slide-4 panel: quarterly income series + revenue surprise.
+
+    Two independent inputs (ms_quarterly_forecasts, ms_calendar_events).
+    Either alone is enough to set has_data=True; both None must yield
+    has_data=False without raising.
+    """
+
+    def test_none_inputs_yield_no_data(self):
+        out = build_income_evolution(None, None)
+        assert out.has_data is False
+        assert out.quarterly_income is None
+        assert out.quarterly_surprise is None
+
+    def test_quarterly_income_only(self):
+        ms_q = {"quarterly": {
+            "periods": ["2025Q3", "2025Q4", "2026Q1"],
+            "announcement_dates": ["10/14/25", "1/13/26", "4/14/26"],
+            "net_sales":  [41.66, 42.4, 46.24],
+            "ebit":       [24.0, 24.5, 27.0],
+            "net_income": [17.77, 18.4, 19.47],
+        }}
+        out = build_income_evolution(ms_q, None)
+        assert out.has_data is True
+        qi = out.quarterly_income
+        assert qi is not None
+        assert qi.periods == ["2025Q3", "2025Q4", "2026Q1"]
+        # Margins computed: Op = EBIT/Sales*100, Net = NI/Sales*100
+        assert qi.operating_margin_pct[0] == pytest.approx(57.6, abs=0.5)
+        assert qi.net_margin_pct[0] == pytest.approx(42.7, abs=0.5)
+        # Last period has a date so actuals_boundary = 2.
+        assert qi.actuals_boundary == 2
+        assert out.quarterly_surprise is None  # no calendar input
+
+    def test_surprise_only(self):
+        cal = {"quarterly_results": {
+            "quarters": ["2025 Q3", "2025 Q4", "2026 Q1"],
+            "rows": [{"metric_key": "net_sales", "by_quarter": [
+                {"released": 41.66, "forecast": 39.0, "spread_pct": 6.8},
+                {"released": 42.4,  "forecast": 42.4, "spread_pct": 0.0},
+                {"released": 46.24, "forecast": 43.84, "spread_pct": 5.5},
+            ]}],
+        }}
+        out = build_income_evolution(None, cal)
+        assert out.has_data is True
+        qs = out.quarterly_surprise
+        assert qs is not None
+        assert qs.periods == ["2025 Q3", "2025 Q4", "2026 Q1"]
+        assert qs.actual == [41.66, 42.4, 46.24]
+        assert qs.estimate == [39.0, 42.4, 43.84]
+        assert qs.surprise_pct == [6.8, 0.0, 5.5]
+        assert out.quarterly_income is None
+
+    def test_quarters_with_neither_value_skipped(self):
+        """MS sometimes lists a future quarter in the table but with both
+        released/forecast empty (placeholder). Those rows must drop out
+        rather than render an empty pair of bars."""
+        cal = {"quarterly_results": {
+            "quarters": ["2025 Q4", "2026 Q1", "2026 Q2"],
+            "rows": [{"metric_key": "net_sales", "by_quarter": [
+                {"released": 42.4,  "forecast": 42.4, "spread_pct": 0.0},
+                {"released": 46.24, "forecast": 43.84, "spread_pct": 5.5},
+                {"released": None, "forecast": None, "spread_pct": None},
+            ]}],
+        }}
+        out = build_income_evolution(None, cal)
+        qs = out.quarterly_surprise
+        assert qs is not None
+        # The empty Q2 row was dropped.
+        assert qs.periods == ["2025 Q4", "2026 Q1"]
+        assert len(qs.actual) == 2
+
+    def test_quarterly_grid_capped_to_18(self):
+        """Long quarterly grids (20+ quarters) trim to the most recent
+        18 so the chart renders legibly."""
+        n = 25
+        periods = [f"2020Q{((i % 4) + 1)}" for i in range(n)]
+        sales = [100.0 + i for i in range(n)]
+        ms_q = {"quarterly": {
+            "periods": periods,
+            "announcement_dates": ["x"] * n,  # all actuals
+            "net_sales": sales,
+            "ebit": [50.0] * n,
+            "net_income": [40.0] * n,
+        }}
+        out = build_income_evolution(ms_q, None)
+        qi = out.quarterly_income
+        assert qi is not None
+        assert len(qi.periods) == 18  # _MAX_QUARTERS_INCOME
+        # Most recent 18 — the last entry should be the last in the input.
+        assert qi.revenue[-1] == sales[-1]
+
+    def test_safe_div_handles_zero_revenue(self):
+        """A ticker reporting zero revenue (rare for upstream/oil-bust
+        scenarios) must not divide-by-zero on margin calc — the
+        margin lists carry None, the chart still renders."""
+        ms_q = {"quarterly": {
+            "periods": ["2025Q1"],
+            "announcement_dates": ["4/14/25"],
+            "net_sales":  [0.0],
+            "ebit":       [-5.0],
+            "net_income": [-10.0],
+        }}
+        out = build_income_evolution(ms_q, None)
+        # Margins computed safely (None, no crash).
+        assert out.quarterly_income is not None
+        assert out.quarterly_income.operating_margin_pct == [None]
+        assert out.quarterly_income.net_margin_pct == [None]

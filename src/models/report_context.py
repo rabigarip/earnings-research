@@ -182,6 +182,11 @@ class AnnualGrid:
     EBITDA for a bank), the metric list is all-None and the renderer
     drops it. EPS is in display currency units; everything else in
     `units_label` (e.g. SARM).
+
+    YoY change rows mirror the "Change" italic rows MS shows under each
+    metric on /finances/ (PDF page 2). Each list is the same length as
+    `periods` — the first entry is always None (no prior to compare),
+    subsequent entries are signed % vs the previous period.
     """
     periods:             list[str]            # ["2023", "2024", "2025", "2026E", ...]
     announcement_dates:  list[Optional[str]]  # None for estimate columns
@@ -190,6 +195,11 @@ class AnnualGrid:
     ebit:                list[Optional[float]] = field(default_factory=list)
     net_income:          list[Optional[float]] = field(default_factory=list)
     eps:                 list[Optional[float]] = field(default_factory=list)
+    revenue_yoy:         list[Optional[float]] = field(default_factory=list)
+    ebitda_yoy:          list[Optional[float]] = field(default_factory=list)
+    ebit_yoy:            list[Optional[float]] = field(default_factory=list)
+    net_income_yoy:      list[Optional[float]] = field(default_factory=list)
+    eps_yoy:             list[Optional[float]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -238,6 +248,56 @@ class FinancialSnapshotData:
     table:           FinancialTable
     valuation:       ValuationSummary
     price_history:   Optional[PriceHistorySeries]
+
+
+# ── Slide 4 (NEW): Income Statement Evolution & Surprise ────────────────
+
+
+@dataclass(frozen=True)
+class QuarterlyIncomeSeries:
+    """Quarterly income-statement chart series matching the MS /finances/
+    Quarterly view (PDF reference page 2, second screenshot).
+
+    Bar series: Sales / Operating Profit (EBIT) / Net Income.
+    Line series: Net Margin and Operating Margin (computed in the builder).
+    `actuals_boundary` is the index of the LAST actual quarter — the
+    chart renderer uses this to apply the hatched/grey "estimate" pattern
+    to forward periods.
+    """
+    periods:             list[str] = field(default_factory=list)
+    revenue:             list[Optional[float]] = field(default_factory=list)
+    ebit:                list[Optional[float]] = field(default_factory=list)
+    net_income:          list[Optional[float]] = field(default_factory=list)
+    operating_margin_pct: list[Optional[float]] = field(default_factory=list)
+    net_margin_pct:      list[Optional[float]] = field(default_factory=list)
+    actuals_boundary:    int = -1
+    units_label:         str = ""
+
+
+@dataclass(frozen=True)
+class QuarterlySurpriseSeries:
+    """Quarterly revenue actual-vs-estimate series — the "Rate of Surprise"
+    chart from MS /consensus/.
+
+    Each list aligns to `periods`. `surprise_pct` may differ from
+    `(actual - estimate) / estimate * 100` when MS publishes a revised
+    surprise figure; we surface MS's value when present.
+    """
+    periods:        list[str] = field(default_factory=list)
+    actual:         list[Optional[float]] = field(default_factory=list)
+    estimate:       list[Optional[float]] = field(default_factory=list)
+    surprise_pct:   list[Optional[float]] = field(default_factory=list)
+    units_label:    str = ""
+
+
+@dataclass(frozen=True)
+class IncomeEvolutionData:
+    """Slide-4 (new) payload — quarterly income statement chart + surprise
+    chart, both sourced from MS. The slide is suppressed when neither
+    series has enough data to render meaningfully (`has_data=False`)."""
+    quarterly_income:    Optional[QuarterlyIncomeSeries] = None
+    quarterly_surprise:  Optional[QuarterlySurpriseSeries] = None
+    has_data:            bool = False
 
 
 # ── Slide 4: Ratings & Sentiment ──────────────────────────────────────────
@@ -365,6 +425,7 @@ class ReportContext:
 
     # Optional MS-extras slides (added 2026-05). Each carries a `has_data`
     # flag — the deck builder skips its slide entirely when that's False.
+    income_evolution:     Optional[IncomeEvolutionData] = None
     ratings:              Optional[RatingsData] = None
     sector:               Optional[SectorComparisonData] = None
     price_action:         Optional[PriceActionData] = None

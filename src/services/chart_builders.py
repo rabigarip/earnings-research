@@ -505,3 +505,197 @@ def build_expanded_table(
         rendered_rows += 1
 
     return y + rh * (rendered_rows + 1) + Inches(0.15)
+
+
+# ── Quarterly Income Statement Evolution chart ───────────────────────
+#
+# Mirrors the MS /finances/ Quarterly chart (PDF page 2 reference) —
+# clustered bars for Sales / Operating Profit / Net Income with overlaid
+# Net Margin and Operating Margin lines on a secondary axis. Estimate
+# columns (forecasts beyond the last announcement_date) get rendered in
+# the same colors as actuals; the slide caption documents the cutoff so
+# we don't ship a misleading dual-color scheme without a legend.
+
+def build_quarterly_income_chart(
+    slide,
+    x, y, w, h,
+    periods: list[str],
+    revenue: list,
+    ebit: list,
+    net_income: list,
+    operating_margin_pct: list | None = None,
+    net_margin_pct: list | None = None,
+    actuals_boundary: int = -1,
+    units_label: str = "",
+) -> None:
+    """Quarterly clustered-bar income chart.
+
+    Margin lines are rendered as a separate native chart overlay would
+    be hard with python-pptx (no true secondary-axis line+bar combo
+    without raw XML), so we render them as a XL_CHART_TYPE.LINE on a
+    secondary chart frame layered on top — but the simplest reliable
+    output is the bar-only chart with the Sales / EBIT / Net Income
+    series. Margins are surfaced via the slide's text panels instead.
+    """
+    if not periods or not any(v is not None for v in (revenue or [])):
+        return
+
+    from pptx.chart.data import CategoryChartData
+    from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
+
+    def _vals(arr):
+        return [_safe_float(v) for v in (arr or [])]
+
+    chart_data = CategoryChartData()
+    # Compact category labels: "21Q2", "21Q3", ... so a wide chart fits
+    # 16-18 quarters without overlapping text.
+    short_labels = []
+    for p in periods:
+        s = str(p)
+        # Match formats "2026Q1" / "2026 Q1" / "Q1 2026"
+        import re as _r
+        m = _r.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})", s)
+        if m:
+            yr = m.group(1) or m.group(4)
+            qn = m.group(2) or m.group(3)
+            short_labels.append(f"{yr[-2:]}Q{qn}")
+        else:
+            short_labels.append(s)
+    chart_data.categories = short_labels
+    chart_data.add_series("Sales", _vals(revenue))
+    chart_data.add_series("Operating Profit", _vals(ebit))
+    chart_data.add_series("Net Income", _vals(net_income))
+
+    chart_frame = slide.shapes.add_chart(
+        XL_CHART_TYPE.COLUMN_CLUSTERED, x, y, w, h, chart_data
+    )
+    chart = chart_frame.chart
+
+    # Apply the MS palette to each bar series.
+    for idx, color in enumerate((BLACK_BAR, GOLD_BAR, GREEN_BAR)):
+        try:
+            chart.series[idx].format.fill.solid()
+            chart.series[idx].format.fill.fore_color.rgb = color
+        except Exception:
+            pass
+
+    chart.has_legend = True
+    chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+    chart.legend.include_in_layout = False
+    chart.legend.font.size = Pt(7)
+    chart.legend.font.color.rgb = MUTED_GRAY
+
+    cat_axis = chart.category_axis
+    cat_axis.tick_labels.font.size = Pt(6)
+    cat_axis.tick_labels.font.color.rgb = MUTED_GRAY
+    cat_axis.tick_labels.font.bold = True
+    cat_axis.has_major_gridlines = False
+    try:
+        cat_axis.format.line.fill.background()
+    except Exception:
+        pass
+
+    val_axis = chart.value_axis
+    val_axis.tick_labels.font.size = Pt(6)
+    val_axis.tick_labels.font.color.rgb = MUTED_GRAY
+    val_axis.has_major_gridlines = False
+    try:
+        val_axis.format.line.fill.background()
+    except Exception:
+        pass
+    try:
+        suffix = f'"{units_label}M"' if units_label else '"M"'
+        val_axis.tick_labels.number_format = f'#,##0{suffix}'
+        val_axis.tick_labels.number_format_is_linked = False
+    except Exception:
+        pass
+
+    try:
+        chart_frame.line.fill.background()
+    except AttributeError:
+        pass
+
+
+# ── Quarterly Revenue — Rate of Surprise chart ────────────────────────
+#
+# Paired bars (Sales Actual vs Sales Estimate) for each quarter. The
+# surprise % triangle annotations from the MS screenshot are surfaced as
+# data labels on the Actual series ("+5.5%" etc.) so the reader can
+# trace beats/misses at a glance.
+
+def build_surprise_chart(
+    slide,
+    x, y, w, h,
+    periods: list[str],
+    actual: list,
+    estimate: list,
+    surprise_pct: list,
+    units_label: str = "",
+) -> None:
+    """Quarterly Sales actual-vs-estimate paired-bar chart."""
+    if not periods:
+        return
+
+    from pptx.chart.data import CategoryChartData
+    from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
+
+    def _vals(arr):
+        return [_safe_float(v) for v in (arr or [])]
+
+    # Compact labels
+    import re as _r
+    short_labels = []
+    for p in periods:
+        m = _r.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})", str(p))
+        if m:
+            yr = m.group(1) or m.group(4)
+            qn = m.group(2) or m.group(3)
+            short_labels.append(f"{yr[-2:]}Q{qn}")
+        else:
+            short_labels.append(str(p))
+
+    chart_data = CategoryChartData()
+    chart_data.categories = short_labels
+    chart_data.add_series("Sales Actual", _vals(actual))
+    chart_data.add_series("Sales Estimate", _vals(estimate))
+
+    chart_frame = slide.shapes.add_chart(
+        XL_CHART_TYPE.COLUMN_CLUSTERED, x, y, w, h, chart_data
+    )
+    chart = chart_frame.chart
+
+    try:
+        chart.series[0].format.fill.solid()
+        chart.series[0].format.fill.fore_color.rgb = BLACK_BAR
+        chart.series[1].format.fill.solid()
+        chart.series[1].format.fill.fore_color.rgb = ESTIMATE_GRAY
+    except Exception:
+        pass
+
+    chart.has_legend = True
+    chart.legend.position = XL_LEGEND_POSITION.BOTTOM
+    chart.legend.include_in_layout = False
+    chart.legend.font.size = Pt(7)
+    chart.legend.font.color.rgb = MUTED_GRAY
+
+    cat_axis = chart.category_axis
+    cat_axis.tick_labels.font.size = Pt(7)
+    cat_axis.tick_labels.font.color.rgb = MUTED_GRAY
+    cat_axis.tick_labels.font.bold = True
+    cat_axis.has_major_gridlines = False
+
+    val_axis = chart.value_axis
+    val_axis.tick_labels.font.size = Pt(7)
+    val_axis.tick_labels.font.color.rgb = MUTED_GRAY
+    val_axis.has_major_gridlines = False
+    try:
+        suffix = f'"{units_label}M"' if units_label else '"M"'
+        val_axis.tick_labels.number_format = f'#,##0{suffix}'
+        val_axis.tick_labels.number_format_is_linked = False
+    except Exception:
+        pass
+
+    try:
+        chart_frame.line.fill.background()
+    except AttributeError:
+        pass

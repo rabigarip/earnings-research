@@ -16,9 +16,12 @@ from src.models.report_context import (
     BrokerAction,
     CompositeRating,
     CourseRange,
+    IncomeEvolutionData,
     PeerRow,
     PerformanceCell,
     PriceActionData,
+    QuarterlyIncomeSeries,
+    QuarterlySurpriseSeries,
     RatingsData,
     SectorComparisonData,
 )
@@ -266,4 +269,148 @@ def build_price_action(
         broker_actions=broker_actions,
         covering_brokers=covering_brokers,
         has_data=has_perf or has_actions or has_extremes,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Slide 4 (NEW): Income Statement Evolution & Surprise
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Trim the quarterly grid to the last N quarters that actually fit on the
+# slide. MS publishes 20+ quarters; the chart becomes unreadable beyond
+# ~16 quarter labels in our portrait layout.
+_MAX_QUARTERS_INCOME = 18
+
+
+def _last_actual_index(periods: list[str], dates: list) -> int:
+    """Return the index of the LAST quarter with a non-empty announcement_date.
+
+    Mirrors `_resolve_annual_indices`'s actual-detection rule. Returns -1
+    when every period is an estimate (no actuals).
+    """
+    last = -1
+    for i, _ in enumerate(periods):
+        d = dates[i] if i < len(dates) else None
+        has_date = d and str(d).strip() not in ("", "-", "None")
+        if has_date:
+            last = i
+    return last
+
+
+def _safe_div(num: Optional[float], den: Optional[float]) -> Optional[float]:
+    if num is None or den is None or not den:
+        return None
+    try:
+        return float(num) / float(den) * 100.0
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def build_income_evolution(
+    ms_quarterly_forecasts: dict | None,
+    ms_calendar_events: dict | None,
+    units_label: str = "",
+) -> IncomeEvolutionData:
+    """Build the new "Income Statement Evolution & Surprise" slide payload.
+
+    Two independent panels:
+
+    1. Quarterly income series — from `ms_annual_forecasts.quarterly`
+       (which `fetch_financial_forecast_series` emits). Trimmed to the
+       most-recent _MAX_QUARTERS_INCOME quarters so the chart fits.
+       Margins are derived (net = NI/Sales, operating = EBIT/Sales).
+
+    2. Quarterly surprise series — from
+       `ms_calendar_events.quarterly_results`. Surfaces only the Sales
+       (net_sales) row's `released` / `forecast` / `spread_pct`.
+
+    Either source alone is enough to render the slide.
+    """
+    quarterly_income: Optional[QuarterlyIncomeSeries] = None
+    quarterly_surprise: Optional[QuarterlySurpriseSeries] = None
+
+    # ── Quarterly income chart ──
+    if isinstance(ms_quarterly_forecasts, dict):
+        qb = ms_quarterly_forecasts.get("quarterly", {}) or {}
+        periods = list(qb.get("periods") or [])
+        if periods:
+            dates = list(qb.get("announcement_dates") or [])
+            sales = list(qb.get("net_sales") or [None] * len(periods))
+            ebit = list(qb.get("ebit") or [None] * len(periods))
+            net_income = list(qb.get("net_income") or [None] * len(periods))
+
+            # Trim to most-recent N quarters
+            n = min(_MAX_QUARTERS_INCOME, len(periods))
+            sl = slice(-n, None)
+            tp = periods[sl]
+            td = dates[sl] if dates else [None] * n
+            ts = sales[sl] if sales else [None] * n
+            te = ebit[sl] if ebit else [None] * n
+            tn = net_income[sl] if net_income else [None] * n
+
+            op_margin = [_safe_div(e, s) for e, s in zip(te, ts)]
+            net_margin = [_safe_div(ni, s) for ni, s in zip(tn, ts)]
+
+            quarterly_income = QuarterlyIncomeSeries(
+                periods=tp,
+                revenue=ts,
+                ebit=te,
+                net_income=tn,
+                operating_margin_pct=op_margin,
+                net_margin_pct=net_margin,
+                actuals_boundary=_last_actual_index(tp, td),
+                units_label=units_label,
+            )
+
+    # ── Quarterly surprise chart ──
+    if isinstance(ms_calendar_events, dict):
+        qr = ms_calendar_events.get("quarterly_results") or {}
+        if isinstance(qr, dict):
+            quarters = list(qr.get("quarters") or [])
+            rows = qr.get("rows") or []
+            sales_row = next(
+                (r for r in rows
+                 if isinstance(r, dict) and r.get("metric_key") == "net_sales"),
+                None,
+            )
+            if quarters and sales_row:
+                by_quarter = sales_row.get("by_quarter") or []
+                actuals: list[Optional[float]] = []
+                estimates: list[Optional[float]] = []
+                surprise: list[Optional[float]] = []
+                kept_periods: list[str] = []
+                for i, q in enumerate(quarters):
+                    cell = by_quarter[i] if i < len(by_quarter) else None
+                    if not isinstance(cell, dict):
+                        continue
+                    a = cell.get("released")
+                    e = cell.get("forecast")
+                    sp = cell.get("spread_pct")
+                    # Skip quarters with neither side populated.
+                    if a is None and e is None:
+                        continue
+                    kept_periods.append(str(q))
+                    actuals.append(a)
+                    estimates.append(e)
+                    surprise.append(sp)
+                if kept_periods:
+                    quarterly_surprise = QuarterlySurpriseSeries(
+                        periods=kept_periods,
+                        actual=actuals,
+                        estimate=estimates,
+                        surprise_pct=surprise,
+                        units_label=units_label,
+                    )
+
+    has_income = quarterly_income is not None and any(
+        v is not None for v in quarterly_income.revenue
+    )
+    has_surprise = quarterly_surprise is not None and any(
+        v is not None for v in quarterly_surprise.actual
+    )
+
+    return IncomeEvolutionData(
+        quarterly_income=quarterly_income if has_income else None,
+        quarterly_surprise=quarterly_surprise if has_surprise else None,
+        has_data=has_income or has_surprise,
     )
