@@ -205,9 +205,43 @@ def _compute_memo(
             else:
                 next_quarter_label = f"{m.group(3)} Q{m.group(4)}"
     if not next_quarter_label and ms_quarterly_forecasts:
+        # The next quarter to be reported is the FIRST period that does NOT
+        # carry an announcement_date (i.e. not yet released). Picking
+        # `periods[-1]` (the furthest-out forecast) was the prior bug — for
+        # tickers like 2020.SR where MS publishes 3+ quarters of forward
+        # estimates, that fed Q4 26 into the cover label and the YoY delta
+        # while the slide-2 cards correctly used Q2 26 (the actual next
+        # release). This mirrors `_resolve_annual_indices` in
+        # build_report_context.py so both paths agree.
         qtr = ms_quarterly_forecasts.get("quarterly", {})
         periods = qtr.get("periods", [])
-        if periods:
+        dates = qtr.get("announcement_dates", []) or []
+        next_idx = None
+        for i, _ in enumerate(periods):
+            has_date = (
+                i < len(dates)
+                and dates[i]
+                and str(dates[i]).strip() not in ("", "-", "None")
+            )
+            if not has_date:
+                next_idx = i
+                break
+        # Normalize "2026Q2" → "2026 Q2" for downstream regex matching.
+        # Both formats already match the (\d{4})\s*Q(\d) regex used later,
+        # but the spaced form is what the memo's other paths emit.
+        if next_idx is not None and next_idx < len(periods):
+            raw = str(periods[next_idx])
+            import re as _rq2
+            m = _rq2.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})", raw, _rq2.I)
+            if m:
+                yr = m.group(1) or m.group(4)
+                qn = m.group(2) or m.group(3)
+                next_quarter_label = f"{yr} Q{qn}"
+            else:
+                next_quarter_label = raw
+        elif periods:
+            # Fallback to the original behaviour only when every quarter
+            # has an announcement_date (everything reported, none upcoming).
             next_quarter_label = periods[-1]
     out["next_quarter_label"] = next_quarter_label
     # Short form e.g. 1Q26
