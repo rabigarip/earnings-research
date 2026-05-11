@@ -436,20 +436,67 @@ def _refresh_one(ticker: str, config: CalendarConfig) -> str:
     # Auto-resolve the MarketScreener slug if the seed file doesn't carry
     # one. The `company_master.json` ships with `marketscreener_id`
     # populated for only ~7 of ~600 tickers; the rest get resolved
-    # lazily via ISIN → MS search → validation. Resolution writes the
-    # slug back to the DB, so subsequent refresh runs skip this step
-    # and just hit MS directly.
-    if company_row and not (
+    # lazily via ISIN → MS candidate search → validation. When the
+    # ISIN-based path doesn't yield a slug (common for smaller MENA and
+    # SE Asia listings), fall back to MS's `/search/?q=<ticker>`
+    # endpoint and validate the first hit. Resolution writes the slug
+    # back to the DB so subsequent refresh runs skip both steps.
+    needs_resolve = company_row and not (
         (company_row.get("marketscreener_id") or "").strip()
         or (company_row.get("marketscreener_company_url") or "").strip()
-    ):
+    )
+    if needs_resolve:
+        # Step 1 — ISIN-based candidate search.
         try:
             from src.services.entity_resolution import ensure_marketscreener_cached
             updated = ensure_marketscreener_cached(ticker, company_row)
             if updated:
                 company_row = updated
         except Exception as exc:
-            log.info("[calendar] %s slug auto-resolve failed: %s", ticker, exc)
+            log.info("[calendar] %s ISIN slug auto-resolve failed: %s", ticker, exc)
+
+        # Step 2 — if still no slug, fall back to ticker/name search
+        # against MS's public search endpoint. This is the same path
+        # the report orchestrator (fetch_marketscreener_pages.py) uses
+        # and recovers slugs for the ~500 mid/small-cap MENA / SE Asia
+        # tickers MS doesn't index by ISIN. Validate the candidate
+        # against the seed company_row to avoid wrong-entity matches.
+        still_missing = not (
+            (company_row.get("marketscreener_id") or "").strip()
+            or (company_row.get("marketscreener_company_url") or "").strip()
+        )
+        if still_missing:
+            try:
+                from src.providers.marketscreener_pages import resolve_slug_from_search
+                from src.services.entity_resolution import validate_candidate_page
+                from src.storage.db import update_company_marketscreener
+                found_slug = resolve_slug_from_search(
+                    ticker,
+                    company_name=(company_row.get("company_name") or "").strip(),
+                )
+                if found_slug:
+                    candidate_url = f"https://www.marketscreener.com/quote/stock/{found_slug}/"
+                    vr = validate_candidate_page(
+                        company_row, found_slug, candidate_url,
+                        cache_name=f"calendar_validate_{ticker.replace('.', '_')}",
+                    )
+                    if vr.valid:
+                        from datetime import datetime as _dt2, timezone as _tz2
+                        update_company_marketscreener(
+                            ticker=ticker,
+                            marketscreener_company_url=candidate_url,
+                            marketscreener_symbol=ticker,
+                            marketscreener_status="ok",
+                            last_verified=_dt2.now(_tz2.utc).isoformat(),
+                            marketscreener_id=found_slug,
+                        )
+                        # Refresh company_row in memory so the next-step
+                        # fetchers can use the newly-resolved slug.
+                        company_row = dict(company_row)
+                        company_row["marketscreener_id"] = found_slug
+                        company_row["marketscreener_company_url"] = candidate_url
+            except Exception as exc:
+                log.info("[calendar] %s search slug auto-resolve failed: %s", ticker, exc)
 
     got_any = False
     errored = False
