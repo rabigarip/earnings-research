@@ -395,6 +395,11 @@ def get_calendar(
     Defaults to a 60-day window around today if start/end omitted.
     `countries` is an optional comma-separated list of ISO-2 codes.
     `confirmed=1` returns only confirmed events.
+
+    Auto-refresh: when the DB has < 20 events in the requested window
+    (cold start / first visit) and no refresh job is already running,
+    kick off a background backfill so the next page-load has data.
+    This request still returns immediately with whatever's in the DB.
     """
     from src.storage.db import list_calendar_events
 
@@ -415,7 +420,51 @@ def get_calendar(
         countries=country_list,
         confirmed_only=bool(confirmed),
     )
-    return {"start": s, "end": e, "events": events}
+
+    # Auto-trigger a backfill on cold start / sparse DB. Idempotent —
+    # only fires when no other refresh job is already in flight.
+    refresh_started = False
+    try:
+        if len(events) < 20:
+            with _calendar_jobs_lock:
+                any_running = any(
+                    j.get("status") in ("queued", "running")
+                    for j in _calendar_jobs.values()
+                )
+            if not any_running:
+                _kickoff_auto_refresh()
+                refresh_started = True
+    except Exception as exc:
+        log.warning("calendar auto-refresh trigger failed: %s", exc)
+
+    return {
+        "start": s, "end": e, "events": events,
+        "auto_refresh_started": refresh_started,
+    }
+
+
+def _kickoff_auto_refresh() -> str:
+    """Spin up a background refresh job (same path as the manual button).
+
+    Returns the job_id. Idempotent in practice — `get_calendar` only
+    calls this when no other job is running.
+    """
+    import uuid as _uuid
+    job_id = str(_uuid.uuid4())
+    with _calendar_jobs_lock:
+        _calendar_jobs[job_id] = {
+            "status": "queued",
+            "auto": True,
+            "started_at": _dt.utcnow().isoformat() + "Z",
+            "summary": None,
+        }
+    _threading.Thread(
+        target=_run_calendar_refresh_job,
+        args=(job_id, None, False),
+        daemon=True,
+    ).start()
+    log.info("[calendar] auto-refresh job kicked off: %s", job_id)
+    return job_id
 
 
 @app.get("/api/calendar/ticker/{ticker}")

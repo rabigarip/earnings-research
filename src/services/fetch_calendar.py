@@ -219,12 +219,15 @@ def _ms_company_url(company_row: dict | None) -> str:
 
 
 def _fetch_marketscreener(ticker: str, company_row: dict | None) -> dict | None:
-    """Return {event_date, confirmed, source} from MS /calendar/ page, or None.
+    """Return {event_date, confirmed, source} from MS, or None.
 
-    Resolves the MS company URL from either `marketscreener_company_url`
-    (explicit) or `marketscreener_id` (slug). Earlier this only checked the
-    explicit URL field, which silently no-op'd for the entire seeded
-    universe (the seed file uses `marketscreener_id`).
+    Two-stage resolution. The /calendar/ page is silent for most non-US
+    tickers (MS only publishes confirmed dates there for richly-covered
+    names), so we fall back to extrapolating from the historical
+    announcement_dates MS exposes on /finances/. The estimated dates
+    land on the calendar marked `confirmed=False` (UI badges them
+    accordingly) — better than the prior behaviour where 580+ of 600
+    seeded tickers got NO calendar entry at all.
     """
     base = _ms_company_url(company_row)
     if not base:
@@ -233,21 +236,102 @@ def _fetch_marketscreener(ticker: str, company_row: dict | None) -> dict | None:
         from src.providers.marketscreener_pages import fetch_calendar_events
     except ImportError:
         return None
+
+    # Stage 1: try MS /calendar/ for a confirmed next-earnings date.
     try:
         payload, _status = fetch_calendar_events(base, cache_key_prefix=ticker)
     except Exception as exc:
-        log.info("[calendar] %s MS fetch failed: %s", ticker, exc)
+        log.info("[calendar] %s MS /calendar/ fetch failed: %s", ticker, exc)
+        payload = None
+    if payload:
+        date = payload.get("next_expected_earnings_date")
+        if date and re.match(r"\d{4}-\d{2}-\d{2}", str(date)):
+            return {
+                "event_date": str(date)[:10],
+                # MS shows confirmed dates on /calendar/ — treat presence as confirmed.
+                "confirmed": True,
+                "source": "marketscreener",
+            }
+
+    # Stage 2: extrapolate from MS /finances/ quarterly announcement
+    # history. Most non-US tickers don't have /calendar/ data but do
+    # have a rich quarterly history — projecting forward from that
+    # is how we fill the calendar for the bulk of the universe.
+    return _estimate_next_from_finances_history(ticker, base)
+
+
+def _estimate_next_from_finances_history(
+    ticker: str, ms_company_url: str
+) -> dict | None:
+    """Estimate the next earnings date from MS /finances/ historical
+    announcement dates.
+
+    Algorithm:
+      1. Fetch the quarterly grid (announcement_dates list).
+      2. Parse populated dates (skip "-", "", "None" sentinels).
+      3. Compute the median gap between consecutive dates (typically
+         ~91 days, but some tickers report on a non-90-day cadence).
+      4. Project forward from the most recent announcement: last + median.
+      5. Cap at 180 days into the future — beyond that the projection
+         is unreliable and we'd rather show nothing.
+      6. Suppress projections that land in the past (stale data).
+
+    Returns the same dict shape as _fetch_marketscreener for upsert.
+    """
+    try:
+        from src.providers.marketscreener_pages import fetch_financial_forecast_series
+    except ImportError:
+        return None
+    try:
+        payload, _ = fetch_financial_forecast_series(
+            ms_company_url, cache_key_prefix=ticker,
+        )
+    except Exception as exc:
+        log.info("[calendar] %s MS /finances/ extrapolation failed: %s", ticker, exc)
         return None
     if not payload:
         return None
-    date = payload.get("next_expected_earnings_date")
-    if not date or not re.match(r"\d{4}-\d{2}-\d{2}", str(date)):
+
+    qb = payload.get("quarterly") or {}
+    raw_dates = qb.get("announcement_dates") or []
+    parsed: list[datetime] = []
+    for d in raw_dates:
+        if not d:
+            continue
+        s = str(d).strip()
+        if s in ("", "-", "None"):
+            continue
+        for fmt in ("%m/%d/%y", "%m/%d/%Y", "%Y-%m-%d"):
+            try:
+                parsed.append(datetime.strptime(s, fmt))
+                break
+            except ValueError:
+                continue
+    if len(parsed) < 2:
+        return None  # need at least 2 dates to compute a cadence
+
+    parsed.sort()
+    gaps = [
+        (parsed[i + 1] - parsed[i]).days
+        for i in range(len(parsed) - 1)
+    ]
+    gaps = [g for g in gaps if 30 <= g <= 200]
+    if not gaps:
         return None
+    gaps.sort()
+    median_gap = gaps[len(gaps) // 2]
+
+    last = parsed[-1]
+    projected = last + timedelta(days=median_gap)
+    if (projected - datetime.now()).days > 180:
+        return None
+    if projected.date() < datetime.now().date():
+        return None
+
     return {
-        "event_date": str(date)[:10],
-        # MS shows confirmed dates on /calendar/ — treat presence as confirmed.
-        "confirmed": True,
-        "source": "marketscreener",
+        "event_date": projected.date().isoformat(),
+        "confirmed": False,
+        "source": "marketscreener_estimated",
     }
 
 
