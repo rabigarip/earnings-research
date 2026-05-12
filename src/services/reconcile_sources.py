@@ -44,10 +44,12 @@ TRUST_LADDER = [
     "adx",           # exchange direct
     "nse",
     "hkex",
+    "investing",     # Investing.com — for forward estimates / rating split
+                     # it has the richest analyst-aggregate panel of the
+                     # free sources (matches Bloomberg's BEST screen).
     "marketscreener",
     "yahoo",
     "macro",
-    "investing",
 ]
 
 # Sources whose presence alone earns a High-confidence tier — these are

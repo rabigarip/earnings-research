@@ -340,60 +340,73 @@ def _build_estimates_rows(cv: dict) -> list[dict]:
         }
 
     rows = []
-    # EPS row — MS forward dict structure varies; try several keys, fall
-    # back to the most recent historical EPS for context.
-    eps_consensus = None
-    for k in ("eps_2026", "eps_2027", "eps_fy1", "eps_fy2", "eps"):
-        v = fwd.get(k)
-        if isinstance(v, (int, float)):
-            eps_consensus = v
-            break
-    if eps_consensus is None and hist:
-        for v in reversed(hist.get("eps", []) or []):
+
+    def _firstnum(*keys):
+        for k in keys:
+            v = fwd.get(k)
             if isinstance(v, (int, float)):
-                eps_consensus = v
-                break
-    rows.append(_pair("EPS (FY est.)", None, eps_consensus, None))
+                return v
+        return None
 
-    # Revenue (FY est. — MS sometimes provides annual; quarterly is rare)
-    rev = None
-    for k in ("revenue_2026", "revenue_2027", "revenue_fy1", "revenue"):
-        v = fwd.get(k)
-        if isinstance(v, (int, float)):
-            rev = v
-            break
-    rows.append(_pair("Revenue (FY est.)", None, rev, None))
+    def _fmt_money_b(v):
+        """Render a raw money value as e.g. 'SAR 493.3B' when large."""
+        if not isinstance(v, (int, float)):
+            return None
+        if abs(v) >= 1e12: return f"{v/1e12:,.2f}T"
+        if abs(v) >= 1e9:  return f"{v/1e9:,.1f}B"
+        if abs(v) >= 1e6:  return f"{v/1e6:,.0f}M"
+        return f"{v:,.0f}"
 
-    # EBITDA + margin
-    ebitda = None
-    for k in ("ebitda_2026", "ebitda_2027", "ebitda_fy1", "ebitda"):
-        v = fwd.get(k)
-        if isinstance(v, (int, float)):
-            ebitda = v
-            break
-    margin = None
-    if rev and ebitda:
-        try:
-            margin = float(ebitda) / float(rev) * 100
-        except (TypeError, ValueError, ZeroDivisionError):
-            pass
-    rows.append(_pair("EBITDA (FY est.)", None, ebitda, None))
+    # Two-column FY estimates: FY+1 EPS + Revenue + Next-Q EPS.
+    fy1_year = fwd.get("fy1_year") or fwd.get("fy_year") or ""
+    fy2_year = fwd.get("fy2_year") or ""
+    next_q_period = fwd.get("next_q_period") or "Next Q"
+
+    eps_fy1 = _firstnum("eps_fy1", "eps_2026", "eps_2027", "eps")
+    rev_fy1 = _firstnum("revenue_fy1", "revenue_2026", "revenue_2027", "revenue")
+    eps_fy2 = _firstnum("eps_fy2", "eps_2027", "eps_2028")
+    rev_fy2 = _firstnum("revenue_fy2", "revenue_2027", "revenue_2028")
+    eps_q   = _firstnum("eps_next_q")
+    rev_q   = _firstnum("revenue_next_q")
+
     rows.append({
-        "metric": "EBITDA margin",
+        "metric": f"EPS — {next_q_period}",
         "jabal": "—",
-        "consensus": (f"{margin:.1f}%" if margin else "—"),
+        "consensus": (f"{eps_q:.3f}" if eps_q else "—"),
         "delta": "—", "yoy": "—",
     })
-
-    # Net income
-    ni = None
-    for k in ("net_income_2026", "net_income_2027", "net_income_fy1", "net_income"):
-        v = fwd.get(k)
-        if isinstance(v, (int, float)):
-            ni = v
-            break
-    rows.append(_pair("Net income (FY est.)", None, ni, None))
-    # Dividend
+    rows.append({
+        "metric": f"Revenue — {next_q_period}",
+        "jabal": "—",
+        "consensus": (_fmt_money_b(rev_q) or "—"),
+        "delta": "—", "yoy": "—",
+    })
+    rows.append({
+        "metric": f"EPS — FY{fy1_year}" if fy1_year else "EPS (FY est.)",
+        "jabal": "—",
+        "consensus": (f"{eps_fy1:.3f}" if eps_fy1 else "—"),
+        "delta": "—", "yoy": "—",
+    })
+    rows.append({
+        "metric": f"Revenue — FY{fy1_year}" if fy1_year else "Revenue (FY est.)",
+        "jabal": "—",
+        "consensus": (_fmt_money_b(rev_fy1) or "—"),
+        "delta": "—", "yoy": "—",
+    })
+    if eps_fy2 or rev_fy2:
+        rows.append({
+            "metric": f"EPS — FY{fy2_year}" if fy2_year else "EPS (FY+1 est.)",
+            "jabal": "—",
+            "consensus": (f"{eps_fy2:.3f}" if eps_fy2 else "—"),
+            "delta": "—", "yoy": "—",
+        })
+        rows.append({
+            "metric": f"Revenue — FY{fy2_year}" if fy2_year else "Revenue (FY+1)",
+            "jabal": "—",
+            "consensus": (_fmt_money_b(rev_fy2) or "—"),
+            "delta": "—", "yoy": "—",
+        })
+    # Dividend yield (TTM, from canonical)
     div_y = (cv.get("dividend_yield").value
               if cv.get("dividend_yield") else None)
     rows.append({"metric": "Dividend yield (TTM)",
@@ -412,9 +425,33 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
     cv = get_all_fields(ticker)
     commodities_obs = get_observations_by_provider(ticker, "commodities")
     macro_obs       = get_observations_by_provider(ticker, "macro")
+    investing_obs   = get_observations_by_provider(ticker, "investing")
 
     summary = _template_exec_summary(cv, commodities_obs, macro_obs)
     rows = _build_estimates_rows(cv)
+
+    # Surface Investing's surprise history as a track-record catalyst line.
+    surprise = (investing_obs.get("income_statement_quarterly") or {}).get(
+        "surprise_history", [])
+    track_record_catalyst = None
+    if surprise:
+        beats = sum(1 for r in surprise[:4]
+                     if isinstance(r.get("eps_surprise_pct"), (int, float))
+                     and r["eps_surprise_pct"] > 0)
+        n = min(4, len(surprise))
+        last = surprise[0]
+        last_dir = "beat" if (last.get("eps_surprise_pct") or 0) > 0 else "missed"
+        last_pct = abs(last.get("eps_surprise_pct") or 0)
+        track_record_catalyst = (
+            f"EPS {last_dir} consensus by {last_pct:.1f}% last quarter; "
+            f"{beats} of last {n} quarters above estimates"
+        )
+    default_catalysts = [
+        track_record_catalyst or
+        "Positive quarterly surprise consistent with prior track record",
+        "Constructive guidance on H2 demand and pricing outlook",
+        "Capex/project milestones tracking on schedule",
+    ]
 
     from datetime import datetime
     return ThesisData(
@@ -424,11 +461,7 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
             "Estimates: Jabal Research  ·  "
             "Consensus: MarketScreener  ·  Bps = basis points"
         ),
-        catalysts=catalysts or [
-            "Positive quarterly surprise consistent with prior track record",
-            "Constructive guidance on H2 demand and pricing outlook",
-            "Capex/project milestones tracking on schedule",
-        ],
+        catalysts=catalysts or default_catalysts,
         risks=risks or [
             "Cautious management tone could validate target-price gap",
             "Feedstock / input cost volatility pressures margin trajectory",
