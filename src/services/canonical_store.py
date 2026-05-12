@@ -109,6 +109,42 @@ def get_freshness(ticker: str, field: str) -> Optional[timedelta]:
     return cv.age if cv else None
 
 
+def get_observations_by_provider(ticker: str, provider: str) -> dict[str, Any]:
+    """Return the latest observation per field for a specific provider.
+
+    Used by the slide renderer to pull SUPPLEMENTARY context that lost
+    the trust-ladder fight in reconciliation (commodities, ishares ETF
+    proxies, macro overlays). The reconciled canonical value reflects
+    the primary source; this helper exposes the side data that the
+    primary obscured.
+
+    Returns {field: value} where value is the JSON-decoded observation
+    payload (or None if the field has only errored observations)."""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT field, value_json, observed_at
+            FROM coverage_observations
+            WHERE ticker = ? AND provider = ? AND value_json IS NOT NULL
+              AND COALESCE(error, '') = ''
+            ORDER BY observed_at DESC
+            """,
+            (ticker, provider),
+        ).fetchall()
+    finally:
+        conn.close()
+    out: dict[str, Any] = {}
+    for r in rows:
+        if r["field"] in out:
+            continue   # we want the most-recent per field
+        try:
+            out[r["field"]] = json.loads(r["value_json"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            out[r["field"]] = r["value_json"]
+    return out
+
+
 def upsert_reconciled(
     ticker: str, field: str, canonical_value: Any, canonical_source: str,
     confidence: str, sources_with_value: list[str], sources_agreeing: list[str],

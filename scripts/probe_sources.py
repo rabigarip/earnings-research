@@ -70,6 +70,18 @@ def _load_providers(only: set[str] | None):
             providers["hkex"] = HKEXProvider()
         except Exception as exc:
             print(f"  [skip] hkex: {exc}", file=sys.stderr)
+    if not only or "ishares" in only:
+        try:
+            from src.providers.probe_ishares import iSharesProvider
+            providers["ishares"] = iSharesProvider()
+        except Exception as exc:
+            print(f"  [skip] ishares: {exc}", file=sys.stderr)
+    if not only or "commodities" in only:
+        try:
+            from src.providers.probe_commodities import CommoditiesProvider
+            providers["commodities"] = CommoditiesProvider()
+        except Exception as exc:
+            print(f"  [skip] commodities: {exc}", file=sys.stderr)
     if "investing" in (only or set()):  # only on explicit opt-in (non-headless)
         try:
             from src.providers.probe_investing import InvestingProvider

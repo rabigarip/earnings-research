@@ -61,6 +61,59 @@ INDICATORS = {
 }
 
 
+# IMF WEO (World Economic Outlook) public datamapper — adds FORECAST
+# values for GDP and inflation that World Bank doesn't carry. The
+# datamapper /api/v1 endpoint is anonymous JSON with one indicator per
+# call. We surface forecast values for the next two calendar years so
+# the slide can show "2026E / 2027E" alongside the WB latest actual.
+_IMF_BASE = "https://www.imf.org/external/datamapper/api/v1"
+_IMF_INDICATORS = {
+    "gdp_growth_pct_fcst":  "NGDP_RPCH",   # Real GDP growth, %
+    "inflation_pct_fcst":   "PCPIPCH",     # Inflation, CPI, %
+    "current_account_pct":  "BCA_NGDPD",   # Current account, % of GDP
+}
+
+
+def _imf_fetch(iso3: str, indicator: str) -> Optional[dict]:
+    """One IMF datamapper call. Returns latest year's value + the
+    next-year forecast where available. The IMF publishes WEO twice a
+    year (Apr / Oct) and includes future-year forecasts alongside
+    historical actuals."""
+    url = f"{_IMF_BASE}/{indicator}/{iso3}"
+    try:
+        resp = requests.get(url, timeout=15)
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+    except (requests.RequestException, ValueError):
+        return None
+    values = data.get("values", {}).get(indicator, {}).get(iso3, {})
+    if not values:
+        return None
+    pairs = []
+    for yr, val in values.items():
+        try:
+            pairs.append((int(yr), float(val)))
+        except (TypeError, ValueError):
+            continue
+    if not pairs:
+        return None
+    pairs.sort()
+    latest_year, latest_val = pairs[-1]
+    next_year = next_val = None
+    for yr, val in pairs:
+        if yr > latest_year:
+            next_year, next_val = yr, val
+            break
+    return {
+        "value":      round(latest_val, 2),
+        "year":       latest_year,
+        "next_value": round(next_val, 2) if next_val is not None else None,
+        "next_year":  next_year,
+        "indicator":  indicator,
+    }
+
+
 def _wb_fetch(iso3: str, indicator: str) -> Optional[dict]:
     """One World Bank Open Data call. Returns the most recent
     non-null observation as {value, year, indicator} or None.
@@ -121,14 +174,26 @@ class MacroProvider(Provider):
 
     def _macro_for(self, iso3: str) -> dict:
         out = {}
+        # World Bank: actuals
         for key, code in INDICATORS.items():
-            ck = (iso3, code)
+            ck = ("wb", iso3, code)
             if ck not in self._cache:
                 self._cache[ck] = _wb_fetch(iso3, code)
             obs = self._cache[ck]
             if obs:
                 out[key] = obs["value"]
                 out[f"{key}_year"] = obs["year"]
+        # IMF WEO: forecasts (+ current-account ratio)
+        for key, code in _IMF_INDICATORS.items():
+            ck = ("imf", iso3, code)
+            if ck not in self._cache:
+                self._cache[ck] = _imf_fetch(iso3, code)
+            obs = self._cache[ck]
+            if obs:
+                out[key]              = obs["value"]
+                out[f"{key}_year"]    = obs["year"]
+                out[f"{key}_next"]    = obs["next_value"]
+                out[f"{key}_next_year"] = obs["next_year"]
         return out
 
     # ── Only company_profile is implemented for the macro overlay. ──
@@ -157,5 +222,13 @@ class MacroProvider(Provider):
             "population":        snap.get("population"),
             "fx_lcu_per_usd":    snap.get("fx_lcu_per_usd"),
             "macro_year":        snap.get("gdp_growth_pct_year"),
+            # IMF WEO forecasts
+            "gdp_growth_fcst_pct":      snap.get("gdp_growth_pct_fcst"),
+            "gdp_growth_fcst_year":     snap.get("gdp_growth_pct_fcst_year"),
+            "gdp_growth_fcst_next_pct": snap.get("gdp_growth_pct_fcst_next"),
+            "gdp_growth_fcst_next_year": snap.get("gdp_growth_pct_fcst_next_year"),
+            "inflation_fcst_pct":       snap.get("inflation_pct_fcst"),
+            "inflation_fcst_next_pct":  snap.get("inflation_pct_fcst_next"),
+            "current_account_pct":      snap.get("current_account_pct"),
         }
         return profile, "macro", snap.get("gdp_growth_pct_year") or "", raw_id

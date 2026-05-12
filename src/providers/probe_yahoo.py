@@ -113,8 +113,67 @@ class YahooProvider(Provider):
             })
         raw_id = persist_raw(self.name, ticker, "historical_prices", records)
         info = t.info or {}
+
+        # Derive perf_* deltas + 52w range + YTD from the close series.
+        # The renderer reads these from the canonical value dict, so we
+        # surface them here (compact summary) rather than asking the
+        # consumer to re-parse the full bar list. Full bars stay in the
+        # persisted raw_response for any deeper analysis.
+        closes = [r["close"] for r in records if r["close"] is not None]
+        dates  = [r["date"]  for r in records if r["close"] is not None]
+        current = closes[-1] if closes else None
+
+        def _at_days_back(n_trading_days: int):
+            if not closes or n_trading_days >= len(closes):
+                return None
+            return closes[-1 - n_trading_days]
+
+        def _pct(now, then):
+            if now is None or then is None or then == 0:
+                return None
+            return round((now / then - 1.0) * 100, 2)
+
+        # ~21 trading days ≈ 1 month
+        perf_1d  = _pct(current, _at_days_back(1))
+        perf_1w  = _pct(current, _at_days_back(5))
+        perf_1m  = _pct(current, _at_days_back(21))
+        perf_3m  = _pct(current, _at_days_back(63))
+        perf_6m  = _pct(current, _at_days_back(126))
+
+        # YTD: first close of the current calendar year
+        ytd_anchor = None
+        if dates and current is not None:
+            yr = dates[-1][:4]
+            for d, c in zip(dates, closes):
+                if d.startswith(yr):
+                    ytd_anchor = c
+                    break
+        perf_ytd = _pct(current, ytd_anchor)
+
+        rng_low  = min(closes) if closes else None
+        rng_high = max(closes) if closes else None
+
+        summary = {
+            "n_bars": len(records),
+            "first": records[0]["date"],
+            "last":  records[-1]["date"],
+            "perf_1d":  perf_1d,
+            "perf_1w":  perf_1w,
+            "perf_1m":  perf_1m,
+            "perf_3m":  perf_3m,
+            "perf_6m":  perf_6m,
+            "perf_ytd": perf_ytd,
+            "range_52w_low":  rng_low,
+            "range_52w_high": rng_high,
+            # Compact close-only series for the slide-3 line chart
+            # (every 5th bar to keep canonical_store size manageable)
+            "close_series": [
+                {"date": d, "close": c}
+                for d, c in list(zip(dates, closes))[::5]
+            ],
+        }
         return (
-            {"n_bars": len(records), "first": records[0]["date"], "last": records[-1]["date"]},
+            summary,
             (info.get("currency") or ""),
             records[-1]["date"],
             raw_id,
