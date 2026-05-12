@@ -92,6 +92,21 @@ _IR_PDF_URLS: dict[str, dict[str, str]] = {
         "period_label": "Q1 2025",
         "currency": "USD",  # OQEP reports in USD per IPO prospectus
     },
+    # ADCB publishes its quarterly statements at a date-pathed URL like
+    # /en/multimedia/pdfs/<yyyy>/<month>/FinancialStatements-Q<n>-<yyyy>.pdf
+    # The IR landing page is Cloudflare-gated, but file URLs are not.
+    "ADCB.AE": {
+        "url": "https://www.adcb.com/en/multimedia/pdfs/2026/april/FinancialStatements-Q1-2026.pdf",
+        "period_label": "Q1 2026",
+        "currency": "AED",
+    },
+    # ADNOC Drilling uses ASHX wrapper URLs that proxy to PDFs.
+    # File is signed (audited) Q1 2026 financial statements (English).
+    "ADNOCDRILL.AE": {
+        "url": "https://adnocdrilling.ae/-/media/drilling/files/2026/1q-2026-results/adnoc-drilling-1q26-financial-statements_en.ashx",
+        "period_label": "Q1 2026",
+        "currency": "USD",
+    },
 }
 
 

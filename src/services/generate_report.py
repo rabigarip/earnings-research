@@ -1,4 +1,15 @@
-"""Earnings preview: PPTX output + sector IV helpers (imported by qa_engine)."""
+"""Earnings preview: PPTX output + sector IV helpers (imported by qa_engine).
+
+Two render paths coexist:
+
+1. Legacy renderer (`_write_preview_pptx_portrait`) — the original
+   12-step deck built directly from `ReportPayload`.
+2. Jabal renderer (`_write_jabal_preview`) — Stage 2 3-slide deck that
+   reads from `canonical_store`. Selected when `JABAL_RENDERER=1` env
+   var is set (or `cfg.report.renderer == 'jabal'`).
+
+Legacy stays for backwards-compat; new work should pick Jabal.
+"""
 from __future__ import annotations
 import os
 from datetime import datetime
@@ -9,6 +20,79 @@ from src.models.report_payload import ReportPayload
 from src.models.step_result import Status, StepResult, StepTimer
 
 STEP = "generate_report"
+
+
+def _use_jabal_renderer() -> bool:
+    """Switch which renderer drives the final PPTX output.
+
+    Order: env override > config flag > default off.
+    """
+    if os.environ.get("JABAL_RENDERER") in {"1", "true", "yes", "on"}:
+        return True
+    try:
+        return getattr(cfg.report, "renderer", "legacy") == "jabal"
+    except (AttributeError, KeyError):
+        return False
+
+
+def _write_jabal_preview(payload: ReportPayload, out_path: Path,
+                          memo_data: dict | None) -> None:
+    """Render the 3-slide Jabal deck via the new render_jabal_* modules,
+    reading data from canonical_store.
+
+    Bootstrap step: if canonical_store has no rows for this ticker (e.g.
+    fresh DB or first run on a new name), we kick off a daily-cadence
+    refresh against the standard provider set so the slides aren't empty.
+    """
+    from pptx import Presentation
+    from pptx.util import Inches as _In
+    from src.services.canonical_store import get_all_fields
+    from src.services.jabal_design_tokens import PAGE_W_IN, PAGE_H_IN
+    from src.services.render_jabal_snapshot import (
+        render_snapshot_slide, build_snapshot_data,
+    )
+    from src.services.render_jabal_thesis import (
+        render_thesis_slide, build_thesis_data,
+    )
+    from src.services.render_jabal_valuation import (
+        render_valuation_slide, build_valuation_data,
+    )
+
+    ticker = payload.company.ticker
+    if not get_all_fields(ticker):
+        # Run a quick refresh across the default-on providers so the slides
+        # populate. We intentionally exclude Investing.com (Playwright) and
+        # IR-PDF (needs curated URL) from the auto-bootstrap.
+        import subprocess, sys
+        for cadence in ("daily", "weekly", "quarterly"):
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "scripts.daily_refresh",
+                     f"--cadence={cadence}",
+                     f"--tickers={ticker}",
+                     "--only=yahoo,marketscreener,macro,ishares,commodities"],
+                    timeout=180, check=False,
+                )
+            except Exception:
+                continue
+
+    # Stage 2 period defaulting — caller can override via memo_data.
+    period_label = (memo_data or {}).get("period_label") or "Earnings Preview"
+    report_date  = (memo_data or {}).get("report_date") or "TBA"
+
+    snap      = build_snapshot_data(ticker, period_label=period_label,
+                                       report_date=report_date)
+    thesis    = build_thesis_data(ticker)
+    valuation = build_valuation_data(ticker)
+
+    prs = Presentation()
+    prs.slide_width  = _In(PAGE_W_IN)
+    prs.slide_height = _In(PAGE_H_IN)
+    render_snapshot_slide(prs, snap)
+    render_thesis_slide(prs, thesis)
+    render_valuation_slide(prs, valuation)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    prs.save(str(out_path))
 
 # Minimum character length for IV paragraphs before using fallback (with Recent Context we accept shorter LLM output)
 MIN_IV_LEN_WITH_RECENT_CONTEXT = 20
@@ -632,7 +716,18 @@ def run(payload: ReportPayload, memo_data: dict | None = None, qa_audit: dict | 
             # Add automated data validation warnings
             if data_warnings:
                 quality_flags.extend(data_warnings)
-            _write_preview_pptx_portrait(payload, out_path, memo_data, iv_text, watch, quality_flags or None)
-            return StepResult(step_name=STEP, status=Status.SUCCESS, source="pptx", message=f"Report saved → {out_path}", data=str(out_path), elapsed_seconds=t.elapsed)
+            if _use_jabal_renderer():
+                # New Stage-2 3-slide deck — reads exclusively from
+                # canonical_store. Bootstraps a quick refresh if the
+                # store has no rows for this ticker.
+                _write_jabal_preview(payload, out_path, memo_data)
+                source_tag = "pptx-jabal"
+            else:
+                _write_preview_pptx_portrait(
+                    payload, out_path, memo_data, iv_text, watch,
+                    quality_flags or None,
+                )
+                source_tag = "pptx"
+            return StepResult(step_name=STEP, status=Status.SUCCESS, source=source_tag, message=f"Report saved → {out_path}", data=str(out_path), elapsed_seconds=t.elapsed)
         except Exception as exc:
             return StepResult(step_name=STEP, status=Status.FAILED, source="pptx", message="Report generation failed", error_detail=str(exc), elapsed_seconds=t.elapsed)
