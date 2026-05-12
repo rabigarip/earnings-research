@@ -430,6 +430,25 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
     summary = _template_exec_summary(cv, commodities_obs, macro_obs)
     rows = _build_estimates_rows(cv)
 
+    # Compose the table footnote: lead with the next-Q anchor (date,
+    # consensus source, analyst count) since that's the strongest data
+    # point we have for the full panel.
+    val_fwd = cv.get("valuation_forward")
+    rs = cv.get("rating_split")
+    fwd_dict = val_fwd.value if val_fwd and isinstance(val_fwd.value, dict) else {}
+    rs_dict  = rs.value if rs and isinstance(rs.value, dict) else {}
+    n_an = int(rs_dict.get("total", 0) or 0)
+    nq_period = fwd_dict.get("next_q_period") or ""
+    nq_date   = fwd_dict.get("next_q_report_date") or ""
+    fwd_source = (val_fwd.canonical_source if val_fwd else "—").title()
+    footnote_bits = []
+    if nq_period and nq_date:
+        footnote_bits.append(f"Next print: {nq_date} (period {nq_period})")
+    footnote_bits.append(f"Consensus: {fwd_source}")
+    if n_an:
+        footnote_bits.append(f"{n_an} analysts covering")
+    estimates_footnote = "  ·  ".join(footnote_bits)
+
     # Surface Investing's surprise history as a track-record catalyst line.
     surprise = (investing_obs.get("income_statement_quarterly") or {}).get(
         "surprise_history", [])
@@ -457,10 +476,7 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
     return ThesisData(
         exec_summary_body=summary,
         estimates_rows=rows,
-        estimates_footnote=(
-            "Estimates: Jabal Research  ·  "
-            "Consensus: MarketScreener  ·  Bps = basis points"
-        ),
+        estimates_footnote=estimates_footnote,
         catalysts=catalysts or default_catalysts,
         risks=risks or [
             "Cautious management tone could validate target-price gap",
