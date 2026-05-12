@@ -70,7 +70,18 @@ def _load_providers(only: set[str] | None):
             providers["hkex"] = HKEXProvider()
         except Exception as exc:
             print(f"  [skip] hkex: {exc}", file=sys.stderr)
-    # MSX / BSE / Investing / IR-PDFs slot in here as built.
+    if "investing" in (only or set()):  # only on explicit opt-in (non-headless)
+        try:
+            from src.providers.probe_investing import InvestingProvider
+            providers["investing"] = InvestingProvider()
+        except Exception as exc:
+            print(f"  [skip] investing: {exc}", file=sys.stderr)
+    if "ir_pdf" in (only or set()):  # only on explicit opt-in (needs cached PDFs)
+        try:
+            from src.providers.probe_ir_pdf import IRPDFProvider
+            providers["ir_pdf"] = IRPDFProvider()
+        except Exception as exc:
+            print(f"  [skip] ir_pdf: {exc}", file=sys.stderr)
     return providers
 
 
