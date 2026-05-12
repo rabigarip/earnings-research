@@ -151,8 +151,11 @@ class NSEProvider(Provider):
             "country":  "India",
             "currency": "INR",
         }
-        if not any(profile.values()):
-            raise ValueError("NSE quote had no recognized profile fields")
+        # Require at least one strong identity field. NSE returns 200
+        # with a stub object (only country/currency populated) for
+        # non-Indian tickers — we'd otherwise count those as hits.
+        if not (profile["name"] or profile["symbol"] or profile["isin"]):
+            raise ValueError("NSE quote had no companyName / symbol / ISIN — likely non-Indian ticker")
         return profile, "", "", raw_id
 
     # ── Everything else is not implemented ──

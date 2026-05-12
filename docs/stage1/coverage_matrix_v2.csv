@@ -1,0 +1,781 @@
+ticker,provider,field,value,units,as_of,error,latency_ms,fetched_at,raw_response_id
+2222.SR,yahoo,current_price,27.82,SAR,,,1262.5,2026-05-12T14:23:01.384481+00:00,yahoo/2222_SR/current_price_20260512T142302.json
+2222.SR,yahoo,historical_prices,"{""n_bars"": 251, ""first"": ""2025-05-12"", ""last"": ""2026-05-12""}",SAR,2026-05-12,,130.0,2026-05-12T14:23:02.647245+00:00,yahoo/2222_SR/historical_prices_20260512T142302.json
+2222.SR,yahoo,market_cap,6729864052736.0,SAR,,,0.3,2026-05-12T14:23:02.777368+00:00,yahoo/2222_SR/market_cap_20260512T142302.json
+2222.SR,yahoo,company_profile,"{""name"": ""Saudi Arabian Oil Co."", ""sector"": ""Energy"", ""industry"": ""Oil & Gas Integrated"", ""country"": ""Saudi Arabia"", ""currency"": ""SAR"", ""summary"": ""Saudi Arabian Oil Company operates as an integrated energy and chemical company in the Kingdom of Saudi Arabia and internationally. The company operates through two segments, Upstream and Downstream. The Upstream segment explores, develops, produces, and sells crude oil, condensate, natural gas, and natural gas liquids (NGLs). The Downstream segment produces various chemicals, such as aromatics, olefins, and polyolefins; polyols, isocyanates, and synthetic rubber; methanol, MTBE, glycols, linear"", ""website"": ""https://www.aramco.com""}",,,,0.3,2026-05-12T14:23:02.777724+00:00,yahoo/2222_SR/company_profile_20260512T142302.json
+2222.SR,yahoo,income_statement_annual,"{""n_periods"": 5, ""fields_present"": [""Selling General And Administration"", ""Operating Expense"", ""Gross Profit"", ""Cost Of Revenue"", ""Diluted NI Availto Com Stockholders"", ""Normalized EBITDA"", ""Net Income From Continuing And Discontinued Operation"", ""Diluted Average Shares"", ""Tax Provision"", ""Interest Income""]}",SAR,2025-12-31 00:00:00,,255.0,2026-05-12T14:23:02.778059+00:00,yahoo/2222_SR/income_statement_annual_20260512T142303.json
+2222.SR,yahoo,income_statement_quarterly,"{""n_periods"": 5, ""fields_present"": [""Selling General And Administration"", ""Operating Expense"", ""Gross Profit"", ""Cost Of Revenue"", ""Diluted NI Availto Com Stockholders"", ""Normalized EBITDA"", ""Net Income From Continuing And Discontinued Operation"", ""Diluted Average Shares"", ""Tax Provision"", ""Interest Income""]}",SAR,2025-12-31 00:00:00,,295.9,2026-05-12T14:23:03.033056+00:00,yahoo/2222_SR/income_statement_quarterly_20260512T142303.json
+2222.SR,yahoo,balance_sheet,"{""n_periods"": 5, ""fields_present"": [""Available For Sale Securities"", ""Goodwill"", ""Total Equity Gross Minority Interest"", ""Payables"", ""Total Liabilities Net Minority Interest"", ""Total Assets"", ""Net Debt"", ""Taxes Receivable"", ""Total Non Current Liabilities Net Minority Interest"", ""Long Term Debt""]}",SAR,2025-12-31 00:00:00,,361.1,2026-05-12T14:23:03.329042+00:00,yahoo/2222_SR/balance_sheet_20260512T142303.json
+2222.SR,yahoo,cash_flow,"{""n_periods"": 5, ""fields_present"": [""Capital Expenditure"", ""End Cash Position"", ""Interest Paid Cff"", ""Change In Inventory"", ""Other Non Cash Items"", ""Common Stock Dividend Paid"", ""Issuance Of Capital Stock"", ""Taxes Refund Paid"", ""Gain Loss On Sale Of PPE"", ""Common Stock Payments""]}",SAR,2025-12-31 00:00:00,,321.3,2026-05-12T14:23:03.690123+00:00,yahoo/2222_SR/cash_flow_20260512T142304.json
+2222.SR,yahoo,valuation_historical,"{""trailing_pe"": 19.319443, ""forward_pe"": 16.658684, ""price_to_book"": 4.510376, ""ev_to_ebitda"": 8.143, ""ev_to_revenue"": 4.075}",ratio,,,0.2,2026-05-12T14:23:04.011391+00:00,yahoo/2222_SR/valuation_historical_20260512T142304.json
+2222.SR,yahoo,dividend_yield,491.0,%,,,0.3,2026-05-12T14:23:04.011688+00:00,yahoo/2222_SR/dividend_yield_20260512T142304.json
+2222.SR,yahoo,valuation_forward,"{""forward_pe"": 16.658684, ""forward_eps"": 1.67, ""price_to_sales"": 3.9382923}",ratio,,,0.2,2026-05-12T14:23:04.012041+00:00,yahoo/2222_SR/valuation_forward_20260512T142304.json
+2222.SR,yahoo,target_price,"{""mean"": 29.60106, ""median"": 29.1, ""high"": 35.0, ""low"": 26.5, ""n_analysts"": 18}",SAR,,,0.2,2026-05-12T14:23:04.012290+00:00,yahoo/2222_SR/target_price_20260512T142304.json
+2222.SR,yahoo,rating_split,"{""consensus"": ""buy"", ""n_analysts"": 18}",,,,0.2,2026-05-12T14:23:04.012553+00:00,yahoo/2222_SR/rating_split_20260512T142304.json
+2222.SR,marketscreener,current_price,27.64,SAR,,,1650.0,2026-05-12T14:23:04.012777+00:00,marketscreener/2222_SR/current_price_20260512T142305.json
+2222.SR,marketscreener,historical_prices,,,,not_implemented,0.0,2026-05-12T14:23:05.662162+00:00,
+2222.SR,marketscreener,market_cap,6686321.0,M,,,514.8,2026-05-12T14:23:05.662209+00:00,marketscreener/2222_SR/market_cap_20260512T142306.json
+2222.SR,marketscreener,company_profile,"{""name"": ""Saudi Arabian Oil Company"", ""sector"": ""Energy"", ""industry"": ""Oil & Gas Integrated"", ""country"": ""Saudi Arabia"", ""currency"": ""SAR"", ""summary"": """"}",,,,399.1,2026-05-12T14:23:06.176906+00:00,marketscreener/2222_SR/company_profile_20260512T142306.json
+2222.SR,marketscreener,income_statement_annual,"{""n_periods"": 8, ""periods"": [""FY2021"", ""FY2022"", ""FY2023"", ""FY2024"", ""FY2025"", ""FY2026"", ""FY2027"", ""FY2028""], ""metrics_present"": [""net_sales"", ""ebitda"", ""ebit"", ""ebt"", ""interest_paid"", ""net_income""]}",SAR,FY2028,,320.7,2026-05-12T14:23:06.575965+00:00,marketscreener/2222_SR/income_statement_annual_20260512T142306.json
+2222.SR,marketscreener,income_statement_quarterly,"{""n_periods"": 28, ""periods"": [""2026Q2"", ""2026Q3"", ""2026Q4"", ""2027Q1"", ""2027Q2"", ""2027Q3"", ""2027Q4"", ""2028Q1""], ""metrics_present"": [""net_sales"", ""ebitda"", ""ebit"", ""net_income""]}",SAR,2028Q1,,249.1,2026-05-12T14:23:06.896620+00:00,marketscreener/2222_SR/income_statement_quarterly_20260512T142307.json
+2222.SR,marketscreener,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:23:07.145695+00:00,
+2222.SR,marketscreener,cash_flow,,,,not_implemented,0.0,2026-05-12T14:23:07.145855+00:00,
+2222.SR,marketscreener,valuation_historical,"{""periods"": [""FY2021"", ""FY2022"", ""FY2023"", ""FY2024"", ""FY2025"", ""FY2026"", ""FY2027"", ""FY2028""], ""pe"": [18.1, 11.8, 17.6, 17.2, 16.5, 13.6, 15.1, 15.0], ""pbr"": [6.43, 4.87, 5.2, 4.65, 3.86, 3.95, 3.96, 3.71], ""ev_ebitda"": [8.56, 5.62, 8.17, 7.83, 7.29, 6.57, 7.15, 6.92], ""yield_pct"": [3.91, 4.08, 5.14, 6.33, 5.56, 5.07, 5.5, 5.66]}",ratio,FY2028,,199.8,2026-05-12T14:23:07.145902+00:00,marketscreener/2222_SR/valuation_historical_20260512T142307.json
+2222.SR,marketscreener,dividend_yield,5.66,%,,,232.5,2026-05-12T14:23:07.345936+00:00,marketscreener/2222_SR/dividend_yield_20260512T142307.json
+2222.SR,marketscreener,valuation_forward,"{""pe_2026"": null, ""pe_2027"": 13.6, ""ev_sales_2026"": null, ""yield_2026"": null}",ratio,,,1519.8,2026-05-12T14:23:07.578445+00:00,marketscreener/2222_SR/valuation_forward_20260512T142309.json
+2222.SR,marketscreener,target_price,"{""mean"": 29.86, ""high"": 35.0, ""low"": 26.5, ""n_analysts"": 18}",SAR,,,2828.6,2026-05-12T14:23:09.097832+00:00,marketscreener/2222_SR/target_price_20260512T142311.json
+2222.SR,marketscreener,rating_split,"{""consensus"": ""OUTPERFORM""}",,,,469.2,2026-05-12T14:23:11.925742+00:00,marketscreener/2222_SR/rating_split_20260512T142312.json
+2222.SR,macro,current_price,,,,not_implemented,0.0,2026-05-12T14:23:12.394914+00:00,
+2222.SR,macro,historical_prices,,,,not_implemented,0.0,2026-05-12T14:23:12.394972+00:00,
+2222.SR,macro,market_cap,,,,not_implemented,0.0,2026-05-12T14:23:12.395031+00:00,
+2222.SR,macro,company_profile,"{""country_iso3"": ""SAU"", ""gdp_growth_pct"": 1.99650173436159, ""inflation_pct"": 1.68792112375809, ""population"": 35300280, ""fx_lcu_per_usd"": 3.75, ""macro_year"": ""2024""}",macro,2024,,1429.8,2026-05-12T14:23:12.395078+00:00,macro/2222_SR/company_profile_20260512T142313.json
+2222.SR,macro,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:23:13.824964+00:00,
+2222.SR,macro,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:23:13.825155+00:00,
+2222.SR,macro,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:23:13.825276+00:00,
+2222.SR,macro,cash_flow,,,,not_implemented,0.0,2026-05-12T14:23:13.825367+00:00,
+2222.SR,macro,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:23:13.825544+00:00,
+2222.SR,macro,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:23:13.825636+00:00,
+2222.SR,macro,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:23:13.825729+00:00,
+2222.SR,macro,target_price,,,,not_implemented,0.0,2026-05-12T14:23:13.825821+00:00,
+2222.SR,macro,rating_split,,,,not_implemented,0.0,2026-05-12T14:23:13.825911+00:00,
+2222.SR,adx,current_price,,,,ValueError: 2222.SR not on ADX main market board,714.0,2026-05-12T14:23:13.826006+00:00,
+2222.SR,adx,historical_prices,,,,not_implemented,0.0,2026-05-12T14:23:14.540404+00:00,
+2222.SR,adx,market_cap,,,,ValueError: 2222.SR not on ADX main market board,0.6,2026-05-12T14:23:14.540573+00:00,
+2222.SR,adx,company_profile,,,,ValueError: 2222.SR not in ADX board or listed-companies,8000.8,2026-05-12T14:23:14.541329+00:00,
+2222.SR,adx,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:23:22.541193+00:00,
+2222.SR,adx,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:23:22.541605+00:00,
+2222.SR,adx,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:23:22.541695+00:00,
+2222.SR,adx,cash_flow,,,,not_implemented,0.0,2026-05-12T14:23:22.541772+00:00,
+2222.SR,adx,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:23:22.541844+00:00,
+2222.SR,adx,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:23:22.541914+00:00,
+2222.SR,adx,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:23:22.541985+00:00,
+2222.SR,adx,target_price,,,,not_implemented,0.0,2026-05-12T14:23:22.542052+00:00,
+2222.SR,adx,rating_split,,,,not_implemented,0.0,2026-05-12T14:23:22.542121+00:00,
+2222.SR,nse,current_price,,,,ValueError: priceInfo.lastPrice missing,4507.3,2026-05-12T14:23:22.542190+00:00,
+2222.SR,nse,historical_prices,,,,not_implemented,0.0,2026-05-12T14:23:27.049727+00:00,
+2222.SR,nse,market_cap,,,,ValueError: can't derive marketCap (price or issuedSize missing),0.5,2026-05-12T14:23:27.050312+00:00,
+2222.SR,nse,company_profile,,,,ValueError: NSE quote had no companyName / symbol / ISIN — likely non-Indian ticker,0.5,2026-05-12T14:23:27.051086+00:00,
+2222.SR,nse,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:23:27.051971+00:00,
+2222.SR,nse,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:23:27.052197+00:00,
+2222.SR,nse,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:23:27.052385+00:00,
+2222.SR,nse,cash_flow,,,,not_implemented,0.0,2026-05-12T14:23:27.052590+00:00,
+2222.SR,nse,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:23:27.052733+00:00,
+2222.SR,nse,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:23:27.052890+00:00,
+2222.SR,nse,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:23:27.053034+00:00,
+2222.SR,nse,target_price,,,,not_implemented,0.0,2026-05-12T14:23:27.053169+00:00,
+2222.SR,nse,rating_split,,,,not_implemented,0.0,2026-05-12T14:23:27.053317+00:00,
+2222.SR,hkex,current_price,,,,ValueError: HKEX returned no quote for sym=2222.SR,10376.8,2026-05-12T14:23:27.053498+00:00,
+2222.SR,hkex,historical_prices,,,,not_implemented,0.0,2026-05-12T14:23:37.429841+00:00,
+2222.SR,hkex,market_cap,,,,ValueError: HKEX returned no quote for sym=2222.SR,0.0,2026-05-12T14:23:37.429913+00:00,
+2222.SR,hkex,company_profile,,,,ValueError: HKEX returned no quote for sym=2222.SR,0.0,2026-05-12T14:23:37.429967+00:00,
+2222.SR,hkex,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:23:37.430009+00:00,
+2222.SR,hkex,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:23:37.430048+00:00,
+2222.SR,hkex,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:23:37.430085+00:00,
+2222.SR,hkex,cash_flow,,,,not_implemented,0.0,2026-05-12T14:23:37.430120+00:00,
+2222.SR,hkex,valuation_historical,,,,ValueError: HKEX returned no quote for sym=2222.SR,0.0,2026-05-12T14:23:37.430156+00:00,
+2222.SR,hkex,dividend_yield,,,,ValueError: HKEX returned no quote for sym=2222.SR,0.0,2026-05-12T14:23:37.430196+00:00,
+2222.SR,hkex,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:23:37.430234+00:00,
+2222.SR,hkex,target_price,,,,not_implemented,0.0,2026-05-12T14:23:37.430302+00:00,
+2222.SR,hkex,rating_split,,,,not_implemented,0.0,2026-05-12T14:23:37.430365+00:00,
+ADNOCDRILL.AE,yahoo,current_price,,,,ValueError: no price in info,1311.1,2026-05-12T14:23:37.430409+00:00,
+ADNOCDRILL.AE,yahoo,historical_prices,,,,ValueError: no historical bars,1068.1,2026-05-12T14:23:38.741933+00:00,
+ADNOCDRILL.AE,yahoo,market_cap,,,,ValueError: no marketCap,0.6,2026-05-12T14:23:39.810570+00:00,
+ADNOCDRILL.AE,yahoo,company_profile,,,,ValueError: info empty — Yahoo has no profile for this ticker,0.4,2026-05-12T14:23:39.811408+00:00,
+ADNOCDRILL.AE,yahoo,income_statement_annual,,,,ValueError: no annual income statement,279.5,2026-05-12T14:23:39.811991+00:00,
+ADNOCDRILL.AE,yahoo,income_statement_quarterly,,,,ValueError: no quarterly income statement,353.4,2026-05-12T14:23:40.092245+00:00,
+ADNOCDRILL.AE,yahoo,balance_sheet,,,,ValueError: no balance sheet,354.7,2026-05-12T14:23:40.446440+00:00,
+ADNOCDRILL.AE,yahoo,cash_flow,,,,ValueError: no cash flow,381.9,2026-05-12T14:23:40.801742+00:00,
+ADNOCDRILL.AE,yahoo,valuation_historical,,,,ValueError: no valuation ratios in info,0.4,2026-05-12T14:23:41.184122+00:00,
+ADNOCDRILL.AE,yahoo,dividend_yield,,,,ValueError: no dividend yield,0.2,2026-05-12T14:23:41.184743+00:00,
+ADNOCDRILL.AE,yahoo,valuation_forward,,,,ValueError: no forward valuation fields,0.2,2026-05-12T14:23:41.185118+00:00,
+ADNOCDRILL.AE,yahoo,target_price,,,,ValueError: no targetMeanPrice,0.2,2026-05-12T14:23:41.185478+00:00,
+ADNOCDRILL.AE,yahoo,rating_split,,,,ValueError: no recommendationKey,0.2,2026-05-12T14:23:41.185846+00:00,
+ADNOCDRILL.AE,marketscreener,current_price,1.71,USD,,,2122.0,2026-05-12T14:23:41.186216+00:00,marketscreener/ADNOCDRILL_AE/current_price_20260512T142343.json
+ADNOCDRILL.AE,marketscreener,historical_prices,,,,not_implemented,0.0,2026-05-12T14:23:43.308335+00:00,
+ADNOCDRILL.AE,marketscreener,market_cap,27340.0,M,,,385.9,2026-05-12T14:23:43.308406+00:00,marketscreener/ADNOCDRILL_AE/market_cap_20260512T142343.json
+ADNOCDRILL.AE,marketscreener,company_profile,"{""name"": ""ADNOC Drilling Company P.J.S.C."", ""sector"": ""Energy"", ""industry"": ""Oil & Gas Drilling"", ""country"": ""UAE"", ""currency"": ""USD"", ""summary"": """"}",,,,415.3,2026-05-12T14:23:43.694437+00:00,marketscreener/ADNOCDRILL_AE/company_profile_20260512T142344.json
+ADNOCDRILL.AE,marketscreener,income_statement_annual,"{""n_periods"": 8, ""periods"": [""FY2021"", ""FY2022"", ""FY2023"", ""FY2024"", ""FY2025"", ""FY2026"", ""FY2027"", ""FY2028""], ""metrics_present"": [""net_sales"", ""ebitda"", ""ebit"", ""ebt"", ""interest_paid"", ""net_income""]}",,FY2028,,404.7,2026-05-12T14:23:44.109837+00:00,marketscreener/ADNOCDRILL_AE/income_statement_annual_20260512T142344.json
+ADNOCDRILL.AE,marketscreener,income_statement_quarterly,"{""n_periods"": 26, ""periods"": [""2026Q1"", ""2026Q2"", ""2026Q3"", ""2026Q4"", ""2027Q1"", ""2027Q2"", ""2027Q3"", ""2027Q4""], ""metrics_present"": [""net_sales"", ""ebitda"", ""ebit"", ""net_income""]}",,2027Q4,,257.2,2026-05-12T14:23:44.514672+00:00,marketscreener/ADNOCDRILL_AE/income_statement_quarterly_20260512T142344.json
+ADNOCDRILL.AE,marketscreener,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:23:44.772004+00:00,
+ADNOCDRILL.AE,marketscreener,cash_flow,,,,not_implemented,0.0,2026-05-12T14:23:44.772064+00:00,
+ADNOCDRILL.AE,marketscreener,valuation_historical,"{""periods"": [""FY2021"", ""FY2022"", ""FY2023"", ""FY2024"", ""FY2025"", ""FY2026"", ""FY2027"", ""FY2028""], ""pe"": [24.4, 16.2, 15.8, 17.9, 16.0, 18.3, 16.8, 15.0], ""pbr"": [5.3, 4.43, 5.04, 6.09, 5.66, 5.68, 5.44, 4.99], ""ev_ebitda"": [15.2, 11.5, 12.3, 12.8, 11.5, 12.9, 11.9, 11.0], ""yield_pct"": [2.16, null, 16.0, 3.39, 4.01, 4.04, 4.21, 4.51]}",ratio,FY2028,,382.4,2026-05-12T14:23:44.772114+00:00,marketscreener/ADNOCDRILL_AE/valuation_historical_20260512T142345.json
+ADNOCDRILL.AE,marketscreener,dividend_yield,4.51,%,,,228.3,2026-05-12T14:23:45.154623+00:00,marketscreener/ADNOCDRILL_AE/dividend_yield_20260512T142345.json
+ADNOCDRILL.AE,marketscreener,valuation_forward,,,,ValueError: forward valuation fields all None,288.9,2026-05-12T14:23:45.383031+00:00,
+ADNOCDRILL.AE,marketscreener,target_price,"{""mean"": 1.788, ""high"": 1.987, ""low"": 1.527, ""n_analysts"": 17}",USD,,,651.4,2026-05-12T14:23:45.672021+00:00,marketscreener/ADNOCDRILL_AE/target_price_20260512T142346.json
+ADNOCDRILL.AE,marketscreener,rating_split,"{""consensus"": ""BUY""}",,,,362.3,2026-05-12T14:23:46.323473+00:00,marketscreener/ADNOCDRILL_AE/rating_split_20260512T142346.json
+ADNOCDRILL.AE,macro,current_price,,,,not_implemented,0.0,2026-05-12T14:23:46.685834+00:00,
+ADNOCDRILL.AE,macro,historical_prices,,,,not_implemented,0.0,2026-05-12T14:23:46.686013+00:00,
+ADNOCDRILL.AE,macro,market_cap,,,,not_implemented,0.0,2026-05-12T14:23:46.686053+00:00,
+ADNOCDRILL.AE,macro,company_profile,"{""country_iso3"": ""ARE"", ""gdp_growth_pct"": 3.99180705485398, ""inflation_pct"": 1.66336510224894, ""population"": 10986400, ""fx_lcu_per_usd"": 3.6725, ""macro_year"": ""2024""}",macro,2024,,2008.4,2026-05-12T14:23:46.686085+00:00,macro/ADNOCDRILL_AE/company_profile_20260512T142348.json
+ADNOCDRILL.AE,macro,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:23:48.698552+00:00,
+ADNOCDRILL.AE,macro,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:23:48.699342+00:00,
+ADNOCDRILL.AE,macro,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:23:48.699972+00:00,
+ADNOCDRILL.AE,macro,cash_flow,,,,not_implemented,0.0,2026-05-12T14:23:48.700189+00:00,
+ADNOCDRILL.AE,macro,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:23:48.700327+00:00,
+ADNOCDRILL.AE,macro,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:23:48.700443+00:00,
+ADNOCDRILL.AE,macro,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:23:48.700553+00:00,
+ADNOCDRILL.AE,macro,target_price,,,,not_implemented,0.0,2026-05-12T14:23:48.700657+00:00,
+ADNOCDRILL.AE,macro,rating_split,,,,not_implemented,0.0,2026-05-12T14:23:48.700753+00:00,
+ADNOCDRILL.AE,adx,current_price,6.15,AED,,,1.0,2026-05-12T14:23:48.700851+00:00,adx/ADNOCDRILL_AE/current_price_20260512T142348.json
+ADNOCDRILL.AE,adx,historical_prices,,,,not_implemented,0.0,2026-05-12T14:23:48.702004+00:00,
+ADNOCDRILL.AE,adx,market_cap,98400000000.0,AED,,,0.4,2026-05-12T14:23:48.702155+00:00,adx/ADNOCDRILL_AE/market_cap_20260512T142348.json
+ADNOCDRILL.AE,adx,company_profile,"{""name"": ""ADNOC Drilling Company PJSC"", ""symbol"": ""ADNOCDRILL"", ""isin"": ""AEA007301012"", ""sector"": null, ""industry"": null, ""country"": ""UAE"", ""currency"": ""AED""}",,,,0.5,2026-05-12T14:23:48.702786+00:00,adx/ADNOCDRILL_AE/company_profile_20260512T142348.json
+ADNOCDRILL.AE,adx,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:23:48.703494+00:00,
+ADNOCDRILL.AE,adx,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:23:48.703770+00:00,
+ADNOCDRILL.AE,adx,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:23:48.704024+00:00,
+ADNOCDRILL.AE,adx,cash_flow,,,,not_implemented,0.0,2026-05-12T14:23:48.704315+00:00,
+ADNOCDRILL.AE,adx,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:23:48.704498+00:00,
+ADNOCDRILL.AE,adx,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:23:48.704669+00:00,
+ADNOCDRILL.AE,adx,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:23:48.704822+00:00,
+ADNOCDRILL.AE,adx,target_price,,,,not_implemented,0.0,2026-05-12T14:23:48.704982+00:00,
+ADNOCDRILL.AE,adx,rating_split,,,,not_implemented,0.0,2026-05-12T14:23:48.705141+00:00,
+ADNOCDRILL.AE,nse,current_price,,,,ValueError: priceInfo.lastPrice missing,4408.1,2026-05-12T14:23:48.705364+00:00,
+ADNOCDRILL.AE,nse,historical_prices,,,,not_implemented,0.0,2026-05-12T14:23:53.114094+00:00,
+ADNOCDRILL.AE,nse,market_cap,,,,ValueError: can't derive marketCap (price or issuedSize missing),0.4,2026-05-12T14:23:53.114288+00:00,
+ADNOCDRILL.AE,nse,company_profile,,,,ValueError: NSE quote had no companyName / symbol / ISIN — likely non-Indian ticker,0.2,2026-05-12T14:23:53.114859+00:00,
+ADNOCDRILL.AE,nse,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:23:53.115209+00:00,
+ADNOCDRILL.AE,nse,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:23:53.115369+00:00,
+ADNOCDRILL.AE,nse,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:23:53.115461+00:00,
+ADNOCDRILL.AE,nse,cash_flow,,,,not_implemented,0.0,2026-05-12T14:23:53.115552+00:00,
+ADNOCDRILL.AE,nse,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:23:53.115640+00:00,
+ADNOCDRILL.AE,nse,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:23:53.115732+00:00,
+ADNOCDRILL.AE,nse,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:23:53.115814+00:00,
+ADNOCDRILL.AE,nse,target_price,,,,not_implemented,0.0,2026-05-12T14:23:53.115898+00:00,
+ADNOCDRILL.AE,nse,rating_split,,,,not_implemented,0.0,2026-05-12T14:23:53.115992+00:00,
+ADNOCDRILL.AE,hkex,current_price,,,,ValueError: HKEX returned no quote for sym=ADNOCDRILL.AE,10243.5,2026-05-12T14:23:53.116078+00:00,
+ADNOCDRILL.AE,hkex,historical_prices,,,,not_implemented,0.0,2026-05-12T14:24:03.359828+00:00,
+ADNOCDRILL.AE,hkex,market_cap,,,,ValueError: HKEX returned no quote for sym=ADNOCDRILL.AE,0.0,2026-05-12T14:24:03.359960+00:00,
+ADNOCDRILL.AE,hkex,company_profile,,,,ValueError: HKEX returned no quote for sym=ADNOCDRILL.AE,0.0,2026-05-12T14:24:03.360050+00:00,
+ADNOCDRILL.AE,hkex,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:24:03.360166+00:00,
+ADNOCDRILL.AE,hkex,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:24:03.360586+00:00,
+ADNOCDRILL.AE,hkex,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:24:03.361191+00:00,
+ADNOCDRILL.AE,hkex,cash_flow,,,,not_implemented,0.0,2026-05-12T14:24:03.361309+00:00,
+ADNOCDRILL.AE,hkex,valuation_historical,,,,ValueError: HKEX returned no quote for sym=ADNOCDRILL.AE,0.0,2026-05-12T14:24:03.361610+00:00,
+ADNOCDRILL.AE,hkex,dividend_yield,,,,ValueError: HKEX returned no quote for sym=ADNOCDRILL.AE,0.0,2026-05-12T14:24:03.361692+00:00,
+ADNOCDRILL.AE,hkex,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:24:03.361785+00:00,
+ADNOCDRILL.AE,hkex,target_price,,,,not_implemented,0.0,2026-05-12T14:24:03.361911+00:00,
+ADNOCDRILL.AE,hkex,rating_split,,,,not_implemented,0.0,2026-05-12T14:24:03.361983+00:00,
+ADCB.AE,yahoo,current_price,,,,ValueError: no price in info,675.9,2026-05-12T14:24:03.362297+00:00,
+ADCB.AE,yahoo,historical_prices,,,,ValueError: no historical bars,576.5,2026-05-12T14:24:04.038573+00:00,
+ADCB.AE,yahoo,market_cap,,,,ValueError: no marketCap,0.4,2026-05-12T14:24:04.615583+00:00,
+ADCB.AE,yahoo,company_profile,,,,ValueError: info empty — Yahoo has no profile for this ticker,0.3,2026-05-12T14:24:04.616129+00:00,
+ADCB.AE,yahoo,income_statement_annual,,,,ValueError: no annual income statement,267.3,2026-05-12T14:24:04.616528+00:00,
+ADCB.AE,yahoo,income_statement_quarterly,,,,ValueError: no quarterly income statement,294.5,2026-05-12T14:24:04.884510+00:00,
+ADCB.AE,yahoo,balance_sheet,,,,ValueError: no balance sheet,284.6,2026-05-12T14:24:05.179934+00:00,
+ADCB.AE,yahoo,cash_flow,,,,ValueError: no cash flow,252.4,2026-05-12T14:24:05.465268+00:00,
+ADCB.AE,yahoo,valuation_historical,,,,ValueError: no valuation ratios in info,1.0,2026-05-12T14:24:05.718468+00:00,
+ADCB.AE,yahoo,dividend_yield,,,,ValueError: no dividend yield,1.0,2026-05-12T14:24:05.719932+00:00,
+ADCB.AE,yahoo,valuation_forward,,,,ValueError: no forward valuation fields,0.7,2026-05-12T14:24:05.721486+00:00,
+ADCB.AE,yahoo,target_price,,,,ValueError: no targetMeanPrice,0.6,2026-05-12T14:24:05.722509+00:00,
+ADCB.AE,yahoo,rating_split,,,,ValueError: no recommendationKey,0.5,2026-05-12T14:24:05.723351+00:00,
+ADCB.AE,marketscreener,current_price,7.9,AED,,,582.9,2026-05-12T14:24:05.724078+00:00,marketscreener/ADCB_AE/current_price_20260512T142406.json
+ADCB.AE,marketscreener,historical_prices,,,,not_implemented,0.0,2026-05-12T14:24:06.307081+00:00,
+ADCB.AE,marketscreener,market_cap,62115.0,M,,,417.4,2026-05-12T14:24:06.307126+00:00,marketscreener/ADCB_AE/market_cap_20260512T142406.json
+ADCB.AE,marketscreener,company_profile,"{""name"": ""Abu Dhabi Commercial Bank P.J.S.C."", ""sector"": ""Financials"", ""industry"": ""Banks"", ""country"": ""UAE"", ""currency"": ""AED"", ""summary"": """"}",,,,297.0,2026-05-12T14:24:06.724665+00:00,marketscreener/ADCB_AE/company_profile_20260512T142407.json
+ADCB.AE,marketscreener,income_statement_annual,"{""n_periods"": 8, ""periods"": [""FY2021"", ""FY2022"", ""FY2023"", ""FY2024"", ""FY2025"", ""FY2026"", ""FY2027"", ""FY2028""], ""metrics_present"": [""net_sales"", ""ebitda"", ""ebit"", ""ebt"", ""interest_paid"", ""net_income""]}",,FY2028,,290.4,2026-05-12T14:24:07.021964+00:00,marketscreener/ADCB_AE/income_statement_annual_20260512T142407.json
+ADCB.AE,marketscreener,income_statement_quarterly,"{""n_periods"": 28, ""periods"": [""2026Q2"", ""2026Q3"", ""2026Q4"", ""2027Q1"", ""2027Q2"", ""2027Q3"", ""2027Q4"", ""2028Q1""], ""metrics_present"": [""net_sales"", ""ebitda"", ""ebit"", ""net_income""]}",,2028Q1,,1066.7,2026-05-12T14:24:07.312467+00:00,marketscreener/ADCB_AE/income_statement_quarterly_20260512T142408.json
+ADCB.AE,marketscreener,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:24:08.379895+00:00,
+ADCB.AE,marketscreener,cash_flow,,,,not_implemented,0.0,2026-05-12T14:24:08.380163+00:00,
+ADCB.AE,marketscreener,valuation_historical,"{""periods"": [""FY2021"", ""FY2022"", ""FY2023"", ""FY2024"", ""FY2025"", ""FY2026"", ""FY2027"", ""FY2028""], ""pe"": [13.5, 12.0, 11.0, 11.0, 9.11, 6.62, 6.22, 5.78], ""pbr"": [1.17, 1.15, 1.28, 1.64, 1.61, 1.3, 1.04, 0.86], ""ev_ebitda"": [10.4, 8.89, 8.32, 9.05, 7.33, 5.23, 4.24, 3.48], ""yield_pct"": [3.76, 3.61, 3.18, 2.41, 2.36, 2.91, 3.23, 3.56]}",ratio,FY2028,,499.7,2026-05-12T14:24:08.380506+00:00,marketscreener/ADCB_AE/valuation_historical_20260512T142408.json
+ADCB.AE,marketscreener,dividend_yield,3.56,%,,,1658.9,2026-05-12T14:24:08.880313+00:00,marketscreener/ADCB_AE/dividend_yield_20260512T142410.json
+ADCB.AE,marketscreener,valuation_forward,,,,ValueError: forward valuation fields all None,780.4,2026-05-12T14:24:10.539284+00:00,
+ADCB.AE,marketscreener,target_price,"{""mean"": 11.32, ""high"": 14.0, ""low"": 8.58, ""n_analysts"": 11}",AED,,,970.7,2026-05-12T14:24:11.319807+00:00,marketscreener/ADCB_AE/target_price_20260512T142412.json
+ADCB.AE,marketscreener,rating_split,"{""consensus"": ""BUY""}",,,,257.2,2026-05-12T14:24:12.290615+00:00,marketscreener/ADCB_AE/rating_split_20260512T142412.json
+ADCB.AE,macro,current_price,,,,not_implemented,0.0,2026-05-12T14:24:12.547981+00:00,
+ADCB.AE,macro,historical_prices,,,,not_implemented,0.0,2026-05-12T14:24:12.548043+00:00,
+ADCB.AE,macro,market_cap,,,,not_implemented,0.0,2026-05-12T14:24:12.548090+00:00,
+ADCB.AE,macro,company_profile,"{""country_iso3"": ""ARE"", ""gdp_growth_pct"": 3.99180705485398, ""inflation_pct"": 1.66336510224894, ""population"": 10986400, ""fx_lcu_per_usd"": 3.6725, ""macro_year"": ""2024""}",macro,2024,,0.9,2026-05-12T14:24:12.548157+00:00,macro/ADCB_AE/company_profile_20260512T142412.json
+ADCB.AE,macro,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:24:12.549144+00:00,
+ADCB.AE,macro,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:24:12.549195+00:00,
+ADCB.AE,macro,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:24:12.549239+00:00,
+ADCB.AE,macro,cash_flow,,,,not_implemented,0.0,2026-05-12T14:24:12.549286+00:00,
+ADCB.AE,macro,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:24:12.549330+00:00,
+ADCB.AE,macro,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:24:12.549371+00:00,
+ADCB.AE,macro,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:24:12.549408+00:00,
+ADCB.AE,macro,target_price,,,,not_implemented,0.0,2026-05-12T14:24:12.549445+00:00,
+ADCB.AE,macro,rating_split,,,,not_implemented,0.0,2026-05-12T14:24:12.549480+00:00,
+ADCB.AE,adx,current_price,13.82,AED,,,0.1,2026-05-12T14:24:12.549518+00:00,adx/ADCB_AE/current_price_20260512T142412.json
+ADCB.AE,adx,historical_prices,,,,not_implemented,0.0,2026-05-12T14:24:12.549696+00:00,
+ADCB.AE,adx,market_cap,109346268312.0,AED,,,0.1,2026-05-12T14:24:12.549732+00:00,adx/ADCB_AE/market_cap_20260512T142412.json
+ADCB.AE,adx,company_profile,"{""name"": ""Abu Dhabi Commercial Bank"", ""symbol"": ""ADCB"", ""isin"": ""AEA000201011"", ""sector"": null, ""industry"": null, ""country"": ""UAE"", ""currency"": ""AED""}",,,,0.1,2026-05-12T14:24:12.549874+00:00,adx/ADCB_AE/company_profile_20260512T142412.json
+ADCB.AE,adx,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:24:12.550044+00:00,
+ADCB.AE,adx,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:24:12.550084+00:00,
+ADCB.AE,adx,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:24:12.550128+00:00,
+ADCB.AE,adx,cash_flow,,,,not_implemented,0.0,2026-05-12T14:24:12.550165+00:00,
+ADCB.AE,adx,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:24:12.550202+00:00,
+ADCB.AE,adx,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:24:12.550239+00:00,
+ADCB.AE,adx,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:24:12.550277+00:00,
+ADCB.AE,adx,target_price,,,,not_implemented,0.0,2026-05-12T14:24:12.550314+00:00,
+ADCB.AE,adx,rating_split,,,,not_implemented,0.0,2026-05-12T14:24:12.550352+00:00,
+ADCB.AE,nse,current_price,,,,ValueError: priceInfo.lastPrice missing,4920.8,2026-05-12T14:24:12.550393+00:00,
+ADCB.AE,nse,historical_prices,,,,not_implemented,0.0,2026-05-12T14:24:17.472035+00:00,
+ADCB.AE,nse,market_cap,,,,ValueError: can't derive marketCap (price or issuedSize missing),0.7,2026-05-12T14:24:17.472398+00:00,
+ADCB.AE,nse,company_profile,,,,ValueError: NSE quote had no companyName / symbol / ISIN — likely non-Indian ticker,0.4,2026-05-12T14:24:17.473312+00:00,
+ADCB.AE,nse,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:24:17.473894+00:00,
+ADCB.AE,nse,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:24:17.474062+00:00,
+ADCB.AE,nse,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:24:17.474205+00:00,
+ADCB.AE,nse,cash_flow,,,,not_implemented,0.0,2026-05-12T14:24:17.474335+00:00,
+ADCB.AE,nse,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:24:17.474458+00:00,
+ADCB.AE,nse,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:24:17.474589+00:00,
+ADCB.AE,nse,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:24:17.474733+00:00,
+ADCB.AE,nse,target_price,,,,not_implemented,0.0,2026-05-12T14:24:17.474863+00:00,
+ADCB.AE,nse,rating_split,,,,not_implemented,0.0,2026-05-12T14:24:17.474983+00:00,
+ADCB.AE,hkex,current_price,,,,ValueError: HKEX returned no quote for sym=ADCB.AE,12128.7,2026-05-12T14:24:17.475111+00:00,
+ADCB.AE,hkex,historical_prices,,,,not_implemented,0.0,2026-05-12T14:24:29.604102+00:00,
+ADCB.AE,hkex,market_cap,,,,ValueError: HKEX returned no quote for sym=ADCB.AE,0.0,2026-05-12T14:24:29.604205+00:00,
+ADCB.AE,hkex,company_profile,,,,ValueError: HKEX returned no quote for sym=ADCB.AE,0.0,2026-05-12T14:24:29.604278+00:00,
+ADCB.AE,hkex,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:24:29.604339+00:00,
+ADCB.AE,hkex,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:24:29.604388+00:00,
+ADCB.AE,hkex,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:24:29.604436+00:00,
+ADCB.AE,hkex,cash_flow,,,,not_implemented,0.0,2026-05-12T14:24:29.604484+00:00,
+ADCB.AE,hkex,valuation_historical,,,,ValueError: HKEX returned no quote for sym=ADCB.AE,0.0,2026-05-12T14:24:29.604529+00:00,
+ADCB.AE,hkex,dividend_yield,,,,ValueError: HKEX returned no quote for sym=ADCB.AE,0.0,2026-05-12T14:24:29.604579+00:00,
+ADCB.AE,hkex,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:24:29.604628+00:00,
+ADCB.AE,hkex,target_price,,,,not_implemented,0.0,2026-05-12T14:24:29.604672+00:00,
+ADCB.AE,hkex,rating_split,,,,not_implemented,0.0,2026-05-12T14:24:29.604718+00:00,
+BKMB.OM,yahoo,current_price,,,,ValueError: no price in info,1206.4,2026-05-12T14:24:29.604772+00:00,
+BKMB.OM,yahoo,historical_prices,,,,ValueError: no historical bars,1141.6,2026-05-12T14:24:30.811550+00:00,
+BKMB.OM,yahoo,market_cap,,,,ValueError: no marketCap,0.7,2026-05-12T14:24:31.954073+00:00,
+BKMB.OM,yahoo,company_profile,,,,ValueError: info empty — Yahoo has no profile for this ticker,0.5,2026-05-12T14:24:31.955138+00:00,
+BKMB.OM,yahoo,income_statement_annual,,,,ValueError: no annual income statement,531.3,2026-05-12T14:24:31.955905+00:00,
+BKMB.OM,yahoo,income_statement_quarterly,,,,ValueError: no quarterly income statement,282.5,2026-05-12T14:24:32.488226+00:00,
+BKMB.OM,yahoo,balance_sheet,,,,ValueError: no balance sheet,260.7,2026-05-12T14:24:32.771399+00:00,
+BKMB.OM,yahoo,cash_flow,,,,ValueError: no cash flow,252.3,2026-05-12T14:24:33.033482+00:00,
+BKMB.OM,yahoo,valuation_historical,,,,ValueError: no valuation ratios in info,0.8,2026-05-12T14:24:33.286577+00:00,
+BKMB.OM,yahoo,dividend_yield,,,,ValueError: no dividend yield,0.6,2026-05-12T14:24:33.287718+00:00,
+BKMB.OM,yahoo,valuation_forward,,,,ValueError: no forward valuation fields,0.5,2026-05-12T14:24:33.288545+00:00,
+BKMB.OM,yahoo,target_price,,,,ValueError: no targetMeanPrice,0.4,2026-05-12T14:24:33.289260+00:00,
+BKMB.OM,yahoo,rating_split,,,,ValueError: no recommendationKey,0.5,2026-05-12T14:24:33.289967+00:00,
+BKMB.OM,marketscreener,current_price,0.453,OMR,,,512.2,2026-05-12T14:24:33.290717+00:00,marketscreener/BKMB_OM/current_price_20260512T142433.json
+BKMB.OM,marketscreener,historical_prices,,,,not_implemented,0.0,2026-05-12T14:24:33.802992+00:00,
+BKMB.OM,marketscreener,market_cap,3400.0,M,,,304.6,2026-05-12T14:24:33.803042+00:00,marketscreener/BKMB_OM/market_cap_20260512T142434.json
+BKMB.OM,marketscreener,company_profile,"{""name"": ""Bank Muscat"", ""sector"": ""Financials"", ""industry"": ""Banks"", ""country"": ""Oman"", ""currency"": ""OMR"", ""summary"": """"}",,,,514.8,2026-05-12T14:24:34.107735+00:00,marketscreener/BKMB_OM/company_profile_20260512T142434.json
+BKMB.OM,marketscreener,income_statement_annual,"{""n_periods"": 8, ""periods"": [""FY2021"", ""FY2022"", ""FY2023"", ""FY2024"", ""FY2025"", ""FY2026"", ""FY2027"", ""FY2028""], ""metrics_present"": [""net_sales"", ""ebit"", ""ebt"", ""net_income""]}",,FY2028,,543.9,2026-05-12T14:24:34.622670+00:00,marketscreener/BKMB_OM/income_statement_annual_20260512T142435.json
+BKMB.OM,marketscreener,income_statement_quarterly,"{""n_periods"": 20, ""periods"": [""2024Q2"", ""2024Q3"", ""2024Q4"", ""2025Q1"", ""2025Q2"", ""2025Q3"", ""2025Q4"", ""2026Q1""], ""metrics_present"": [""net_sales"", ""ebit"", ""net_income""]}",,2026Q1,,338.4,2026-05-12T14:24:35.166663+00:00,marketscreener/BKMB_OM/income_statement_quarterly_20260512T142435.json
+BKMB.OM,marketscreener,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:24:35.505109+00:00,
+BKMB.OM,marketscreener,cash_flow,,,,not_implemented,0.0,2026-05-12T14:24:35.505159+00:00,
+BKMB.OM,marketscreener,valuation_historical,"{""periods"": [""FY2021"", ""FY2022"", ""FY2023"", ""FY2024"", ""FY2025"", ""FY2026"", ""FY2027"", ""FY2028""], ""pe"": [9.49, 10.6, 10.6, 9.33, 10.7, 13.5, 12.9, 12.4], ""pbr"": [0.86, 1.2, 1.15, 0.76, null, 1.55, 1.48, 1.42], ""ev_ebitda"": [null, null, null, null, null, null, null, null], ""yield_pct"": [6.2, 5.45, 5.87, 6.55, 5.41, 4.42, 4.64, 4.75]}",ratio,FY2028,,249.5,2026-05-12T14:24:35.505199+00:00,marketscreener/BKMB_OM/valuation_historical_20260512T142435.json
+BKMB.OM,marketscreener,dividend_yield,4.75,%,,,330.6,2026-05-12T14:24:35.754830+00:00,marketscreener/BKMB_OM/dividend_yield_20260512T142436.json
+BKMB.OM,marketscreener,valuation_forward,,,,ValueError: forward valuation fields all None,309.2,2026-05-12T14:24:36.085523+00:00,
+BKMB.OM,marketscreener,target_price,"{""mean"": 0.475, ""high"": 0.52, ""low"": 0.39, ""n_analysts"": 3}",OMR,,,355.0,2026-05-12T14:24:36.394990+00:00,marketscreener/BKMB_OM/target_price_20260512T142436.json
+BKMB.OM,marketscreener,rating_split,"{""consensus"": ""BUY""}",,,,346.8,2026-05-12T14:24:36.750169+00:00,marketscreener/BKMB_OM/rating_split_20260512T142437.json
+BKMB.OM,macro,current_price,,,,not_implemented,0.0,2026-05-12T14:24:37.097120+00:00,
+BKMB.OM,macro,historical_prices,,,,not_implemented,0.0,2026-05-12T14:24:37.097176+00:00,
+BKMB.OM,macro,market_cap,,,,not_implemented,0.0,2026-05-12T14:24:37.097228+00:00,
+BKMB.OM,macro,company_profile,"{""country_iso3"": ""OMN"", ""gdp_growth_pct"": 1.63163221127449, ""inflation_pct"": 0.593589236248469, ""population"": 5281538, ""fx_lcu_per_usd"": 0.3845, ""macro_year"": ""2024""}",macro,2024,,740.0,2026-05-12T14:24:37.097271+00:00,macro/BKMB_OM/company_profile_20260512T142437.json
+BKMB.OM,macro,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:24:37.838337+00:00,
+BKMB.OM,macro,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:24:37.838821+00:00,
+BKMB.OM,macro,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:24:37.839009+00:00,
+BKMB.OM,macro,cash_flow,,,,not_implemented,0.0,2026-05-12T14:24:37.839160+00:00,
+BKMB.OM,macro,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:24:37.839299+00:00,
+BKMB.OM,macro,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:24:37.839469+00:00,
+BKMB.OM,macro,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:24:37.839752+00:00,
+BKMB.OM,macro,target_price,,,,not_implemented,0.0,2026-05-12T14:24:37.840287+00:00,
+BKMB.OM,macro,rating_split,,,,not_implemented,0.0,2026-05-12T14:24:37.840456+00:00,
+BKMB.OM,adx,current_price,,,,ValueError: BKMB.OM not on ADX main market board,0.7,2026-05-12T14:24:37.840608+00:00,
+BKMB.OM,adx,historical_prices,,,,not_implemented,0.0,2026-05-12T14:24:37.841500+00:00,
+BKMB.OM,adx,market_cap,,,,ValueError: BKMB.OM not on ADX main market board,0.6,2026-05-12T14:24:37.841675+00:00,
+BKMB.OM,adx,company_profile,,,,ValueError: BKMB.OM not in ADX board or listed-companies,0.5,2026-05-12T14:24:37.842434+00:00,
+BKMB.OM,adx,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:24:37.843101+00:00,
+BKMB.OM,adx,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:24:37.843253+00:00,
+BKMB.OM,adx,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:24:37.843391+00:00,
+BKMB.OM,adx,cash_flow,,,,not_implemented,0.0,2026-05-12T14:24:37.843530+00:00,
+BKMB.OM,adx,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:24:37.843664+00:00,
+BKMB.OM,adx,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:24:37.843787+00:00,
+BKMB.OM,adx,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:24:37.843919+00:00,
+BKMB.OM,adx,target_price,,,,not_implemented,0.0,2026-05-12T14:24:37.844039+00:00,
+BKMB.OM,adx,rating_split,,,,not_implemented,0.0,2026-05-12T14:24:37.844156+00:00,
+BKMB.OM,nse,current_price,,,,ValueError: priceInfo.lastPrice missing,4594.1,2026-05-12T14:24:37.844277+00:00,
+BKMB.OM,nse,historical_prices,,,,not_implemented,0.0,2026-05-12T14:24:42.438756+00:00,
+BKMB.OM,nse,market_cap,,,,ValueError: can't derive marketCap (price or issuedSize missing),0.5,2026-05-12T14:24:42.439000+00:00,
+BKMB.OM,nse,company_profile,,,,ValueError: NSE quote had no companyName / symbol / ISIN — likely non-Indian ticker,0.4,2026-05-12T14:24:42.439705+00:00,
+BKMB.OM,nse,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:24:42.440345+00:00,
+BKMB.OM,nse,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:24:42.440515+00:00,
+BKMB.OM,nse,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:24:42.440686+00:00,
+BKMB.OM,nse,cash_flow,,,,not_implemented,0.0,2026-05-12T14:24:42.440833+00:00,
+BKMB.OM,nse,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:24:42.440981+00:00,
+BKMB.OM,nse,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:24:42.441134+00:00,
+BKMB.OM,nse,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:24:42.441290+00:00,
+BKMB.OM,nse,target_price,,,,not_implemented,0.0,2026-05-12T14:24:42.441446+00:00,
+BKMB.OM,nse,rating_split,,,,not_implemented,0.0,2026-05-12T14:24:42.441590+00:00,
+BKMB.OM,hkex,current_price,,,,ValueError: HKEX returned no quote for sym=BKMB.OM,9724.2,2026-05-12T14:24:42.441738+00:00,
+BKMB.OM,hkex,historical_prices,,,,not_implemented,0.0,2026-05-12T14:24:52.166058+00:00,
+BKMB.OM,hkex,market_cap,,,,ValueError: HKEX returned no quote for sym=BKMB.OM,0.0,2026-05-12T14:24:52.166127+00:00,
+BKMB.OM,hkex,company_profile,,,,ValueError: HKEX returned no quote for sym=BKMB.OM,0.0,2026-05-12T14:24:52.166185+00:00,
+BKMB.OM,hkex,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:24:52.166234+00:00,
+BKMB.OM,hkex,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:24:52.166278+00:00,
+BKMB.OM,hkex,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:24:52.166369+00:00,
+BKMB.OM,hkex,cash_flow,,,,not_implemented,0.0,2026-05-12T14:24:52.166410+00:00,
+BKMB.OM,hkex,valuation_historical,,,,ValueError: HKEX returned no quote for sym=BKMB.OM,0.0,2026-05-12T14:24:52.166449+00:00,
+BKMB.OM,hkex,dividend_yield,,,,ValueError: HKEX returned no quote for sym=BKMB.OM,0.0,2026-05-12T14:24:52.166493+00:00,
+BKMB.OM,hkex,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:24:52.166535+00:00,
+BKMB.OM,hkex,target_price,,,,not_implemented,0.0,2026-05-12T14:24:52.166574+00:00,
+BKMB.OM,hkex,rating_split,,,,not_implemented,0.0,2026-05-12T14:24:52.166612+00:00,
+OQEP.OM,yahoo,current_price,,,,ValueError: no price in info,959.8,2026-05-12T14:24:52.166660+00:00,
+OQEP.OM,yahoo,historical_prices,,,,ValueError: no historical bars,556.9,2026-05-12T14:24:53.126918+00:00,
+OQEP.OM,yahoo,market_cap,,,,ValueError: no marketCap,0.4,2026-05-12T14:24:53.684045+00:00,
+OQEP.OM,yahoo,company_profile,,,,ValueError: info empty — Yahoo has no profile for this ticker,0.3,2026-05-12T14:24:53.684607+00:00,
+OQEP.OM,yahoo,income_statement_annual,,,,ValueError: no annual income statement,348.9,2026-05-12T14:24:53.684996+00:00,
+OQEP.OM,yahoo,income_statement_quarterly,,,,ValueError: no quarterly income statement,226.2,2026-05-12T14:24:54.034481+00:00,
+OQEP.OM,yahoo,balance_sheet,,,,ValueError: no balance sheet,307.8,2026-05-12T14:24:54.261423+00:00,
+OQEP.OM,yahoo,cash_flow,,,,ValueError: no cash flow,472.6,2026-05-12T14:24:54.570667+00:00,
+OQEP.OM,yahoo,valuation_historical,,,,ValueError: no valuation ratios in info,0.7,2026-05-12T14:24:55.043911+00:00,
+OQEP.OM,yahoo,dividend_yield,,,,ValueError: no dividend yield,0.4,2026-05-12T14:24:55.044904+00:00,
+OQEP.OM,yahoo,valuation_forward,,,,ValueError: no forward valuation fields,0.4,2026-05-12T14:24:55.045657+00:00,
+OQEP.OM,yahoo,target_price,,,,ValueError: no targetMeanPrice,0.3,2026-05-12T14:24:55.046227+00:00,
+OQEP.OM,yahoo,rating_split,,,,ValueError: no recommendationKey,0.3,2026-05-12T14:24:55.046716+00:00,
+OQEP.OM,marketscreener,current_price,0.503,OMR,,,375.8,2026-05-12T14:24:55.047189+00:00,marketscreener/OQEP_OM/current_price_20260512T142455.json
+OQEP.OM,marketscreener,historical_prices,,,,not_implemented,0.0,2026-05-12T14:24:55.423259+00:00,
+OQEP.OM,marketscreener,market_cap,4009.0,M,,,331.2,2026-05-12T14:24:55.423313+00:00,marketscreener/OQEP_OM/market_cap_20260512T142455.json
+OQEP.OM,marketscreener,company_profile,"{""name"": ""OQ Exploration & Production"", ""sector"": ""Energy"", ""industry"": ""Oil & Gas Exploration"", ""country"": ""Oman"", ""currency"": ""OMR"", ""summary"": """"}",,,,351.2,2026-05-12T14:24:55.754536+00:00,marketscreener/OQEP_OM/company_profile_20260512T142456.json
+OQEP.OM,marketscreener,income_statement_annual,"{""n_periods"": 5, ""periods"": [""FY2024"", ""FY2025"", ""FY2026"", ""FY2027"", ""FY2028""], ""metrics_present"": [""net_sales"", ""ebitda"", ""ebit"", ""ebt"", ""interest_paid"", ""net_income""]}",,FY2028,,331.2,2026-05-12T14:24:56.105874+00:00,marketscreener/OQEP_OM/income_statement_annual_20260512T142456.json
+OQEP.OM,marketscreener,income_statement_quarterly,"{""n_periods"": 6, ""periods"": [""2024Q4"", ""2025Q1"", ""2025Q2"", ""2025Q3"", ""2025Q4"", ""2026Q1""], ""metrics_present"": [""net_sales"", ""ebitda"", ""net_income""]}",,2026Q1,,273.5,2026-05-12T14:24:56.437122+00:00,marketscreener/OQEP_OM/income_statement_quarterly_20260512T142456.json
+OQEP.OM,marketscreener,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:24:56.710702+00:00,
+OQEP.OM,marketscreener,cash_flow,,,,not_implemented,0.0,2026-05-12T14:24:56.710752+00:00,
+OQEP.OM,marketscreener,valuation_historical,"{""periods"": [""FY2024"", ""FY2025"", ""FY2026"", ""FY2027"", ""FY2028""], ""pe"": [8.43, 10.3, 10.7, 13.3, 13.1], ""pbr"": [2.96, 3.19, 4.08, 3.89, 3.61], ""ev_ebitda"": [4.93, 5.37, 4.44, 5.45, 5.4], ""yield_pct"": [6.41, null, 8.34, 5.73, 5.72]}",ratio,FY2028,,377.3,2026-05-12T14:24:56.710797+00:00,marketscreener/OQEP_OM/valuation_historical_20260512T142457.json
+OQEP.OM,marketscreener,dividend_yield,5.72,%,,,360.9,2026-05-12T14:24:57.088258+00:00,marketscreener/OQEP_OM/dividend_yield_20260512T142457.json
+OQEP.OM,marketscreener,valuation_forward,,,,ValueError: forward valuation fields all None,373.3,2026-05-12T14:24:57.449193+00:00,
+OQEP.OM,marketscreener,target_price,"{""mean"": 0.5418, ""high"": 0.58, ""low"": 0.491, ""n_analysts"": 4}",OMR,,,297.0,2026-05-12T14:24:57.822635+00:00,marketscreener/OQEP_OM/target_price_20260512T142458.json
+OQEP.OM,marketscreener,rating_split,"{""consensus"": ""BUY""}",,,,215.2,2026-05-12T14:24:58.119684+00:00,marketscreener/OQEP_OM/rating_split_20260512T142458.json
+OQEP.OM,macro,current_price,,,,not_implemented,0.0,2026-05-12T14:24:58.335101+00:00,
+OQEP.OM,macro,historical_prices,,,,not_implemented,0.0,2026-05-12T14:24:58.335165+00:00,
+OQEP.OM,macro,market_cap,,,,not_implemented,0.0,2026-05-12T14:24:58.335222+00:00,
+OQEP.OM,macro,company_profile,"{""country_iso3"": ""OMN"", ""gdp_growth_pct"": 1.63163221127449, ""inflation_pct"": 0.593589236248469, ""population"": 5281538, ""fx_lcu_per_usd"": 0.3845, ""macro_year"": ""2024""}",macro,2024,,0.9,2026-05-12T14:24:58.335280+00:00,macro/OQEP_OM/company_profile_20260512T142458.json
+OQEP.OM,macro,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:24:58.336209+00:00,
+OQEP.OM,macro,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:24:58.336268+00:00,
+OQEP.OM,macro,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:24:58.336317+00:00,
+OQEP.OM,macro,cash_flow,,,,not_implemented,0.0,2026-05-12T14:24:58.336367+00:00,
+OQEP.OM,macro,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:24:58.336411+00:00,
+OQEP.OM,macro,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:24:58.336462+00:00,
+OQEP.OM,macro,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:24:58.336507+00:00,
+OQEP.OM,macro,target_price,,,,not_implemented,0.0,2026-05-12T14:24:58.336552+00:00,
+OQEP.OM,macro,rating_split,,,,not_implemented,0.0,2026-05-12T14:24:58.336598+00:00,
+OQEP.OM,adx,current_price,,,,ValueError: OQEP.OM not on ADX main market board,0.3,2026-05-12T14:24:58.336646+00:00,
+OQEP.OM,adx,historical_prices,,,,not_implemented,0.0,2026-05-12T14:24:58.336956+00:00,
+OQEP.OM,adx,market_cap,,,,ValueError: OQEP.OM not on ADX main market board,0.2,2026-05-12T14:24:58.337004+00:00,
+OQEP.OM,adx,company_profile,,,,ValueError: OQEP.OM not in ADX board or listed-companies,0.2,2026-05-12T14:24:58.337289+00:00,
+OQEP.OM,adx,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:24:58.337562+00:00,
+OQEP.OM,adx,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:24:58.337609+00:00,
+OQEP.OM,adx,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:24:58.337651+00:00,
+OQEP.OM,adx,cash_flow,,,,not_implemented,0.0,2026-05-12T14:24:58.337694+00:00,
+OQEP.OM,adx,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:24:58.337731+00:00,
+OQEP.OM,adx,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:24:58.337775+00:00,
+OQEP.OM,adx,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:24:58.337818+00:00,
+OQEP.OM,adx,target_price,,,,not_implemented,0.0,2026-05-12T14:24:58.337861+00:00,
+OQEP.OM,adx,rating_split,,,,not_implemented,0.0,2026-05-12T14:24:58.337903+00:00,
+OQEP.OM,nse,current_price,,,,ValueError: priceInfo.lastPrice missing,4781.7,2026-05-12T14:24:58.337947+00:00,
+OQEP.OM,nse,historical_prices,,,,not_implemented,0.0,2026-05-12T14:25:03.120106+00:00,
+OQEP.OM,nse,market_cap,,,,ValueError: can't derive marketCap (price or issuedSize missing),0.6,2026-05-12T14:25:03.120442+00:00,
+OQEP.OM,nse,company_profile,,,,ValueError: NSE quote had no companyName / symbol / ISIN — likely non-Indian ticker,0.4,2026-05-12T14:25:03.121270+00:00,
+OQEP.OM,nse,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:25:03.121926+00:00,
+OQEP.OM,nse,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:25:03.122140+00:00,
+OQEP.OM,nse,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:25:03.122338+00:00,
+OQEP.OM,nse,cash_flow,,,,not_implemented,0.0,2026-05-12T14:25:03.122648+00:00,
+OQEP.OM,nse,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:25:03.122810+00:00,
+OQEP.OM,nse,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:25:03.122965+00:00,
+OQEP.OM,nse,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:25:03.123110+00:00,
+OQEP.OM,nse,target_price,,,,not_implemented,0.0,2026-05-12T14:25:03.123252+00:00,
+OQEP.OM,nse,rating_split,,,,not_implemented,0.0,2026-05-12T14:25:03.123392+00:00,
+OQEP.OM,hkex,current_price,,,,ValueError: HKEX returned no quote for sym=OQEP.OM,10107.3,2026-05-12T14:25:03.123549+00:00,
+OQEP.OM,hkex,historical_prices,,,,not_implemented,0.0,2026-05-12T14:25:13.230952+00:00,
+OQEP.OM,hkex,market_cap,,,,ValueError: HKEX returned no quote for sym=OQEP.OM,0.0,2026-05-12T14:25:13.231030+00:00,
+OQEP.OM,hkex,company_profile,,,,ValueError: HKEX returned no quote for sym=OQEP.OM,0.0,2026-05-12T14:25:13.231093+00:00,
+OQEP.OM,hkex,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:25:13.231146+00:00,
+OQEP.OM,hkex,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:25:13.231193+00:00,
+OQEP.OM,hkex,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:25:13.231237+00:00,
+OQEP.OM,hkex,cash_flow,,,,not_implemented,0.0,2026-05-12T14:25:13.231281+00:00,
+OQEP.OM,hkex,valuation_historical,,,,ValueError: HKEX returned no quote for sym=OQEP.OM,0.0,2026-05-12T14:25:13.231323+00:00,
+OQEP.OM,hkex,dividend_yield,,,,ValueError: HKEX returned no quote for sym=OQEP.OM,0.0,2026-05-12T14:25:13.231369+00:00,
+OQEP.OM,hkex,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:25:13.231413+00:00,
+OQEP.OM,hkex,target_price,,,,not_implemented,0.0,2026-05-12T14:25:13.231454+00:00,
+OQEP.OM,hkex,rating_split,,,,not_implemented,0.0,2026-05-12T14:25:13.231494+00:00,
+JINDALSTEL.NS,yahoo,current_price,1214.3,INR,,,356.3,2026-05-12T14:25:13.231536+00:00,yahoo/JINDALSTEL_NS/current_price_20260512T142513.json
+JINDALSTEL.NS,yahoo,historical_prices,"{""n_bars"": 250, ""first"": ""2025-05-12"", ""last"": ""2026-05-12""}",INR,2026-05-12,,135.8,2026-05-12T14:25:13.588299+00:00,yahoo/JINDALSTEL_NS/historical_prices_20260512T142513.json
+JINDALSTEL.NS,yahoo,market_cap,1235535921152.0,INR,,,0.5,2026-05-12T14:25:13.724281+00:00,yahoo/JINDALSTEL_NS/market_cap_20260512T142513.json
+JINDALSTEL.NS,yahoo,company_profile,"{""name"": ""JINDAL STEEL LIMITED"", ""sector"": ""Basic Materials"", ""industry"": ""Steel"", ""country"": ""India"", ""currency"": ""INR"", ""summary"": ""Jindal Steel Limited operates in the steel, mining, and infrastructure sectors in India and internationally. It offers rails; medium and heavy hot-rolled parallel flange beams and column sections; plates and coils; angles and channels; cold heading quality, electrode quality, and high carbon wire rods; round bars; fabricated sections; Jindal Speedfloor concrete flooring solutions; Jindal Panther TMT rebars; semi-finished products, including slabs, billets, blooms, beam blank, and rounds; and Jin"", ""website"": ""https://www.jindalsteel.in""}",,,,0.6,2026-05-12T14:25:13.724896+00:00,yahoo/JINDALSTEL_NS/company_profile_20260512T142513.json
+JINDALSTEL.NS,yahoo,income_statement_annual,"{""n_periods"": 5, ""fields_present"": [""Selling General And Administration"", ""Operating Expense"", ""Net Income Discontinuous Operations"", ""Gross Profit"", ""Diluted NI Availto Com Stockholders"", ""Cost Of Revenue"", ""Normalized EBITDA"", ""Net Income From Continuing And Discontinued Operation"", ""Diluted Average Shares"", ""Tax Provision""]}",INR,2026-03-31 00:00:00,,270.6,2026-05-12T14:25:13.725659+00:00,yahoo/JINDALSTEL_NS/income_statement_annual_20260512T142513.json
+JINDALSTEL.NS,yahoo,income_statement_quarterly,"{""n_periods"": 5, ""fields_present"": [""Operating Expense"", ""Gross Profit"", ""Cost Of Revenue"", ""Diluted NI Availto Com Stockholders"", ""Normalized EBITDA"", ""Net Income From Continuing And Discontinued Operation"", ""Diluted Average Shares"", ""Tax Provision"", ""Depreciation And Amortization In Income Statement"", ""Special Income Charges""]}",INR,2026-03-31 00:00:00,,287.8,2026-05-12T14:25:13.996438+00:00,yahoo/JINDALSTEL_NS/income_statement_quarterly_20260512T142514.json
+JINDALSTEL.NS,yahoo,balance_sheet,"{""n_periods"": 5, ""fields_present"": [""Available For Sale Securities"", ""Goodwill"", ""Total Equity Gross Minority Interest"", ""Payables"", ""Total Liabilities Net Minority Interest"", ""Total Assets"", ""Net Debt"", ""Taxes Receivable"", ""Total Non Current Liabilities Net Minority Interest"", ""Long Term Debt""]}",INR,2026-03-31 00:00:00,,406.2,2026-05-12T14:25:14.284459+00:00,yahoo/JINDALSTEL_NS/balance_sheet_20260512T142514.json
+JINDALSTEL.NS,yahoo,cash_flow,"{""n_periods"": 5, ""fields_present"": [""Capital Expenditure"", ""End Cash Position"", ""Interest Paid Cff"", ""Change In Inventory"", ""Other Non Cash Items"", ""Taxes Refund Paid"", ""Issuance Of Capital Stock"", ""Gain Loss On Sale Of PPE"", ""Common Stock Payments"", ""Change In Payable""]}",INR,2026-03-31 00:00:00,,288.9,2026-05-12T14:25:14.690723+00:00,yahoo/JINDALSTEL_NS/cash_flow_20260512T142514.json
+JINDALSTEL.NS,yahoo,valuation_historical,"{""trailing_pe"": 36.64152, ""forward_pe"": 12.673916, ""price_to_book"": 2.487122, ""ev_to_ebitda"": 14.766, ""ev_to_revenue"": 2.68}",ratio,,,0.5,2026-05-12T14:25:14.979780+00:00,yahoo/JINDALSTEL_NS/valuation_historical_20260512T142514.json
+JINDALSTEL.NS,yahoo,dividend_yield,16.0,%,,,0.4,2026-05-12T14:25:14.980378+00:00,yahoo/JINDALSTEL_NS/dividend_yield_20260512T142514.json
+JINDALSTEL.NS,yahoo,valuation_forward,"{""forward_pe"": 12.673916, ""forward_eps"": 95.81096, ""price_to_sales"": 2.3213484}",ratio,,,0.4,2026-05-12T14:25:14.980887+00:00,yahoo/JINDALSTEL_NS/valuation_forward_20260512T142514.json
+JINDALSTEL.NS,yahoo,target_price,"{""mean"": 1277.5483, ""median"": 1318.0, ""high"": 1430.0, ""low"": 595.0, ""n_analysts"": 31}",INR,,,0.4,2026-05-12T14:25:14.981391+00:00,yahoo/JINDALSTEL_NS/target_price_20260512T142514.json
+JINDALSTEL.NS,yahoo,rating_split,"{""consensus"": ""buy"", ""n_analysts"": 31}",,,,0.4,2026-05-12T14:25:14.981930+00:00,yahoo/JINDALSTEL_NS/rating_split_20260512T142514.json
+JINDALSTEL.NS,marketscreener,current_price,1232.0,INR,,,486.5,2026-05-12T14:25:14.982414+00:00,marketscreener/JINDALSTEL_NS/current_price_20260512T142515.json
+JINDALSTEL.NS,marketscreener,historical_prices,,,,not_implemented,0.0,2026-05-12T14:25:15.468947+00:00,
+JINDALSTEL.NS,marketscreener,market_cap,1256749.0,M,,,308.5,2026-05-12T14:25:15.468995+00:00,marketscreener/JINDALSTEL_NS/market_cap_20260512T142515.json
+JINDALSTEL.NS,marketscreener,company_profile,"{""name"": ""Jindal Steel & Power Limited"", ""sector"": ""Materials"", ""industry"": ""Steel"", ""country"": ""India"", ""currency"": ""INR"", ""summary"": """"}",,,,354.7,2026-05-12T14:25:15.777597+00:00,marketscreener/JINDALSTEL_NS/company_profile_20260512T142516.json
+JINDALSTEL.NS,marketscreener,income_statement_annual,"{""n_periods"": 8, ""periods"": [""FY2021"", ""FY2022"", ""FY2023"", ""FY2024"", ""FY2025"", ""FY2026"", ""FY2027"", ""FY2028""], ""metrics_present"": [""net_sales"", ""ebitda"", ""ebit"", ""ebt"", ""interest_paid"", ""net_income""]}",,FY2028,,325.4,2026-05-12T14:25:16.132332+00:00,marketscreener/JINDALSTEL_NS/income_statement_annual_20260512T142516.json
+JINDALSTEL.NS,marketscreener,income_statement_quarterly,"{""n_periods"": 25, ""periods"": [""2025Q4"", ""2026Q1"", ""2026Q2"", ""2026Q3"", ""2026Q4"", ""2027Q1"", ""2027Q2"", ""2027Q3""], ""metrics_present"": [""net_sales"", ""ebitda"", ""ebit"", ""net_income""]}",,2027Q3,,335.6,2026-05-12T14:25:16.457772+00:00,marketscreener/JINDALSTEL_NS/income_statement_quarterly_20260512T142516.json
+JINDALSTEL.NS,marketscreener,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:25:16.793443+00:00,
+JINDALSTEL.NS,marketscreener,cash_flow,,,,not_implemented,0.0,2026-05-12T14:25:16.793483+00:00,
+JINDALSTEL.NS,marketscreener,valuation_historical,"{""periods"": [""FY2021"", ""FY2022"", ""FY2023"", ""FY2024"", ""FY2025"", ""FY2026"", ""FY2027"", ""FY2028""], ""pe"": [9.64, 9.45, 14.0, 14.4, 32.8, 33.6, 17.8, 12.6], ""pbr"": [1.1, 1.51, 1.42, 1.92, 1.96, 2.23, 2.17, 1.87], ""ev_ebitda"": [4.03, 4.12, 6.23, 9.59, 11.1, 13.4, 9.87, 7.49], ""yield_pct"": [null, 0.56, 0.37, 0.24, 0.22, 0.18, 0.21, 0.25]}",ratio,FY2028,,416.9,2026-05-12T14:25:16.793518+00:00,marketscreener/JINDALSTEL_NS/valuation_historical_20260512T142517.json
+JINDALSTEL.NS,marketscreener,dividend_yield,,,,ValueError: no yield_pct populated,623.8,2026-05-12T14:25:17.210568+00:00,
+JINDALSTEL.NS,marketscreener,valuation_forward,,,,ValueError: forward valuation fields all None,1888.9,2026-05-12T14:25:17.834472+00:00,
+JINDALSTEL.NS,marketscreener,target_price,,,,ValueError: no average_target_price in consensus,697.2,2026-05-12T14:25:19.723458+00:00,
+JINDALSTEL.NS,marketscreener,rating_split,,,,ValueError: no consensus_rating or rating_details,769.7,2026-05-12T14:25:20.420858+00:00,
+JINDALSTEL.NS,macro,current_price,,,,not_implemented,0.0,2026-05-12T14:25:21.190638+00:00,
+JINDALSTEL.NS,macro,historical_prices,,,,not_implemented,0.0,2026-05-12T14:25:21.190692+00:00,
+JINDALSTEL.NS,macro,market_cap,,,,not_implemented,0.0,2026-05-12T14:25:21.190741+00:00,
+JINDALSTEL.NS,macro,company_profile,"{""country_iso3"": ""IND"", ""gdp_growth_pct"": 6.49476552383821, ""inflation_pct"": null, ""population"": 1450935791, ""fx_lcu_per_usd"": 83.669281580941, ""macro_year"": ""2024""}",macro,2024,,6876.0,2026-05-12T14:25:21.190796+00:00,macro/JINDALSTEL_NS/company_profile_20260512T142528.json
+JINDALSTEL.NS,macro,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:25:28.067248+00:00,
+JINDALSTEL.NS,macro,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:25:28.067548+00:00,
+JINDALSTEL.NS,macro,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:25:28.067826+00:00,
+JINDALSTEL.NS,macro,cash_flow,,,,not_implemented,0.0,2026-05-12T14:25:28.068094+00:00,
+JINDALSTEL.NS,macro,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:25:28.068343+00:00,
+JINDALSTEL.NS,macro,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:25:28.068619+00:00,
+JINDALSTEL.NS,macro,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:25:28.068829+00:00,
+JINDALSTEL.NS,macro,target_price,,,,not_implemented,0.0,2026-05-12T14:25:28.069030+00:00,
+JINDALSTEL.NS,macro,rating_split,,,,not_implemented,0.0,2026-05-12T14:25:28.069221+00:00,
+JINDALSTEL.NS,adx,current_price,,,,ValueError: JINDALSTEL.NS not on ADX main market board,0.7,2026-05-12T14:25:28.069407+00:00,
+JINDALSTEL.NS,adx,historical_prices,,,,not_implemented,0.0,2026-05-12T14:25:28.070363+00:00,
+JINDALSTEL.NS,adx,market_cap,,,,ValueError: JINDALSTEL.NS not on ADX main market board,0.6,2026-05-12T14:25:28.070545+00:00,
+JINDALSTEL.NS,adx,company_profile,,,,ValueError: JINDALSTEL.NS not in ADX board or listed-companies,0.6,2026-05-12T14:25:28.071369+00:00,
+JINDALSTEL.NS,adx,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:25:28.072210+00:00,
+JINDALSTEL.NS,adx,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:25:28.072393+00:00,
+JINDALSTEL.NS,adx,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:25:28.072570+00:00,
+JINDALSTEL.NS,adx,cash_flow,,,,not_implemented,0.0,2026-05-12T14:25:28.072738+00:00,
+JINDALSTEL.NS,adx,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:25:28.072913+00:00,
+JINDALSTEL.NS,adx,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:25:28.073101+00:00,
+JINDALSTEL.NS,adx,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:25:28.073309+00:00,
+JINDALSTEL.NS,adx,target_price,,,,not_implemented,0.0,2026-05-12T14:25:28.073481+00:00,
+JINDALSTEL.NS,adx,rating_split,,,,not_implemented,0.0,2026-05-12T14:25:28.073643+00:00,
+JINDALSTEL.NS,nse,current_price,1215.0,INR,,,441.5,2026-05-12T14:25:28.073793+00:00,nse/JINDALSTEL_NS/current_price_20260512T142528.json
+JINDALSTEL.NS,nse,historical_prices,,,,not_implemented,0.0,2026-05-12T14:25:28.515594+00:00,
+JINDALSTEL.NS,nse,market_cap,1239407037855.0,INR,,,0.5,2026-05-12T14:25:28.515782+00:00,nse/JINDALSTEL_NS/market_cap_20260512T142528.json
+JINDALSTEL.NS,nse,company_profile,"{""name"": ""JINDAL STEEL LIMITED"", ""symbol"": ""JINDALSTEL"", ""isin"": ""INE749A01030"", ""sector"": ""Metals & Mining"", ""industry"": ""Ferrous Metals"", ""macro"": ""Commodities"", ""country"": ""India"", ""currency"": ""INR""}",,,,0.4,2026-05-12T14:25:28.516423+00:00,nse/JINDALSTEL_NS/company_profile_20260512T142528.json
+JINDALSTEL.NS,nse,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:25:28.517090+00:00,
+JINDALSTEL.NS,nse,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:25:28.517249+00:00,
+JINDALSTEL.NS,nse,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:25:28.517396+00:00,
+JINDALSTEL.NS,nse,cash_flow,,,,not_implemented,0.0,2026-05-12T14:25:28.517530+00:00,
+JINDALSTEL.NS,nse,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:25:28.517665+00:00,
+JINDALSTEL.NS,nse,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:25:28.517797+00:00,
+JINDALSTEL.NS,nse,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:25:28.517928+00:00,
+JINDALSTEL.NS,nse,target_price,,,,not_implemented,0.0,2026-05-12T14:25:28.518066+00:00,
+JINDALSTEL.NS,nse,rating_split,,,,not_implemented,0.0,2026-05-12T14:25:28.518193+00:00,
+JINDALSTEL.NS,hkex,current_price,,,,ValueError: HKEX returned no quote for sym=JINDALSTEL.NS,10183.6,2026-05-12T14:25:28.518327+00:00,
+JINDALSTEL.NS,hkex,historical_prices,,,,not_implemented,0.0,2026-05-12T14:25:38.702063+00:00,
+JINDALSTEL.NS,hkex,market_cap,,,,ValueError: HKEX returned no quote for sym=JINDALSTEL.NS,0.0,2026-05-12T14:25:38.702135+00:00,
+JINDALSTEL.NS,hkex,company_profile,,,,ValueError: HKEX returned no quote for sym=JINDALSTEL.NS,0.0,2026-05-12T14:25:38.702197+00:00,
+JINDALSTEL.NS,hkex,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:25:38.702252+00:00,
+JINDALSTEL.NS,hkex,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:25:38.702300+00:00,
+JINDALSTEL.NS,hkex,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:25:38.702347+00:00,
+JINDALSTEL.NS,hkex,cash_flow,,,,not_implemented,0.0,2026-05-12T14:25:38.702390+00:00,
+JINDALSTEL.NS,hkex,valuation_historical,,,,ValueError: HKEX returned no quote for sym=JINDALSTEL.NS,0.0,2026-05-12T14:25:38.702432+00:00,
+JINDALSTEL.NS,hkex,dividend_yield,,,,ValueError: HKEX returned no quote for sym=JINDALSTEL.NS,0.0,2026-05-12T14:25:38.702477+00:00,
+JINDALSTEL.NS,hkex,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:25:38.702521+00:00,
+JINDALSTEL.NS,hkex,target_price,,,,not_implemented,0.0,2026-05-12T14:25:38.702562+00:00,
+JINDALSTEL.NS,hkex,rating_split,,,,not_implemented,0.0,2026-05-12T14:25:38.702604+00:00,
+ICICIBANK.BO,yahoo,current_price,1240.15,INR,,,358.1,2026-05-12T14:25:38.702652+00:00,yahoo/ICICIBANK_BO/current_price_20260512T142539.json
+ICICIBANK.BO,yahoo,historical_prices,"{""n_bars"": 248, ""first"": ""2025-05-12"", ""last"": ""2026-05-12""}",INR,2026-05-12,,109.8,2026-05-12T14:25:39.061567+00:00,yahoo/ICICIBANK_BO/historical_prices_20260512T142539.json
+ICICIBANK.BO,yahoo,market_cap,8871812792320.0,INR,,,0.5,2026-05-12T14:25:39.171521+00:00,yahoo/ICICIBANK_BO/market_cap_20260512T142539.json
+ICICIBANK.BO,yahoo,company_profile,"{""name"": ""ICICI BANK LTD."", ""sector"": ""Financial Services"", ""industry"": ""Banks - Regional"", ""country"": ""India"", ""currency"": ""INR"", ""summary"": ""ICICI Bank Limited, together with its subsidiaries, engages in the provision of various banking and financial services to retail and corporate customers in India and internationally. The company operates through Retail Banking, Wholesale Banking, Treasury, Other Banking, Life Insurance, General Insurance, and Others segments. It offers savings, salary, pension, current, trade, escrow, foreign currency, and vostro accounts, as well as time, fixed, recurring, and security deposits. The company als"", ""website"": ""https://www.icici.bank.in""}",,,,0.4,2026-05-12T14:25:39.172131+00:00,yahoo/ICICIBANK_BO/company_profile_20260512T142539.json
+ICICIBANK.BO,yahoo,income_statement_annual,"{""n_periods"": 5, ""fields_present"": [""Selling General And Administration"", ""Occupancy And Equipment"", ""Diluted NI Availto Com Stockholders"", ""Net Income From Continuing And Discontinued Operation"", ""Diluted Average Shares"", ""Tax Provision"", ""Depreciation And Amortization In Income Statement"", ""Interest Income"", ""Special Income Charges"", ""Net Income Including Noncontrolling Interests""]}",INR,2026-03-31 00:00:00,,255.0,2026-05-12T14:25:39.172647+00:00,yahoo/ICICIBANK_BO/income_statement_annual_20260512T142539.json
+ICICIBANK.BO,yahoo,income_statement_quarterly,"{""n_periods"": 7, ""fields_present"": [""Selling General And Administration"", ""Diluted NI Availto Com Stockholders"", ""Net Income From Continuing And Discontinued Operation"", ""Diluted Average Shares"", ""Tax Provision"", ""Other Non Interest Expense"", ""Interest Income"", ""Special Income Charges"", ""Net Income Including Noncontrolling Interests"", ""Total Unusual Items Excluding Goodwill""]}",INR,2026-03-31 00:00:00,,366.6,2026-05-12T14:25:39.427840+00:00,yahoo/ICICIBANK_BO/income_statement_quarterly_20260512T142539.json
+ICICIBANK.BO,yahoo,balance_sheet,"{""n_periods"": 5, ""fields_present"": [""Minority Interest"", ""Share Issued"", ""Available For Sale Securities"", ""Current Debt"", ""Other Payable"", ""Goodwill"", ""Retained Earnings"", ""Accounts Payable"", ""Total Equity Gross Minority Interest"", ""Cash Cash Equivalents And Federal Funds Sold""]}",INR,2026-03-31 00:00:00,,279.5,2026-05-12T14:25:39.794502+00:00,yahoo/ICICIBANK_BO/balance_sheet_20260512T142540.json
+ICICIBANK.BO,yahoo,cash_flow,"{""n_periods"": 5, ""fields_present"": [""Capital Expenditure"", ""End Cash Position"", ""Amortization Of Securities"", ""Cash Flow From Continuing Operating Activities"", ""Other Non Cash Items"", ""Common Stock Dividend Paid"", ""Issuance Of Capital Stock"", ""Taxes Refund Paid"", ""Gain Loss On Sale Of PPE"", ""Net PPE Purchase And Sale""]}",INR,2026-03-31 00:00:00,,320.5,2026-05-12T14:25:40.074237+00:00,yahoo/ICICIBANK_BO/cash_flow_20260512T142540.json
+ICICIBANK.BO,yahoo,valuation_historical,"{""trailing_pe"": 16.930376, ""forward_pe"": 15.616069, ""price_to_book"": 2.543188, ""ev_to_ebitda"": null, ""ev_to_revenue"": 5.463}",ratio,,,0.5,2026-05-12T14:25:40.394833+00:00,yahoo/ICICIBANK_BO/valuation_historical_20260512T142540.json
+ICICIBANK.BO,yahoo,dividend_yield,78.0,%,,,0.5,2026-05-12T14:25:40.395501+00:00,yahoo/ICICIBANK_BO/dividend_yield_20260512T142540.json
+ICICIBANK.BO,yahoo,valuation_forward,"{""forward_pe"": 15.616069, ""forward_eps"": 79.41499, ""price_to_sales"": 4.609446}",ratio,,,0.4,2026-05-12T14:25:40.396092+00:00,yahoo/ICICIBANK_BO/valuation_forward_20260512T142540.json
+ICICIBANK.BO,yahoo,target_price,"{""mean"": 1703.625, ""median"": 1714.0, ""high"": 1990.0, ""low"": 1540.0, ""n_analysts"": 40}",INR,,,0.4,2026-05-12T14:25:40.396596+00:00,yahoo/ICICIBANK_BO/target_price_20260512T142540.json
+ICICIBANK.BO,yahoo,rating_split,"{""consensus"": ""strong_buy"", ""n_analysts"": 40}",,,,0.4,2026-05-12T14:25:40.397093+00:00,yahoo/ICICIBANK_BO/rating_split_20260512T142540.json
+ICICIBANK.BO,marketscreener,current_price,,,,RuntimeError: slug_not_resolved,2807.7,2026-05-12T14:25:40.397584+00:00,
+ICICIBANK.BO,marketscreener,historical_prices,,,,not_implemented,0.0,2026-05-12T14:25:43.205486+00:00,
+ICICIBANK.BO,marketscreener,market_cap,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:43.205537+00:00,
+ICICIBANK.BO,marketscreener,company_profile,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:43.205577+00:00,
+ICICIBANK.BO,marketscreener,income_statement_annual,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:43.205615+00:00,
+ICICIBANK.BO,marketscreener,income_statement_quarterly,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:43.205650+00:00,
+ICICIBANK.BO,marketscreener,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:25:43.205685+00:00,
+ICICIBANK.BO,marketscreener,cash_flow,,,,not_implemented,0.0,2026-05-12T14:25:43.205719+00:00,
+ICICIBANK.BO,marketscreener,valuation_historical,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:43.205755+00:00,
+ICICIBANK.BO,marketscreener,dividend_yield,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:43.205787+00:00,
+ICICIBANK.BO,marketscreener,valuation_forward,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:43.205851+00:00,
+ICICIBANK.BO,marketscreener,target_price,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:43.205887+00:00,
+ICICIBANK.BO,marketscreener,rating_split,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:43.205923+00:00,
+ICICIBANK.BO,macro,current_price,,,,not_implemented,0.0,2026-05-12T14:25:43.205962+00:00,
+ICICIBANK.BO,macro,historical_prices,,,,not_implemented,0.0,2026-05-12T14:25:43.205995+00:00,
+ICICIBANK.BO,macro,market_cap,,,,not_implemented,0.0,2026-05-12T14:25:43.206027+00:00,
+ICICIBANK.BO,macro,company_profile,"{""country_iso3"": ""IND"", ""gdp_growth_pct"": 6.49476552383821, ""inflation_pct"": null, ""population"": 1450935791, ""fx_lcu_per_usd"": 83.669281580941, ""macro_year"": ""2024""}",macro,2024,,0.8,2026-05-12T14:25:43.206056+00:00,macro/ICICIBANK_BO/company_profile_20260512T142543.json
+ICICIBANK.BO,macro,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:25:43.206966+00:00,
+ICICIBANK.BO,macro,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:25:43.207008+00:00,
+ICICIBANK.BO,macro,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:25:43.207047+00:00,
+ICICIBANK.BO,macro,cash_flow,,,,not_implemented,0.0,2026-05-12T14:25:43.207081+00:00,
+ICICIBANK.BO,macro,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:25:43.207114+00:00,
+ICICIBANK.BO,macro,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:25:43.207148+00:00,
+ICICIBANK.BO,macro,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:25:43.207180+00:00,
+ICICIBANK.BO,macro,target_price,,,,not_implemented,0.0,2026-05-12T14:25:43.207212+00:00,
+ICICIBANK.BO,macro,rating_split,,,,not_implemented,0.0,2026-05-12T14:25:43.207244+00:00,
+ICICIBANK.BO,adx,current_price,,,,ValueError: ICICIBANK.BO not on ADX main market board,0.2,2026-05-12T14:25:43.207276+00:00,
+ICICIBANK.BO,adx,historical_prices,,,,not_implemented,0.0,2026-05-12T14:25:43.207527+00:00,
+ICICIBANK.BO,adx,market_cap,,,,ValueError: ICICIBANK.BO not on ADX main market board,0.2,2026-05-12T14:25:43.207562+00:00,
+ICICIBANK.BO,adx,company_profile,,,,ValueError: ICICIBANK.BO not in ADX board or listed-companies,0.2,2026-05-12T14:25:43.207797+00:00,
+ICICIBANK.BO,adx,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:25:43.208033+00:00,
+ICICIBANK.BO,adx,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:25:43.208065+00:00,
+ICICIBANK.BO,adx,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:25:43.208097+00:00,
+ICICIBANK.BO,adx,cash_flow,,,,not_implemented,0.0,2026-05-12T14:25:43.208128+00:00,
+ICICIBANK.BO,adx,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:25:43.208159+00:00,
+ICICIBANK.BO,adx,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:25:43.208190+00:00,
+ICICIBANK.BO,adx,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:25:43.208220+00:00,
+ICICIBANK.BO,adx,target_price,,,,not_implemented,0.0,2026-05-12T14:25:43.208251+00:00,
+ICICIBANK.BO,adx,rating_split,,,,not_implemented,0.0,2026-05-12T14:25:43.208281+00:00,
+ICICIBANK.BO,nse,current_price,1244.5,INR,,,271.9,2026-05-12T14:25:43.208315+00:00,nse/ICICIBANK_BO/current_price_20260512T142543.json
+ICICIBANK.BO,nse,historical_prices,,,,not_implemented,0.0,2026-05-12T14:25:43.481315+00:00,
+ICICIBANK.BO,nse,market_cap,8921315026413.0,INR,,,0.6,2026-05-12T14:25:43.481672+00:00,nse/ICICIBANK_BO/market_cap_20260512T142543.json
+ICICIBANK.BO,nse,company_profile,"{""name"": ""ICICI Bank Limited"", ""symbol"": ""ICICIBANK"", ""isin"": ""INE090A01021"", ""sector"": ""Financial Services"", ""industry"": ""Banks"", ""macro"": ""Financial Services"", ""country"": ""India"", ""currency"": ""INR""}",,,,0.5,2026-05-12T14:25:43.482501+00:00,nse/ICICIBANK_BO/company_profile_20260512T142543.json
+ICICIBANK.BO,nse,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:25:43.483212+00:00,
+ICICIBANK.BO,nse,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:25:43.483374+00:00,
+ICICIBANK.BO,nse,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:25:43.483525+00:00,
+ICICIBANK.BO,nse,cash_flow,,,,not_implemented,0.0,2026-05-12T14:25:43.483666+00:00,
+ICICIBANK.BO,nse,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:25:43.483802+00:00,
+ICICIBANK.BO,nse,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:25:43.483939+00:00,
+ICICIBANK.BO,nse,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:25:43.484081+00:00,
+ICICIBANK.BO,nse,target_price,,,,not_implemented,0.0,2026-05-12T14:25:43.484203+00:00,
+ICICIBANK.BO,nse,rating_split,,,,not_implemented,0.0,2026-05-12T14:25:43.484326+00:00,
+ICICIBANK.BO,hkex,current_price,,,,ValueError: HKEX returned no quote for sym=ICICIBANK.BO,9750.5,2026-05-12T14:25:43.484456+00:00,
+ICICIBANK.BO,hkex,historical_prices,,,,not_implemented,0.0,2026-05-12T14:25:53.235299+00:00,
+ICICIBANK.BO,hkex,market_cap,,,,ValueError: HKEX returned no quote for sym=ICICIBANK.BO,0.0,2026-05-12T14:25:53.235565+00:00,
+ICICIBANK.BO,hkex,company_profile,,,,ValueError: HKEX returned no quote for sym=ICICIBANK.BO,0.0,2026-05-12T14:25:53.235661+00:00,
+ICICIBANK.BO,hkex,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:25:53.235731+00:00,
+ICICIBANK.BO,hkex,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:25:53.235790+00:00,
+ICICIBANK.BO,hkex,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:25:53.235849+00:00,
+ICICIBANK.BO,hkex,cash_flow,,,,not_implemented,0.0,2026-05-12T14:25:53.235904+00:00,
+ICICIBANK.BO,hkex,valuation_historical,,,,ValueError: HKEX returned no quote for sym=ICICIBANK.BO,0.0,2026-05-12T14:25:53.235958+00:00,
+ICICIBANK.BO,hkex,dividend_yield,,,,ValueError: HKEX returned no quote for sym=ICICIBANK.BO,0.0,2026-05-12T14:25:53.236016+00:00,
+ICICIBANK.BO,hkex,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:25:53.236076+00:00,
+ICICIBANK.BO,hkex,target_price,,,,not_implemented,0.0,2026-05-12T14:25:53.236127+00:00,
+ICICIBANK.BO,hkex,rating_split,,,,not_implemented,0.0,2026-05-12T14:25:53.236179+00:00,
+0700.HK,yahoo,current_price,457.2,HKD,,,356.8,2026-05-12T14:25:53.236243+00:00,yahoo/0700_HK/current_price_20260512T142553.json
+0700.HK,yahoo,historical_prices,"{""n_bars"": 248, ""first"": ""2025-05-12"", ""last"": ""2026-05-12""}",HKD,2026-05-12,,123.1,2026-05-12T14:25:53.594443+00:00,yahoo/0700_HK/historical_prices_20260512T142553.json
+0700.HK,yahoo,market_cap,4131670458368.0,HKD,,,0.5,2026-05-12T14:25:53.717826+00:00,yahoo/0700_HK/market_cap_20260512T142553.json
+0700.HK,yahoo,company_profile,"{""name"": ""TENCENT"", ""sector"": ""Communication Services"", ""industry"": ""Internet Content & Information"", ""country"": ""China"", ""currency"": ""HKD"", ""summary"": ""Tencent Holdings Limited, an investment holding company, provides value-added services, marketing services, fintech, and business services in Mainland China and internationally. The company's consumers business includes communications and social services, such as instant messaging and social networks; digital content, including online games, videos, live streaming, news, music, and literature; fintech services, which include mobile payment, wealth management, consumer loans, and securities tradi"", ""website"": ""https://www.tencent.com""}",,,,0.4,2026-05-12T14:25:53.718441+00:00,yahoo/0700_HK/company_profile_20260512T142553.json
+0700.HK,yahoo,income_statement_annual,"{""n_periods"": 5, ""fields_present"": [""Interest Income Non Operating"", ""Selling General And Administration"", ""Operating Expense"", ""Gross Profit"", ""Cost Of Revenue"", ""Diluted NI Availto Com Stockholders"", ""Normalized EBITDA"", ""Net Income From Continuing And Discontinued Operation"", ""Diluted Average Shares"", ""Tax Provision""]}",CNY,2025-12-31 00:00:00,,302.2,2026-05-12T14:25:53.719013+00:00,yahoo/0700_HK/income_statement_annual_20260512T142554.json
+0700.HK,yahoo,income_statement_quarterly,"{""n_periods"": 5, ""fields_present"": [""Interest Income Non Operating"", ""Selling General And Administration"", ""Operating Expense"", ""Gross Profit"", ""Cost Of Revenue"", ""Diluted NI Availto Com Stockholders"", ""Normalized EBITDA"", ""Net Income From Continuing And Discontinued Operation"", ""Diluted Average Shares"", ""Tax Provision""]}",CNY,2025-12-31 00:00:00,,288.4,2026-05-12T14:25:54.021405+00:00,yahoo/0700_HK/income_statement_quarterly_20260512T142554.json
+0700.HK,yahoo,balance_sheet,"{""n_periods"": 5, ""fields_present"": [""Available For Sale Securities"", ""Goodwill"", ""Total Equity Gross Minority Interest"", ""Payables"", ""Total Liabilities Net Minority Interest"", ""Total Assets"", ""Net Debt"", ""Taxes Receivable"", ""Total Non Current Liabilities Net Minority Interest"", ""Long Term Debt""]}",CNY,2025-12-31 00:00:00,,343.0,2026-05-12T14:25:54.310005+00:00,yahoo/0700_HK/balance_sheet_20260512T142554.json
+0700.HK,yahoo,cash_flow,"{""n_periods"": 4, ""fields_present"": [""Capital Expenditure"", ""End Cash Position"", ""Interest Paid Cff"", ""Change In Inventory"", ""Other Non Cash Items"", ""Common Stock Dividend Paid"", ""Issuance Of Capital Stock"", ""Taxes Refund Paid"", ""Gain Loss On Sale Of PPE"", ""Common Stock Payments""]}",CNY,2025-12-31 00:00:00,,288.2,2026-05-12T14:25:54.653164+00:00,yahoo/0700_HK/cash_flow_20260512T142554.json
+0700.HK,yahoo,valuation_historical,"{""trailing_pe"": 16.434221, ""forward_pe"": 11.715156, ""price_to_book"": 3.1108203, ""ev_to_ebitda"": 15.602, ""ev_to_revenue"": 5.674}",ratio,,,0.3,2026-05-12T14:25:54.941532+00:00,yahoo/0700_HK/valuation_historical_20260512T142554.json
+0700.HK,yahoo,dividend_yield,114.0,%,,,0.3,2026-05-12T14:25:54.941922+00:00,yahoo/0700_HK/dividend_yield_20260512T142554.json
+0700.HK,yahoo,valuation_forward,"{""forward_pe"": 11.715156, ""forward_eps"": 39.02637, ""price_to_sales"": 5.4959526}",ratio,,,0.5,2026-05-12T14:25:54.942679+00:00,yahoo/0700_HK/valuation_forward_20260512T142554.json
+0700.HK,yahoo,target_price,"{""mean"": 725.35046, ""median"": 729.17267, ""high"": 890.238, ""low"": 420.28033, ""n_analysts"": 42}",HKD,,,0.3,2026-05-12T14:25:54.943241+00:00,yahoo/0700_HK/target_price_20260512T142554.json
+0700.HK,yahoo,rating_split,"{""consensus"": ""strong_buy"", ""n_analysts"": 42}",,,,0.6,2026-05-12T14:25:54.943629+00:00,yahoo/0700_HK/rating_split_20260512T142554.json
+0700.HK,marketscreener,current_price,,,,RuntimeError: slug_not_resolved,4843.5,2026-05-12T14:25:54.944579+00:00,
+0700.HK,marketscreener,historical_prices,,,,not_implemented,0.0,2026-05-12T14:25:59.788306+00:00,
+0700.HK,marketscreener,market_cap,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:59.788385+00:00,
+0700.HK,marketscreener,company_profile,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:59.788438+00:00,
+0700.HK,marketscreener,income_statement_annual,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:59.788671+00:00,
+0700.HK,marketscreener,income_statement_quarterly,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:59.788779+00:00,
+0700.HK,marketscreener,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:25:59.788850+00:00,
+0700.HK,marketscreener,cash_flow,,,,not_implemented,0.0,2026-05-12T14:25:59.788903+00:00,
+0700.HK,marketscreener,valuation_historical,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:59.788950+00:00,
+0700.HK,marketscreener,dividend_yield,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:59.788997+00:00,
+0700.HK,marketscreener,valuation_forward,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:59.789041+00:00,
+0700.HK,marketscreener,target_price,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:59.789086+00:00,
+0700.HK,marketscreener,rating_split,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:25:59.789136+00:00,
+0700.HK,macro,current_price,,,,not_implemented,0.0,2026-05-12T14:25:59.789178+00:00,
+0700.HK,macro,historical_prices,,,,not_implemented,0.0,2026-05-12T14:25:59.789218+00:00,
+0700.HK,macro,market_cap,,,,not_implemented,0.0,2026-05-12T14:25:59.789256+00:00,
+0700.HK,macro,company_profile,"{""country_iso3"": ""HKG"", ""gdp_growth_pct"": 2.50498758466826, ""inflation_pct"": 1.72972119105914, ""population"": 7524100, ""fx_lcu_per_usd"": 7.80383333333334, ""macro_year"": ""2024""}",macro,2024,,842.5,2026-05-12T14:25:59.789293+00:00,macro/0700_HK/company_profile_20260512T142600.json
+0700.HK,macro,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:26:00.632435+00:00,
+0700.HK,macro,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:26:00.632842+00:00,
+0700.HK,macro,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:26:00.633176+00:00,
+0700.HK,macro,cash_flow,,,,not_implemented,0.0,2026-05-12T14:26:00.633590+00:00,
+0700.HK,macro,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:26:00.633976+00:00,
+0700.HK,macro,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:26:00.634287+00:00,
+0700.HK,macro,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:26:00.634654+00:00,
+0700.HK,macro,target_price,,,,not_implemented,0.0,2026-05-12T14:26:00.634869+00:00,
+0700.HK,macro,rating_split,,,,not_implemented,0.0,2026-05-12T14:26:00.635077+00:00,
+0700.HK,adx,current_price,,,,ValueError: 0700.HK not on ADX main market board,0.6,2026-05-12T14:26:00.635248+00:00,
+0700.HK,adx,historical_prices,,,,not_implemented,0.0,2026-05-12T14:26:00.636150+00:00,
+0700.HK,adx,market_cap,,,,ValueError: 0700.HK not on ADX main market board,0.7,2026-05-12T14:26:00.636355+00:00,
+0700.HK,adx,company_profile,,,,ValueError: 0700.HK not in ADX board or listed-companies,0.5,2026-05-12T14:26:00.637446+00:00,
+0700.HK,adx,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:26:00.638389+00:00,
+0700.HK,adx,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:26:00.638703+00:00,
+0700.HK,adx,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:26:00.638930+00:00,
+0700.HK,adx,cash_flow,,,,not_implemented,0.0,2026-05-12T14:26:00.639119+00:00,
+0700.HK,adx,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:26:00.639279+00:00,
+0700.HK,adx,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:26:00.639426+00:00,
+0700.HK,adx,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:26:00.639585+00:00,
+0700.HK,adx,target_price,,,,not_implemented,0.0,2026-05-12T14:26:00.639902+00:00,
+0700.HK,adx,rating_split,,,,not_implemented,0.0,2026-05-12T14:26:00.640227+00:00,
+0700.HK,nse,current_price,,,,ValueError: priceInfo.lastPrice missing,4478.4,2026-05-12T14:26:00.640478+00:00,
+0700.HK,nse,historical_prices,,,,not_implemented,0.0,2026-05-12T14:26:05.119006+00:00,
+0700.HK,nse,market_cap,,,,ValueError: can't derive marketCap (price or issuedSize missing),0.3,2026-05-12T14:26:05.119099+00:00,
+0700.HK,nse,company_profile,,,,ValueError: NSE quote had no companyName / symbol / ISIN — likely non-Indian ticker,0.4,2026-05-12T14:26:05.119556+00:00,
+0700.HK,nse,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:26:05.120166+00:00,
+0700.HK,nse,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:26:05.120286+00:00,
+0700.HK,nse,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:26:05.120388+00:00,
+0700.HK,nse,cash_flow,,,,not_implemented,0.0,2026-05-12T14:26:05.120482+00:00,
+0700.HK,nse,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:26:05.120585+00:00,
+0700.HK,nse,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:26:05.120671+00:00,
+0700.HK,nse,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:26:05.120758+00:00,
+0700.HK,nse,target_price,,,,not_implemented,0.0,2026-05-12T14:26:05.120852+00:00,
+0700.HK,nse,rating_split,,,,not_implemented,0.0,2026-05-12T14:26:05.120933+00:00,
+0700.HK,hkex,current_price,457.2,HKD,,,1.2,2026-05-12T14:26:05.121019+00:00,hkex/0700_HK/current_price_20260512T142605.json
+0700.HK,hkex,historical_prices,,,,not_implemented,0.0,2026-05-12T14:26:05.122324+00:00,
+0700.HK,hkex,market_cap,4168745775979.1997,HKD,,,0.3,2026-05-12T14:26:05.122417+00:00,hkex/0700_HK/market_cap_20260512T142605.json
+0700.HK,hkex,company_profile,"{""name"": ""Tencent Holdings Ltd."", ""ric"": ""0700.HK"", ""sedol"": ""BMMV2K8"", ""currency"": ""HKD"", ""country"": ""Cayman Islands"", ""fiscal_year_end"": ""31 Dec 2025"", ""chairman"": ""Ma Huateng"", ""shares_outstanding"": 9117991636.0, ""lot_size"": 100.0, ""primary_exchange"": ""HKEX""}",,,,0.3,2026-05-12T14:26:05.122852+00:00,hkex/0700_HK/company_profile_20260512T142605.json
+0700.HK,hkex,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:26:05.123298+00:00,
+0700.HK,hkex,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:26:05.123372+00:00,
+0700.HK,hkex,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:26:05.123438+00:00,
+0700.HK,hkex,cash_flow,,,,not_implemented,0.0,2026-05-12T14:26:05.123502+00:00,
+0700.HK,hkex,valuation_historical,"{""trailing_pe"": 18.47, ""eps"": 24.7487, ""fiscal_year_end"": ""31 Dec 2025""}",ratio,31 Dec 2025,,0.3,2026-05-12T14:26:05.123567+00:00,hkex/0700_HK/valuation_historical_20260512T142605.json
+0700.HK,hkex,dividend_yield,1.16,%,31 Dec 2025,,0.4,2026-05-12T14:26:05.123955+00:00,hkex/0700_HK/dividend_yield_20260512T142605.json
+0700.HK,hkex,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:26:05.124410+00:00,
+0700.HK,hkex,target_price,,,,not_implemented,0.0,2026-05-12T14:26:05.124501+00:00,
+0700.HK,hkex,rating_split,,,,not_implemented,0.0,2026-05-12T14:26:05.124587+00:00,
+2899.HK,yahoo,current_price,38.44,HKD,,,400.1,2026-05-12T14:26:05.124661+00:00,yahoo/2899_HK/current_price_20260512T142605.json
+2899.HK,yahoo,historical_prices,"{""n_bars"": 248, ""first"": ""2025-05-12"", ""last"": ""2026-05-12""}",HKD,2026-05-12,,123.6,2026-05-12T14:26:05.524956+00:00,yahoo/2899_HK/historical_prices_20260512T142605.json
+2899.HK,yahoo,market_cap,1022147035136.0,HKD,,,0.4,2026-05-12T14:26:05.648772+00:00,yahoo/2899_HK/market_cap_20260512T142605.json
+2899.HK,yahoo,company_profile,"{""name"": ""ZIJIN MINING"", ""sector"": ""Basic Materials"", ""industry"": ""Gold"", ""country"": ""China"", ""currency"": ""HKD"", ""summary"": ""Zijin Mining Group Company Limited, together with its subsidiaries, engages in exploration and extraction of metals in Mainland China and internationally. The company offers copper, gold, zinc concentrate, lead concentrate, silver, lithium, iron concentrate, tungsten concentrate, and molybdenum concentrate; smelted copper, smelted and processed gold and silver, smelted zinc ingots, sulfuric acid, and battery -grade lithium carbonate; and copper pipes, copper plates and strips, potassium gold cya"", ""website"": ""https://www.zjky.cn""}",,,,0.4,2026-05-12T14:26:05.649310+00:00,yahoo/2899_HK/company_profile_20260512T142605.json
+2899.HK,yahoo,income_statement_annual,"{""n_periods"": 4, ""fields_present"": [""Selling General And Administration"", ""Operating Expense"", ""Gross Profit"", ""Cost Of Revenue"", ""Normalized EBITDA"", ""Net Income From Continuing And Discontinued Operation"", ""Diluted Average Shares"", ""Tax Provision"", ""Depreciation And Amortization In Income Statement"", ""Interest Income""]}",CNY,2025-12-31 00:00:00,,373.4,2026-05-12T14:26:05.649794+00:00,yahoo/2899_HK/income_statement_annual_20260512T142606.json
+2899.HK,yahoo,income_statement_quarterly,"{""n_periods"": 6, ""fields_present"": [""Selling General And Administration"", ""Operating Expense"", ""Gross Profit"", ""Cost Of Revenue"", ""Normalized EBITDA"", ""Net Income From Continuing And Discontinued Operation"", ""Diluted Average Shares"", ""Tax Provision"", ""Interest Income"", ""Special Income Charges""]}",CNY,2026-03-31 00:00:00,,328.8,2026-05-12T14:26:06.023370+00:00,yahoo/2899_HK/income_statement_quarterly_20260512T142606.json
+2899.HK,yahoo,balance_sheet,"{""n_periods"": 5, ""fields_present"": [""Available For Sale Securities"", ""Goodwill"", ""Total Equity Gross Minority Interest"", ""Payables"", ""Total Liabilities Net Minority Interest"", ""Total Assets"", ""Net Debt"", ""Total Non Current Liabilities Net Minority Interest"", ""Long Term Debt"", ""Properties""]}",CNY,2025-12-31 00:00:00,,331.9,2026-05-12T14:26:06.352303+00:00,yahoo/2899_HK/balance_sheet_20260512T142606.json
+2899.HK,yahoo,cash_flow,"{""n_periods"": 4, ""fields_present"": [""Capital Expenditure"", ""End Cash Position"", ""Change In Inventory"", ""Other Non Cash Items"", ""Paymentsto Suppliersfor Goodsand Services"", ""Gain Loss On Sale Of PPE"", ""Change In Payable"", ""Net Other Financing Charges"", ""Purchase Of Business"", ""Net PPE Purchase And Sale""]}",CNY,2025-12-31 00:00:00,,321.0,2026-05-12T14:26:06.684439+00:00,yahoo/2899_HK/cash_flow_20260512T142607.json
+2899.HK,yahoo,valuation_historical,"{""trailing_pe"": 14.727969, ""forward_pe"": 10.247204, ""price_to_book"": 4.4309325, ""ev_to_ebitda"": 10.559, ""ev_to_revenue"": 3.094}",ratio,,,0.5,2026-05-12T14:26:07.005627+00:00,yahoo/2899_HK/valuation_historical_20260512T142607.json
+2899.HK,yahoo,dividend_yield,144.0,%,,,0.4,2026-05-12T14:26:07.006226+00:00,yahoo/2899_HK/dividend_yield_20260512T142607.json
+2899.HK,yahoo,valuation_forward,"{""forward_pe"": 10.247204, ""forward_eps"": 3.751267, ""price_to_sales"": 2.7726882}",ratio,,,0.4,2026-05-12T14:26:07.006736+00:00,yahoo/2899_HK/valuation_forward_20260512T142607.json
+2899.HK,yahoo,target_price,"{""mean"": 51.87783, ""median"": 52.45857, ""high"": 58.20409, ""low"": 43.7798, ""n_analysts"": 15}",HKD,,,0.4,2026-05-12T14:26:07.007240+00:00,yahoo/2899_HK/target_price_20260512T142607.json
+2899.HK,yahoo,rating_split,"{""consensus"": ""strong_buy"", ""n_analysts"": 15}",,,,0.4,2026-05-12T14:26:07.007722+00:00,yahoo/2899_HK/rating_split_20260512T142607.json
+2899.HK,marketscreener,current_price,,,,RuntimeError: slug_not_resolved,5125.1,2026-05-12T14:26:07.008195+00:00,
+2899.HK,marketscreener,historical_prices,,,,not_implemented,0.0,2026-05-12T14:26:12.133480+00:00,
+2899.HK,marketscreener,market_cap,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:12.133554+00:00,
+2899.HK,marketscreener,company_profile,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:12.133607+00:00,
+2899.HK,marketscreener,income_statement_annual,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:12.133652+00:00,
+2899.HK,marketscreener,income_statement_quarterly,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:12.133696+00:00,
+2899.HK,marketscreener,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:26:12.133738+00:00,
+2899.HK,marketscreener,cash_flow,,,,not_implemented,0.0,2026-05-12T14:26:12.133806+00:00,
+2899.HK,marketscreener,valuation_historical,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:12.133844+00:00,
+2899.HK,marketscreener,dividend_yield,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:12.133883+00:00,
+2899.HK,marketscreener,valuation_forward,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:12.133922+00:00,
+2899.HK,marketscreener,target_price,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:12.133959+00:00,
+2899.HK,marketscreener,rating_split,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:12.133994+00:00,
+2899.HK,macro,current_price,,,,not_implemented,0.0,2026-05-12T14:26:12.134031+00:00,
+2899.HK,macro,historical_prices,,,,not_implemented,0.0,2026-05-12T14:26:12.134066+00:00,
+2899.HK,macro,market_cap,,,,not_implemented,0.0,2026-05-12T14:26:12.134100+00:00,
+2899.HK,macro,company_profile,"{""country_iso3"": ""HKG"", ""gdp_growth_pct"": 2.50498758466826, ""inflation_pct"": 1.72972119105914, ""population"": 7524100, ""fx_lcu_per_usd"": 7.80383333333334, ""macro_year"": ""2024""}",macro,2024,,1.0,2026-05-12T14:26:12.134133+00:00,macro/2899_HK/company_profile_20260512T142612.json
+2899.HK,macro,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:26:12.135213+00:00,
+2899.HK,macro,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:26:12.135262+00:00,
+2899.HK,macro,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:26:12.135304+00:00,
+2899.HK,macro,cash_flow,,,,not_implemented,0.0,2026-05-12T14:26:12.135343+00:00,
+2899.HK,macro,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:26:12.135378+00:00,
+2899.HK,macro,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:26:12.135413+00:00,
+2899.HK,macro,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:26:12.135449+00:00,
+2899.HK,macro,target_price,,,,not_implemented,0.0,2026-05-12T14:26:12.135483+00:00,
+2899.HK,macro,rating_split,,,,not_implemented,0.0,2026-05-12T14:26:12.135517+00:00,
+2899.HK,adx,current_price,,,,ValueError: 2899.HK not on ADX main market board,0.2,2026-05-12T14:26:12.135552+00:00,
+2899.HK,adx,historical_prices,,,,not_implemented,0.0,2026-05-12T14:26:12.135805+00:00,
+2899.HK,adx,market_cap,,,,ValueError: 2899.HK not on ADX main market board,0.2,2026-05-12T14:26:12.135838+00:00,
+2899.HK,adx,company_profile,,,,ValueError: 2899.HK not in ADX board or listed-companies,0.2,2026-05-12T14:26:12.136076+00:00,
+2899.HK,adx,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:26:12.136313+00:00,
+2899.HK,adx,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:26:12.136345+00:00,
+2899.HK,adx,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:26:12.136376+00:00,
+2899.HK,adx,cash_flow,,,,not_implemented,0.0,2026-05-12T14:26:12.136408+00:00,
+2899.HK,adx,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:26:12.136438+00:00,
+2899.HK,adx,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:26:12.136469+00:00,
+2899.HK,adx,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:26:12.136504+00:00,
+2899.HK,adx,target_price,,,,not_implemented,0.0,2026-05-12T14:26:12.136535+00:00,
+2899.HK,adx,rating_split,,,,not_implemented,0.0,2026-05-12T14:26:12.136566+00:00,
+2899.HK,nse,current_price,,,,ValueError: priceInfo.lastPrice missing,4788.8,2026-05-12T14:26:12.136599+00:00,
+2899.HK,nse,historical_prices,,,,not_implemented,0.0,2026-05-12T14:26:16.926205+00:00,
+2899.HK,nse,market_cap,,,,ValueError: can't derive marketCap (price or issuedSize missing),0.5,2026-05-12T14:26:16.926569+00:00,
+2899.HK,nse,company_profile,,,,ValueError: NSE quote had no companyName / symbol / ISIN — likely non-Indian ticker,0.7,2026-05-12T14:26:16.927253+00:00,
+2899.HK,nse,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:26:16.928571+00:00,
+2899.HK,nse,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:26:16.928745+00:00,
+2899.HK,nse,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:26:16.928848+00:00,
+2899.HK,nse,cash_flow,,,,not_implemented,0.0,2026-05-12T14:26:16.928939+00:00,
+2899.HK,nse,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:26:16.929038+00:00,
+2899.HK,nse,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:26:16.929127+00:00,
+2899.HK,nse,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:26:16.929245+00:00,
+2899.HK,nse,target_price,,,,not_implemented,0.0,2026-05-12T14:26:16.929364+00:00,
+2899.HK,nse,rating_split,,,,not_implemented,0.0,2026-05-12T14:26:16.929462+00:00,
+2899.HK,hkex,current_price,38.44,HKD,,,1.1,2026-05-12T14:26:16.929582+00:00,hkex/2899_HK/current_price_20260512T142616.json
+2899.HK,hkex,historical_prices,,,,not_implemented,0.0,2026-05-12T14:26:16.930833+00:00,
+2899.HK,hkex,market_cap,230210000000.0,HKD,,,0.3,2026-05-12T14:26:16.930931+00:00,hkex/2899_HK/market_cap_20260512T142616.json
+2899.HK,hkex,company_profile,"{""name"": ""Zijin Mining Group Co., Ltd. - H Shares"", ""ric"": ""2899.HK"", ""sedol"": ""6725299"", ""currency"": ""HKD"", ""country"": ""PRC"", ""fiscal_year_end"": ""31 Dec 2025"", ""chairman"": ""Zou Laichang"", ""shares_outstanding"": 5988921482.0, ""lot_size"": null, ""primary_exchange"": ""HKEX""}",,,,0.6,2026-05-12T14:26:16.931366+00:00,hkex/2899_HK/company_profile_20260512T142616.json
+2899.HK,hkex,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:26:16.932156+00:00,
+2899.HK,hkex,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:26:16.932235+00:00,
+2899.HK,hkex,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:26:16.932305+00:00,
+2899.HK,hkex,cash_flow,,,,not_implemented,0.0,2026-05-12T14:26:16.932385+00:00,
+2899.HK,hkex,valuation_historical,"{""trailing_pe"": 19.73, ""eps"": 1.9481, ""fiscal_year_end"": ""31 Dec 2025""}",ratio,31 Dec 2025,,0.5,2026-05-12T14:26:16.932456+00:00,hkex/2899_HK/valuation_historical_20260512T142616.json
+2899.HK,hkex,dividend_yield,1.74,%,31 Dec 2025,,0.3,2026-05-12T14:26:16.933103+00:00,hkex/2899_HK/dividend_yield_20260512T142616.json
+2899.HK,hkex,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:26:16.933534+00:00,
+2899.HK,hkex,target_price,,,,not_implemented,0.0,2026-05-12T14:26:16.933622+00:00,
+2899.HK,hkex,rating_split,,,,not_implemented,0.0,2026-05-12T14:26:16.933694+00:00,
+1398.HK,yahoo,current_price,7.05,HKD,,,353.6,2026-05-12T14:26:16.933793+00:00,yahoo/1398_HK/current_price_20260512T142617.json
+1398.HK,yahoo,historical_prices,"{""n_bars"": 248, ""first"": ""2025-05-12"", ""last"": ""2026-05-12""}",HKD,2026-05-12,,112.2,2026-05-12T14:26:17.288046+00:00,yahoo/1398_HK/historical_prices_20260512T142617.json
+1398.HK,yahoo,market_cap,2512664133632.0,HKD,,,0.5,2026-05-12T14:26:17.400494+00:00,yahoo/1398_HK/market_cap_20260512T142617.json
+1398.HK,yahoo,company_profile,"{""name"": ""ICBC"", ""sector"": ""Financial Services"", ""industry"": ""Banks - Diversified"", ""country"": ""China"", ""currency"": ""HKD"", ""summary"": ""Industrial and Commercial Bank of China Limited, together with its subsidiaries, provides banking products and services in the People's Republic of China and internationally. It operates through Corporate Banking, Personal Banking, and Treasury Operations segments. The Corporate Banking segment offers corporate loans, trade financing, deposit-taking activities, corporate wealth management services, custody services, and various types of corporate intermediary services, as well as corporate loans"", ""website"": ""https://www.icbc-ltd.com""}",,,,0.4,2026-05-12T14:26:17.401125+00:00,yahoo/1398_HK/company_profile_20260512T142617.json
+1398.HK,yahoo,income_statement_annual,"{""n_periods"": 4, ""fields_present"": [""Selling General And Administration"", ""Operating Expense"", ""Net Income From Continuing And Discontinued Operation"", ""Diluted Average Shares"", ""Tax Provision"", ""Depreciation And Amortization In Income Statement"", ""Interest Income"", ""Special Income Charges"", ""Net Income Including Noncontrolling Interests"", ""Total Unusual Items Excluding Goodwill""]}",CNY,2025-12-31 00:00:00,,300.5,2026-05-12T14:26:17.401692+00:00,yahoo/1398_HK/income_statement_annual_20260512T142617.json
+1398.HK,yahoo,income_statement_quarterly,"{""n_periods"": 6, ""fields_present"": [""Selling General And Administration"", ""Operating Expense"", ""Net Income From Continuing And Discontinued Operation"", ""Diluted Average Shares"", ""Tax Provision"", ""Interest Income"", ""Special Income Charges"", ""Net Income Including Noncontrolling Interests"", ""Total Unusual Items Excluding Goodwill"", ""Other Operating Expenses""]}",CNY,2026-03-31 00:00:00,,255.0,2026-05-12T14:26:17.702687+00:00,yahoo/1398_HK/income_statement_quarterly_20260512T142617.json
+1398.HK,yahoo,balance_sheet,"{""n_periods"": 4, ""fields_present"": [""Preferred Stock Equity"", ""Minority Interest"", ""Total Tax Payable"", ""Share Issued"", ""Available For Sale Securities"", ""Other Payable"", ""Retained Earnings"", ""Total Equity Gross Minority Interest"", ""Cash Cash Equivalents And Federal Funds Sold"", ""Derivative Product Liabilities""]}",CNY,2025-12-31 00:00:00,,321.0,2026-05-12T14:26:17.957864+00:00,yahoo/1398_HK/balance_sheet_20260512T142618.json
+1398.HK,yahoo,cash_flow,"{""n_periods"": 4, ""fields_present"": [""Capital Expenditure"", ""End Cash Position"", ""Other Non Cash Items"", ""Gain Loss On Sale Of PPE"", ""Change In Payable"", ""Net Other Financing Charges"", ""Net PPE Purchase And Sale"", ""Classesof Cash Receiptsfrom Operating Activities"", ""Purchase Of Investment"", ""Sale Of Business""]}",CNY,2025-12-31 00:00:00,,340.9,2026-05-12T14:26:18.279242+00:00,yahoo/1398_HK/cash_flow_20260512T142618.json
+1398.HK,yahoo,valuation_historical,"{""trailing_pe"": 6.0775867, ""forward_pe"": 5.685777, ""price_to_book"": 0.5536154, ""ev_to_ebitda"": null, ""ev_to_revenue"": 5.731}",ratio,,,0.5,2026-05-12T14:26:18.620338+00:00,yahoo/1398_HK/valuation_historical_20260512T142618.json
+1398.HK,yahoo,dividend_yield,501.0,%,,,0.4,2026-05-12T14:26:18.620986+00:00,yahoo/1398_HK/dividend_yield_20260512T142618.json
+1398.HK,yahoo,valuation_forward,"{""forward_pe"": 5.685777, ""forward_eps"": 1.2399361, ""price_to_sales"": 3.731371}",ratio,,,0.4,2026-05-12T14:26:18.621517+00:00,yahoo/1398_HK/valuation_forward_20260512T142618.json
+1398.HK,yahoo,target_price,"{""mean"": 8.044181, ""median"": 8.120001, ""high"": 9.257123, ""low"": 5.2593365, ""n_analysts"": 16}",HKD,,,0.4,2026-05-12T14:26:18.622022+00:00,yahoo/1398_HK/target_price_20260512T142618.json
+1398.HK,yahoo,rating_split,"{""consensus"": ""strong_buy"", ""n_analysts"": 16}",,,,0.4,2026-05-12T14:26:18.622505+00:00,yahoo/1398_HK/rating_split_20260512T142618.json
+1398.HK,marketscreener,current_price,,,,RuntimeError: slug_not_resolved,4523.2,2026-05-12T14:26:18.622990+00:00,
+1398.HK,marketscreener,historical_prices,,,,not_implemented,0.0,2026-05-12T14:26:23.146368+00:00,
+1398.HK,marketscreener,market_cap,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:23.146437+00:00,
+1398.HK,marketscreener,company_profile,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:23.146490+00:00,
+1398.HK,marketscreener,income_statement_annual,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:23.146536+00:00,
+1398.HK,marketscreener,income_statement_quarterly,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:23.146580+00:00,
+1398.HK,marketscreener,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:26:23.146620+00:00,
+1398.HK,marketscreener,cash_flow,,,,not_implemented,0.0,2026-05-12T14:26:23.146659+00:00,
+1398.HK,marketscreener,valuation_historical,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:23.146697+00:00,
+1398.HK,marketscreener,dividend_yield,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:23.146735+00:00,
+1398.HK,marketscreener,valuation_forward,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:23.146794+00:00,
+1398.HK,marketscreener,target_price,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:23.146830+00:00,
+1398.HK,marketscreener,rating_split,,,,RuntimeError: slug_not_resolved,0.0,2026-05-12T14:26:23.146867+00:00,
+1398.HK,macro,current_price,,,,not_implemented,0.0,2026-05-12T14:26:23.146906+00:00,
+1398.HK,macro,historical_prices,,,,not_implemented,0.0,2026-05-12T14:26:23.146942+00:00,
+1398.HK,macro,market_cap,,,,not_implemented,0.0,2026-05-12T14:26:23.146979+00:00,
+1398.HK,macro,company_profile,"{""country_iso3"": ""HKG"", ""gdp_growth_pct"": 2.50498758466826, ""inflation_pct"": 1.72972119105914, ""population"": 7524100, ""fx_lcu_per_usd"": 7.80383333333334, ""macro_year"": ""2024""}",macro,2024,,1.0,2026-05-12T14:26:23.147014+00:00,macro/1398_HK/company_profile_20260512T142623.json
+1398.HK,macro,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:26:23.148117+00:00,
+1398.HK,macro,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:26:23.148167+00:00,
+1398.HK,macro,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:26:23.148210+00:00,
+1398.HK,macro,cash_flow,,,,not_implemented,0.0,2026-05-12T14:26:23.148249+00:00,
+1398.HK,macro,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:26:23.148286+00:00,
+1398.HK,macro,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:26:23.148323+00:00,
+1398.HK,macro,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:26:23.148358+00:00,
+1398.HK,macro,target_price,,,,not_implemented,0.0,2026-05-12T14:26:23.148392+00:00,
+1398.HK,macro,rating_split,,,,not_implemented,0.0,2026-05-12T14:26:23.148426+00:00,
+1398.HK,adx,current_price,,,,ValueError: 1398.HK not on ADX main market board,0.2,2026-05-12T14:26:23.148461+00:00,
+1398.HK,adx,historical_prices,,,,not_implemented,0.0,2026-05-12T14:26:23.148731+00:00,
+1398.HK,adx,market_cap,,,,ValueError: 1398.HK not on ADX main market board,0.2,2026-05-12T14:26:23.148766+00:00,
+1398.HK,adx,company_profile,,,,ValueError: 1398.HK not in ADX board or listed-companies,0.2,2026-05-12T14:26:23.149021+00:00,
+1398.HK,adx,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:26:23.149272+00:00,
+1398.HK,adx,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:26:23.149306+00:00,
+1398.HK,adx,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:26:23.149340+00:00,
+1398.HK,adx,cash_flow,,,,not_implemented,0.0,2026-05-12T14:26:23.149373+00:00,
+1398.HK,adx,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:26:23.149407+00:00,
+1398.HK,adx,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:26:23.149440+00:00,
+1398.HK,adx,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:26:23.149473+00:00,
+1398.HK,adx,target_price,,,,not_implemented,0.0,2026-05-12T14:26:23.149506+00:00,
+1398.HK,adx,rating_split,,,,not_implemented,0.0,2026-05-12T14:26:23.149539+00:00,
+1398.HK,nse,current_price,,,,ValueError: priceInfo.lastPrice missing,4479.1,2026-05-12T14:26:23.149573+00:00,
+1398.HK,nse,historical_prices,,,,not_implemented,0.0,2026-05-12T14:26:27.629209+00:00,
+1398.HK,nse,market_cap,,,,ValueError: can't derive marketCap (price or issuedSize missing),0.6,2026-05-12T14:26:27.629668+00:00,
+1398.HK,nse,company_profile,,,,ValueError: NSE quote had no companyName / symbol / ISIN — likely non-Indian ticker,0.5,2026-05-12T14:26:27.630566+00:00,
+1398.HK,nse,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:26:27.631243+00:00,
+1398.HK,nse,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:26:27.631420+00:00,
+1398.HK,nse,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:26:27.631579+00:00,
+1398.HK,nse,cash_flow,,,,not_implemented,0.0,2026-05-12T14:26:27.631735+00:00,
+1398.HK,nse,valuation_historical,,,,not_implemented,0.0,2026-05-12T14:26:27.631895+00:00,
+1398.HK,nse,dividend_yield,,,,not_implemented,0.0,2026-05-12T14:26:27.632201+00:00,
+1398.HK,nse,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:26:27.632409+00:00,
+1398.HK,nse,target_price,,,,not_implemented,0.0,2026-05-12T14:26:27.632558+00:00,
+1398.HK,nse,rating_split,,,,not_implemented,0.0,2026-05-12T14:26:27.632688+00:00,
+1398.HK,hkex,current_price,7.05,HKD,,,1.0,2026-05-12T14:26:27.632816+00:00,hkex/1398_HK/current_price_20260512T142627.json
+1398.HK,hkex,historical_prices,,,,not_implemented,0.0,2026-05-12T14:26:27.633952+00:00,
+1398.HK,hkex,market_cap,611890000000.0,HKD,,,0.3,2026-05-12T14:26:27.634084+00:00,hkex/1398_HK/market_cap_20260512T142627.json
+1398.HK,hkex,company_profile,"{""name"": ""Industrial and Commercial Bank of China Ltd. - H Shares"", ""ric"": ""1398.HK"", ""sedol"": ""B1G1QD8"", ""currency"": ""HKD"", ""country"": ""PRC"", ""fiscal_year_end"": ""31 Dec 2025"", ""chairman"": ""Liao Lin"", ""shares_outstanding"": 86794044550.0, ""lot_size"": null, ""primary_exchange"": ""HKEX""}",,,,0.4,2026-05-12T14:26:27.634603+00:00,hkex/1398_HK/company_profile_20260512T142627.json
+1398.HK,hkex,income_statement_annual,,,,not_implemented,0.0,2026-05-12T14:26:27.635154+00:00,
+1398.HK,hkex,income_statement_quarterly,,,,not_implemented,0.0,2026-05-12T14:26:27.635290+00:00,
+1398.HK,hkex,balance_sheet,,,,not_implemented,0.0,2026-05-12T14:26:27.635423+00:00,
+1398.HK,hkex,cash_flow,,,,not_implemented,0.0,2026-05-12T14:26:27.635543+00:00,
+1398.HK,hkex,valuation_historical,"{""trailing_pe"": 7.05, ""eps"": 1.0, ""fiscal_year_end"": ""31 Dec 2025""}",ratio,31 Dec 2025,,0.3,2026-05-12T14:26:27.635657+00:00,hkex/1398_HK/valuation_historical_20260512T142627.json
+1398.HK,hkex,dividend_yield,4.89,%,31 Dec 2025,,0.3,2026-05-12T14:26:27.636131+00:00,hkex/1398_HK/dividend_yield_20260512T142627.json
+1398.HK,hkex,valuation_forward,,,,not_implemented,0.0,2026-05-12T14:26:27.636574+00:00,
+1398.HK,hkex,target_price,,,,not_implemented,0.0,2026-05-12T14:26:27.636676+00:00,
+1398.HK,hkex,rating_split,,,,not_implemented,0.0,2026-05-12T14:26:27.636776+00:00,
