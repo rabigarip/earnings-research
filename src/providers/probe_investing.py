@@ -316,33 +316,49 @@ def _fetch_sub_pages(slug: str) -> dict:
                             return u==='T'?v*1e12 : u==='B'?v*1e9 : u==='M'?v*1e6 : v;
                         };
 
-                        // FY guidance / consensus often summarised in a sentence like:
-                        //   "FY2026 EPS guidance set at $0.52 with revenue forecast of $493.34B;
-                        //    FY2027 targets $0.58 EPS and $544.09B revenue"
-                        const fyRE = /FY\\s*(\\d{4})[^.]{0,200}?\\$?([0-9]+\\.[0-9]+)\\s*EPS?[^.]{0,80}?\\$?([0-9]+\\.[0-9]+)\\s*[BMT]?/gi;
-                        const fyAltRE = /FY\\s*(\\d{4})\\s+EPS[^.]{0,80}?\\$?([0-9]+\\.[0-9]+)[^.]{0,80}?\\$?([0-9.,]+\\s*[BMT])/gi;
+                        // FY guidance summary — companies phrase it many ways.
+                        // Try the most common variants in order; each must
+                        // anchor on "FY<year>" + an EPS-like float + a
+                        // revenue-like dollar amount.
+                        //
+                        // Variant A (Aramco): "FY2026 EPS guidance set at $0.52
+                        //   with revenue forecast of $493.34B; FY2027 targets
+                        //   $0.58 EPS and $544.09B revenue"
+                        // Variant B (Tencent etc.): "FY2026 EPS of HK$22.10 ...
+                        //   revenue of HK$700.0B"
+                        // Variant C (banks): "FY2026 EPS guidance $1.18 ...
+                        //   revenue $14.2B"
                         const fyForecasts = [];
-                        let m;
-                        for (const re of [fyAltRE, fyRE]) {
-                            while ((m = re.exec(body)) !== null) {
+                        const fyVariants = [
+                            // FY<yr> ... <eps> ... <revenue>
+                            /FY\\s*(\\d{4})[^.;]{0,80}?\\$?([0-9]+\\.[0-9]+)[^.;]{0,80}?\\$?([0-9][0-9.,]*\\s*[BMT])/gi,
+                            // FY<yr> targets <eps> EPS and <revenue>
+                            /FY\\s*(\\d{4})\\s+targets[^.;]{0,40}?\\$?([0-9]+\\.[0-9]+)\\s*EPS[^.;]{0,40}?\\$?([0-9][0-9.,]*\\s*[BMT])/gi,
+                        ];
+                        for (const re of fyVariants) {
+                            re.lastIndex = 0;
+                            const seenYears = new Set();
+                            let m;
+                            while ((m = re.exec(body)) !== null && fyForecasts.length < 4) {
+                                const yr = parseInt(m[1]);
+                                if (seenYears.has(yr)) continue;
+                                seenYears.add(yr);
                                 fyForecasts.push({
-                                    year: parseInt(m[1]),
+                                    year: yr,
                                     eps:  parseFloat(m[2]),
                                     revenue: scaled(m[3]),
                                 });
-                                if (fyForecasts.length >= 4) break;
                             }
-                            if (fyForecasts.length) break;
+                            if (fyForecasts.length >= 2) break;
                         }
+                        fyForecasts.sort((a, b) => a.year - b.year);
 
-                        // Forward-most quarterly forecast — narrow phrasing
-                        // pulled from the Q&A section ("X's revenue forecast is 445.34B").
-                        const nextQRevMatch = body.match(/revenue\\s+forecast\\s+is\\s+\\$?([0-9.,]+\\s*[BMT])/i);
-                        const nextQEpsMatch = body.match(/EPS\\s+forecast\\s+(?:is|for[^0-9]{0,40})\\s*\\$?([0-9]+\\.[0-9]+)/i);
-
-                        // Upcoming-quarter row in the surprise table has "--" for
-                        // the actuals; parse that as a fallback for next_q_*.
-                        const upcomingRE = /([A-Z][a-z]{2}\\s+\\d{1,2},\\s+\\d{4})\\t([\\d/A-Za-z]+)\\t--\\t\\/([\\d.]+)\\t--\\t\\/([\\d.,]+[BMT]?)/i;
+                        // Next quarter — pulled DIRECTLY from the upcoming
+                        // row in the surprise/forecast table, which is the
+                        // most reliable place. The row has "--" for actuals.
+                        //
+                        // Layout: <date>\\t<period>\\t--\\t/<eps_est>\\t--\\t/<rev_est>
+                        const upcomingRE = /([A-Z][a-z]{2}\\s+\\d{1,2},\\s+\\d{4})\\t([\\d\\/A-Za-z]+)\\t--\\t\\/([0-9.]+)\\t--\\t\\/([0-9.,]+[BMT]?)/;
                         const upcomingMatch = body.match(upcomingRE);
                         const upcoming = upcomingMatch ? {
                             report_date: upcomingMatch[1],
@@ -376,12 +392,10 @@ def _fetch_sub_pages(slug: str) -> dict:
                         const fy1 = fyForecasts[0] || {};
                         const fy2 = fyForecasts[1] || {};
                         return {
-                            next_q_eps:     (nextQEpsMatch ? parseFloat(nextQEpsMatch[1])
-                                              : (upcoming ? upcoming.eps_estimate : null)),
-                            next_q_revenue: (nextQRevMatch ? scaled(nextQRevMatch[1])
-                                              : (upcoming ? upcoming.revenue_estimate : null)),
-                            next_q_period:  upcoming ? upcoming.period : null,
-                            next_q_report_date: upcoming ? upcoming.report_date : null,
+                            next_q_eps:         upcoming ? upcoming.eps_estimate     : null,
+                            next_q_revenue:     upcoming ? upcoming.revenue_estimate : null,
+                            next_q_period:      upcoming ? upcoming.period           : null,
+                            next_q_report_date: upcoming ? upcoming.report_date      : null,
                             fy1_year:    fy1.year || null,
                             fy1_eps:     fy1.eps  || null,
                             fy1_revenue: fy1.revenue || null,
