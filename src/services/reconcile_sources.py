@@ -39,7 +39,8 @@ from typing import Any, Optional
 # Trust ladder for canonical-value selection (left = highest trust).
 # When multiple sources have a value, we pick the leftmost present.
 TRUST_LADDER = [
-    "ir_page",       # filed-statement values; not yet wired
+    "ir_pdf",        # filed-statement PDFs — ground truth (Stage 2 wired)
+    "ir_page",       # legacy alias retained for backwards compat
     "adx",           # exchange direct
     "nse",
     "hkex",
@@ -48,6 +49,10 @@ TRUST_LADDER = [
     "macro",
     "investing",
 ]
+
+# Sources whose presence alone earns a High-confidence tier — these are
+# either filed statements (IR PDFs) or exchange-direct primary feeds.
+_FILING_GRADE_SOURCES = {"ir_pdf", "ir_page"}
 
 
 @dataclass
@@ -155,8 +160,8 @@ def reconcile(matrix_csv: Path, out_csv: Path) -> dict:
                         agreeing.append(s)
                 rc.sources_agreeing = agreeing
                 rc.max_disagreement_pct = round(max_diff, 2)
-                # IR-page presence wins regardless of disagreement
-                if "ir_page" in sources:
+                # IR-PDF / IR-page presence wins regardless of disagreement
+                if any(s in sources for s in _FILING_GRADE_SOURCES):
                     rc.confidence = "High"
                 elif len(agreeing) >= 3:
                     rc.confidence = "High"
@@ -171,8 +176,14 @@ def reconcile(matrix_csv: Path, out_csv: Path) -> dict:
                 rc.confidence = "Low"
                 rc.notes = "Mixed numeric/non-numeric cells"
         elif len(sources) == 1:
-            rc.confidence = "Low"
-            rc.notes = "Single source — no cross-check"
+            # IR-PDF as a sole source is still ground truth — it IS the
+            # filed statement Bloomberg derives from. Mark High.
+            if rc.canonical_source in _FILING_GRADE_SOURCES:
+                rc.confidence = "High"
+                rc.notes = "Filing-grade single source (IR PDF)"
+            else:
+                rc.confidence = "Low"
+                rc.notes = "Single source — no cross-check"
         else:
             # Non-numeric fields (profile dicts, IS dicts) — we currently
             # don't deep-compare. Mark Medium if multiple sources present.

@@ -136,6 +136,46 @@ CREATE TABLE IF NOT EXISTS earnings_calendar (
 
 CREATE INDEX IF NOT EXISTS idx_earnings_calendar_date
     ON earnings_calendar(event_date);
+
+-- Stage 2 production wire-up: audit log of every probe attempt.
+-- One row per (run, ticker, field, provider). Immutable — never updated
+-- in place. The reconciler reads this to compute reconciled_values.
+CREATE TABLE IF NOT EXISTS coverage_observations (
+    observation_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id            TEXT NOT NULL,
+    observed_at       TEXT NOT NULL,
+    ticker            TEXT NOT NULL,
+    field             TEXT NOT NULL,
+    provider          TEXT NOT NULL,
+    value_json        TEXT,
+    units             TEXT DEFAULT '',
+    as_of             TEXT DEFAULT '',
+    raw_response_id   TEXT DEFAULT '',
+    error             TEXT DEFAULT '',
+    latency_ms        INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_obs_ticker_field
+    ON coverage_observations(ticker, field);
+CREATE INDEX IF NOT EXISTS idx_obs_run
+    ON coverage_observations(run_id);
+
+-- Stage 2 production wire-up: canonical view per (ticker, field).
+-- This is what the report generator queries — never a probe provider
+-- directly. Replaced (upserted) by the refresh runner.
+CREATE TABLE IF NOT EXISTS reconciled_values (
+    ticker                 TEXT NOT NULL,
+    field                  TEXT NOT NULL,
+    canonical_value_json   TEXT NOT NULL,
+    canonical_source       TEXT NOT NULL,
+    confidence             TEXT NOT NULL,
+    sources_with_value     TEXT DEFAULT '',
+    sources_agreeing       TEXT DEFAULT '',
+    max_disagreement_pct   REAL,
+    last_refreshed_at      TEXT NOT NULL,
+    last_observation_id    INTEGER,
+    notes                  TEXT DEFAULT '',
+    PRIMARY KEY (ticker, field)
+);
 """
 
 

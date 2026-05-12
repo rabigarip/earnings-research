@@ -73,13 +73,25 @@ from src.services.probe_harness import Provider, persist_raw, cache_root
 # Stage 2 will replace this manual config with a Playwright-based
 # scraper that scans the IR page each quarter and updates entries.
 _IR_PDF_URLS: dict[str, dict[str, str]] = {
-    # Pending: needs manual URL lookup (BKMB IR page is a SPA).
-    # "BKMB.OM": {
-    #     "url": "https://www.bankmuscat.com/.../Q1-2026.pdf",
-    #     "period_label": "Q1 2026",
-    #     "currency": "OMR",
-    # },
-    # "OQEP.OM": { ... },
+    # Stage 2 curation (manual URL lookup, May 2026).
+    #
+    # Bank Muscat publishes its quarterly statements at a stable path
+    # under /investorrelations/QuarterlyReports/ — file name encodes
+    # the MSX month code (e.g. MSM_0326 = Q1 2026 / March 2026 close).
+    "BKMB.OM": {
+        "url": "https://www.bankmuscat.om/en/investorrelations/QuarterlyReports/MSM_0326.pdf",
+        "period_label": "Q1 2026",
+        "currency": "OMR",
+    },
+    # OQEP's IR portal uses content-hash paths (timestamp + slug) that
+    # are not directly guessable — but the URL itself is stable once
+    # the document is uploaded. Q1 2025 is the latest **signed** PDF
+    # with full IS/BS/CF tables (later quarters are presentation-only).
+    "OQEP.OM": {
+        "url": "https://oqep.om/UploadsAll/IRDocs/1747895969828Signed_English_OQEP_FS_Q1_2025.pdf",
+        "period_label": "Q1 2025",
+        "currency": "USD",  # OQEP reports in USD per IPO prospectus
+    },
 }
 
 

@@ -43,10 +43,19 @@ from src.services.probe_harness import Provider, persist_raw, cache_root
 # discovered (one-time manual lookup; the slug doesn't change).
 # Format: company_master ticker -> Investing.com URL slug.
 _SLUGS: dict[str, str] = {
-    "ICICIBANK.BO":  "icici-bank-ltd",
-    "JINDALSTEL.NS": "jindal-steel---power",
-    # Confirmed missing during discovery (different slugs needed):
-    # "0700.HK", "2222.SR", "1398.HK", "2899.HK" — manual lookup pending
+    # India (originally curated Stage 1)
+    "ICICIBANK.BO":   "icici-bank-ltd",
+    "JINDALSTEL.NS":  "jindal-steel---power",
+    # Stage 2: panel-wide curation. Confirmed via investing.com search
+    # (slugs cross-checked against each /equities/<slug> landing page).
+    "2222.SR":        "saudi-aramco",
+    "0700.HK":        "tencent-holdings-hk",
+    "1398.HK":        "icbc",
+    "2899.HK":        "zijin-mining-group",
+    "ADCB.AE":        "ad-commercial",
+    "ADNOCDRILL.AE":  "adnoc-drilling",
+    "BKMB.OM":        "bank-muscat",
+    "OQEP.OM":        "oq-exploration-and-production-cjsc",
 }
 
 
