@@ -52,7 +52,19 @@ def _load_providers(only: set[str] | None):
             providers["macro"] = MacroProvider()
         except Exception as exc:
             print(f"  [skip] macro: {exc}", file=sys.stderr)
-    # Investing / exchanges / IR pages slot in here as we build them.
+    if not only or "adx" in only:
+        try:
+            from src.providers.probe_adx import ADXProvider
+            providers["adx"] = ADXProvider()
+        except Exception as exc:
+            print(f"  [skip] adx: {exc}", file=sys.stderr)
+    if not only or "nse" in only:
+        try:
+            from src.providers.probe_nse import NSEProvider
+            providers["nse"] = NSEProvider()
+        except Exception as exc:
+            print(f"  [skip] nse: {exc}", file=sys.stderr)
+    # BSE / HKEX / MSX / Investing / IR-PDFs slot in here as built.
     return providers
 
 
