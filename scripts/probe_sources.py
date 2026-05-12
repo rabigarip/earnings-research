@@ -64,7 +64,13 @@ def _load_providers(only: set[str] | None):
             providers["nse"] = NSEProvider()
         except Exception as exc:
             print(f"  [skip] nse: {exc}", file=sys.stderr)
-    # BSE / HKEX / MSX / Investing / IR-PDFs slot in here as built.
+    if not only or "hkex" in only:
+        try:
+            from src.providers.probe_hkex import HKEXProvider
+            providers["hkex"] = HKEXProvider()
+        except Exception as exc:
+            print(f"  [skip] hkex: {exc}", file=sys.stderr)
+    # MSX / BSE / Investing / IR-PDFs slot in here as built.
     return providers
 
 
