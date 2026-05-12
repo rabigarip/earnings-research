@@ -8983,5 +8983,41 @@
     "industry": "Investment",
     "is_bank": false,
     "notes": "MSX30"
+  },
+  {
+    "ticker": "ADNOCDRILL.AE",
+    "company_name": "ADNOC Drilling Company P.J.S.C.",
+    "exchange": "ADX",
+    "country": "UAE",
+    "currency": "AED",
+    "sector": "Energy",
+    "industry": "Oil & Gas Drilling",
+    "is_bank": false,
+    "isin": "",
+    "marketscreener_id": ""
+  },
+  {
+    "ticker": "ADCB.AE",
+    "company_name": "Abu Dhabi Commercial Bank P.J.S.C.",
+    "exchange": "ADX",
+    "country": "UAE",
+    "currency": "AED",
+    "sector": "Financials",
+    "industry": "Banks",
+    "is_bank": true,
+    "isin": "AEA002001013",
+    "marketscreener_id": ""
+  },
+  {
+    "ticker": "JINDALSTEL.NS",
+    "company_name": "Jindal Steel & Power Limited",
+    "exchange": "NSE",
+    "country": "India",
+    "currency": "INR",
+    "sector": "Materials",
+    "industry": "Steel",
+    "is_bank": false,
+    "isin": "INE749A01030",
+    "marketscreener_id": ""
   }
 ]
