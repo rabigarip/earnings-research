@@ -3,17 +3,18 @@
   "company_name": "Bank Muscat",
   "sector": "Financials",
   "currency": "OMR",
-  "cells_in_canonical_store": 9,
+  "cells_in_canonical_store": 10,
   "by_confidence": {
     "High": 0,
-    "Medium": 2,
-    "Low": 7
+    "Medium": 4,
+    "Low": 6
   },
   "sources": [
     "investing",
+    "ishares",
     "marketscreener"
   ],
-  "rendered_at": "2026-05-13T09:46:28.225011+00:00",
-  "pptx_bytes": 39097,
+  "rendered_at": "2026-05-13T10:09:05.363163+00:00",
+  "pptx_bytes": 39307,
   "pptx_filename": "BKMB.OM.pptx"
 }

@@ -1,18 +1,20 @@
 {
   "ticker": "OQEP.OM",
-  "company_name": "OQEP.OM",
-  "sector": "\u2014",
-  "currency": "\u2014",
-  "cells_in_canonical_store": 2,
+  "company_name": "OQ Exploration & Production",
+  "sector": "Energy",
+  "currency": "OMR",
+  "cells_in_canonical_store": 10,
   "by_confidence": {
     "High": 0,
-    "Medium": 0,
-    "Low": 2
+    "Medium": 4,
+    "Low": 6
   },
   "sources": [
-    "investing"
+    "investing",
+    "ishares",
+    "marketscreener"
   ],
-  "rendered_at": "2026-05-13T09:46:28.272466+00:00",
-  "pptx_bytes": 37868,
+  "rendered_at": "2026-05-13T10:09:05.418286+00:00",
+  "pptx_bytes": 39129,
   "pptx_filename": "OQEP.OM.pptx"
 }

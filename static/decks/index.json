@@ -1,62 +1,65 @@
 {
   "panel_size": 10,
-  "rendered_at": "2026-05-13T09:46:28.595856+00:00",
+  "rendered_at": "2026-05-13T10:09:05.733040+00:00",
   "decks": [
     {
       "ticker": "2222.SR",
       "company_name": "Saudi Arabian Oil Company",
       "sector": "Energy",
       "currency": "SAR",
-      "cells_in_canonical_store": 12,
+      "cells_in_canonical_store": 14,
       "by_confidence": {
         "High": 1,
-        "Medium": 3,
-        "Low": 8
+        "Medium": 7,
+        "Low": 6
       },
       "sources": [
         "investing",
         "marketscreener",
         "yahoo"
       ],
-      "rendered_at": "2026-05-13T09:46:28.068050+00:00",
-      "pptx_bytes": 47567,
+      "rendered_at": "2026-05-13T10:09:05.175318+00:00",
+      "pptx_bytes": 47949,
       "pptx_filename": "2222.SR.pptx"
     },
     {
       "ticker": "ADNOCDRILL.AE",
-      "company_name": "ADNOCDRILL.AE",
-      "sector": "\u2014",
-      "currency": "\u2014",
-      "cells_in_canonical_store": 4,
+      "company_name": "ADNOC Drilling Company P.J.S.C.",
+      "sector": "Energy",
+      "currency": "USD",
+      "cells_in_canonical_store": 12,
       "by_confidence": {
         "High": 0,
-        "Medium": 0,
-        "Low": 4
+        "Medium": 5,
+        "Low": 7
       },
       "sources": [
-        "investing"
+        "investing",
+        "ishares",
+        "marketscreener"
       ],
-      "rendered_at": "2026-05-13T09:46:28.116321+00:00",
-      "pptx_bytes": 37922,
+      "rendered_at": "2026-05-13T10:09:05.235014+00:00",
+      "pptx_bytes": 39749,
       "pptx_filename": "ADNOCDRILL.AE.pptx"
     },
     {
       "ticker": "ADCB.AE",
-      "company_name": "ADCB.AE",
-      "sector": "\u2014",
-      "currency": "\u2014",
-      "cells_in_canonical_store": 5,
+      "company_name": "Abu Dhabi Commercial Bank P.J.S.C.",
+      "sector": "Financials",
+      "currency": "AED",
+      "cells_in_canonical_store": 12,
       "by_confidence": {
         "High": 0,
-        "Medium": 0,
-        "Low": 5
+        "Medium": 5,
+        "Low": 7
       },
       "sources": [
         "investing",
+        "ishares",
         "marketscreener"
       ],
-      "rendered_at": "2026-05-13T09:46:28.166209+00:00",
-      "pptx_bytes": 38189,
+      "rendered_at": "2026-05-13T10:09:05.296512+00:00",
+      "pptx_bytes": 39619,
       "pptx_filename": "ADCB.AE.pptx"
     },
     {
@@ -64,83 +67,70 @@
       "company_name": "Bank Muscat",
       "sector": "Financials",
       "currency": "OMR",
-      "cells_in_canonical_store": 9,
+      "cells_in_canonical_store": 10,
       "by_confidence": {
         "High": 0,
-        "Medium": 2,
-        "Low": 7
+        "Medium": 4,
+        "Low": 6
       },
       "sources": [
         "investing",
+        "ishares",
         "marketscreener"
       ],
-      "rendered_at": "2026-05-13T09:46:28.225011+00:00",
-      "pptx_bytes": 39097,
+      "rendered_at": "2026-05-13T10:09:05.363163+00:00",
+      "pptx_bytes": 39307,
       "pptx_filename": "BKMB.OM.pptx"
     },
     {
       "ticker": "OQEP.OM",
-      "company_name": "OQEP.OM",
-      "sector": "\u2014",
-      "currency": "\u2014",
-      "cells_in_canonical_store": 2,
+      "company_name": "OQ Exploration & Production",
+      "sector": "Energy",
+      "currency": "OMR",
+      "cells_in_canonical_store": 10,
       "by_confidence": {
         "High": 0,
-        "Medium": 0,
-        "Low": 2
+        "Medium": 4,
+        "Low": 6
       },
       "sources": [
-        "investing"
+        "investing",
+        "ishares",
+        "marketscreener"
       ],
-      "rendered_at": "2026-05-13T09:46:28.272466+00:00",
-      "pptx_bytes": 37868,
+      "rendered_at": "2026-05-13T10:09:05.418286+00:00",
+      "pptx_bytes": 39129,
       "pptx_filename": "OQEP.OM.pptx"
     },
     {
       "ticker": "JINDALSTEL.NS",
-      "company_name": "JINDALSTEL.NS",
-      "sector": "\u2014",
-      "currency": "\u2014",
-      "cells_in_canonical_store": 4,
+      "company_name": "Jindal Steel & Power Limited",
+      "sector": "Materials",
+      "currency": "INR",
+      "cells_in_canonical_store": 14,
       "by_confidence": {
         "High": 0,
-        "Medium": 0,
-        "Low": 4
+        "Medium": 7,
+        "Low": 7
       },
       "sources": [
-        "investing"
+        "investing",
+        "marketscreener",
+        "yahoo"
       ],
-      "rendered_at": "2026-05-13T09:46:28.320917+00:00",
-      "pptx_bytes": 37964,
+      "rendered_at": "2026-05-13T10:09:05.480206+00:00",
+      "pptx_bytes": 47774,
       "pptx_filename": "JINDALSTEL.NS.pptx"
     },
     {
       "ticker": "ICICIBANK.BO",
-      "company_name": "ICICIBANK.BO",
-      "sector": "\u2014",
-      "currency": "\u2014",
-      "cells_in_canonical_store": 3,
+      "company_name": "ICICI Bank Limited",
+      "sector": "Financials",
+      "currency": "INR",
+      "cells_in_canonical_store": 14,
       "by_confidence": {
         "High": 0,
-        "Medium": 0,
-        "Low": 3
-      },
-      "sources": [
-        "investing"
-      ],
-      "rendered_at": "2026-05-13T09:46:28.369911+00:00",
-      "pptx_bytes": 37895,
-      "pptx_filename": "ICICIBANK.BO.pptx"
-    },
-    {
-      "ticker": "0700.HK",
-      "company_name": "Tencent Holdings Limited",
-      "sector": "Communication Services",
-      "currency": "CNY",
-      "cells_in_canonical_store": 11,
-      "by_confidence": {
-        "High": 0,
-        "Medium": 3,
+        "Medium": 6,
         "Low": 8
       },
       "sources": [
@@ -148,44 +138,68 @@
         "marketscreener",
         "yahoo"
       ],
-      "rendered_at": "2026-05-13T09:46:28.431420+00:00",
-      "pptx_bytes": 47347,
+      "rendered_at": "2026-05-13T10:09:05.544179+00:00",
+      "pptx_bytes": 47812,
+      "pptx_filename": "ICICIBANK.BO.pptx"
+    },
+    {
+      "ticker": "0700.HK",
+      "company_name": "Tencent Holdings Limited",
+      "sector": "Communication Services",
+      "currency": "CNY",
+      "cells_in_canonical_store": 14,
+      "by_confidence": {
+        "High": 0,
+        "Medium": 8,
+        "Low": 6
+      },
+      "sources": [
+        "investing",
+        "marketscreener",
+        "yahoo"
+      ],
+      "rendered_at": "2026-05-13T10:09:05.609657+00:00",
+      "pptx_bytes": 47541,
       "pptx_filename": "0700.HK.pptx"
     },
     {
       "ticker": "2899.HK",
-      "company_name": "2899.HK",
-      "sector": "\u2014",
-      "currency": "\u2014",
-      "cells_in_canonical_store": 4,
+      "company_name": "Zijin Mining Group Company Limited",
+      "sector": "Basic Materials",
+      "currency": "CNY",
+      "cells_in_canonical_store": 14,
       "by_confidence": {
         "High": 0,
-        "Medium": 0,
-        "Low": 4
+        "Medium": 7,
+        "Low": 7
       },
       "sources": [
-        "investing"
+        "investing",
+        "marketscreener",
+        "yahoo"
       ],
-      "rendered_at": "2026-05-13T09:46:28.540283+00:00",
-      "pptx_bytes": 37887,
+      "rendered_at": "2026-05-13T10:09:05.670976+00:00",
+      "pptx_bytes": 47844,
       "pptx_filename": "2899.HK.pptx"
     },
     {
       "ticker": "1398.HK",
-      "company_name": "1398.HK",
-      "sector": "\u2014",
-      "currency": "\u2014",
-      "cells_in_canonical_store": 4,
+      "company_name": "Industrial and Commercial Bank of China Limited",
+      "sector": "Financials",
+      "currency": "CNY",
+      "cells_in_canonical_store": 14,
       "by_confidence": {
         "High": 0,
-        "Medium": 0,
-        "Low": 4
+        "Medium": 7,
+        "Low": 7
       },
       "sources": [
-        "investing"
+        "investing",
+        "marketscreener",
+        "yahoo"
       ],
-      "rendered_at": "2026-05-13T09:46:28.595618+00:00",
-      "pptx_bytes": 37915,
+      "rendered_at": "2026-05-13T10:09:05.732897+00:00",
+      "pptx_bytes": 47711,
       "pptx_filename": "1398.HK.pptx"
     }
   ]

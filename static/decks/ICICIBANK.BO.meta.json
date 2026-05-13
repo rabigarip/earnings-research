@@ -1,18 +1,20 @@
 {
   "ticker": "ICICIBANK.BO",
-  "company_name": "ICICIBANK.BO",
-  "sector": "\u2014",
-  "currency": "\u2014",
-  "cells_in_canonical_store": 3,
+  "company_name": "ICICI Bank Limited",
+  "sector": "Financials",
+  "currency": "INR",
+  "cells_in_canonical_store": 14,
   "by_confidence": {
     "High": 0,
-    "Medium": 0,
-    "Low": 3
+    "Medium": 6,
+    "Low": 8
   },
   "sources": [
-    "investing"
+    "investing",
+    "marketscreener",
+    "yahoo"
   ],
-  "rendered_at": "2026-05-13T09:46:28.369911+00:00",
-  "pptx_bytes": 37895,
+  "rendered_at": "2026-05-13T10:09:05.544179+00:00",
+  "pptx_bytes": 47812,
   "pptx_filename": "ICICIBANK.BO.pptx"
 }

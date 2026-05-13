@@ -300,16 +300,87 @@ class YahooProvider(Provider):
         return (round(float(y) * 100, 3), "%", "", raw_id)
 
     def _fetch_valuation_forward(self, ticker: str):
-        info = self._t(ticker).info or {}
-        raw_id = persist_raw(self.name, ticker, "valuation_forward", info)
-        vals = {
+        """yfinance gives us TWO sources for forward consensus:
+
+          1. info.forwardEps / info.forwardPE — a single point estimate
+             (the "FY+1" anchor that's always there for covered names).
+          2. ticker.earnings_estimate / ticker.revenue_estimate — a
+             rich panel-style table with avg/low/high + analyst count
+             for 0q (current quarter), +1q (next quarter), 0y (current
+             FY), +1y (next FY).
+
+        Investing.com's earnings page only volunteers an FY guidance
+        sentence for ~1 in 10 EM tickers (Aramco), so yfinance's table
+        is the only realistic free-source FY estimate panel-wide.
+        """
+        t = self._t(ticker)
+        info = t.info or {}
+        bundle: dict = {
             "forward_pe":     _safe(info, "forwardPE"),
             "forward_eps":    _safe(info, "forwardEps"),
             "price_to_sales": _safe(info, "priceToSalesTrailing12Months"),
         }
-        if all(v is None for v in vals.values()):
-            raise ValueError("no forward valuation fields")
-        return (vals, "ratio", "", raw_id)
+
+        def _row(df, period: str) -> dict | None:
+            """Pull one row from earnings_estimate / revenue_estimate. The
+            yfinance DataFrame is indexed by period label."""
+            if df is None:
+                return None
+            try:
+                if period not in df.index:
+                    return None
+                row = df.loc[period]
+            except (KeyError, AttributeError):
+                return None
+            def _f(k):
+                try:
+                    v = row.get(k) if hasattr(row, "get") else row[k]
+                    f = float(v)
+                    if f != f:   # NaN
+                        return None
+                    return f
+                except (KeyError, TypeError, ValueError):
+                    return None
+            return {
+                "avg":      _f("avg"),
+                "low":      _f("low"),
+                "high":     _f("high"),
+                "n_analysts": int(_f("numberOfAnalysts") or 0) or None,
+                "growth":   _f("growth"),
+            }
+
+        # The attribute accesses can raise on tickers without coverage;
+        # tolerate that quietly.
+        try:
+            ee = t.earnings_estimate
+        except Exception:
+            ee = None
+        try:
+            re_ = t.revenue_estimate
+        except Exception:
+            re_ = None
+
+        # FY+1 = current FY (column "0y" in yfinance); FY+2 = next FY (+1y).
+        eps_fy1 = _row(ee, "0y")
+        eps_fy2 = _row(ee, "+1y")
+        eps_nq  = _row(ee, "+1q")
+        rev_fy1 = _row(re_, "0y")
+        rev_fy2 = _row(re_, "+1y")
+        rev_nq  = _row(re_, "+1q")
+
+        if eps_fy1: bundle["eps_fy1"] = eps_fy1.get("avg"); bundle["eps_fy1_detail"] = eps_fy1
+        if eps_fy2: bundle["eps_fy2"] = eps_fy2.get("avg"); bundle["eps_fy2_detail"] = eps_fy2
+        if eps_nq:  bundle["eps_next_q"] = eps_nq.get("avg"); bundle["eps_next_q_detail"] = eps_nq
+        if rev_fy1: bundle["revenue_fy1"] = rev_fy1.get("avg")
+        if rev_fy2: bundle["revenue_fy2"] = rev_fy2.get("avg")
+        if rev_nq:  bundle["revenue_next_q"] = rev_nq.get("avg")
+
+        raw_id = persist_raw(self.name, ticker, "valuation_forward", {
+            "info_keys": list(bundle.keys()), "ticker": ticker,
+        })
+        if all(v is None for v in bundle.values()):
+            raise ValueError("no forward valuation fields (info + estimates both empty)")
+        return (bundle, "ratio", "", raw_id)
 
     # ── Analyst ──
 
@@ -328,14 +399,55 @@ class YahooProvider(Provider):
         }, (info.get("currency") or ""), "", raw_id)
 
     def _fetch_rating_split(self, ticker: str):
-        """Yahoo doesn't expose a clean B/H/S bucket count for non-US.
-        `recommendationKey` is a single bucket (e.g. "buy"). For
-        the panel test we capture it as a one-element distribution —
-        the reconciler decides how to compare to MS's 5-bucket split."""
-        info = self._t(ticker).info or {}
+        """yfinance exposes `recommendations_summary` — a DataFrame with
+        columns strongBuy / buy / hold / sell / strongSell across the
+        last 4 months. We collapse to a single bucket count + a derived
+        consensus label. Falls back to `recommendationKey` for tickers
+        without coverage detail.
+        """
+        t = self._t(ticker)
+        info = t.info or {}
         raw_id = persist_raw(self.name, ticker, "rating_split", info)
+
+        # Try the richer recommendations_summary first
+        try:
+            rs = t.recommendations_summary
+        except Exception:
+            rs = None
+        if rs is not None and len(rs) > 0:
+            # Most-recent month is `period == "0m"`.
+            try:
+                row = rs.iloc[0]
+                def _i(k):
+                    try:
+                        v = int(row.get(k) if hasattr(row, "get") else row[k] or 0)
+                        return v
+                    except (KeyError, TypeError, ValueError):
+                        return 0
+                buy_total   = _i("strongBuy") + _i("buy")
+                hold_total  = _i("hold")
+                sell_total  = _i("sell") + _i("strongSell")
+                total       = buy_total + hold_total + sell_total
+                if total > 0:
+                    # Consensus label from majority
+                    label = "OUTPERFORM"
+                    if buy_total / total >= 0.6:        label = "BUY"
+                    elif sell_total / total >= 0.4:     label = "SELL"
+                    elif buy_total > sell_total:        label = "OUTPERFORM"
+                    else:                                label = "HOLD"
+                    return ({
+                        "buy":   buy_total,
+                        "hold":  hold_total,
+                        "sell":  sell_total,
+                        "total": total,
+                        "consensus": label,
+                    }, "", "", raw_id)
+            except Exception:
+                pass
+
+        # Fallback: recommendationKey single bucket
         key = info.get("recommendationKey")
-        n = _safe(info, "numberOfAnalystOpinions")
+        n   = _safe(info, "numberOfAnalystOpinions")
         if not key:
-            raise ValueError("no recommendationKey")
-        return ({"consensus": key, "n_analysts": n}, "", "", raw_id)
+            raise ValueError("no recommendations_summary or recommendationKey")
+        return ({"consensus": (key or "").upper(), "n_analysts": n}, "", "", raw_id)

@@ -232,9 +232,43 @@ def main():
                     else:
                         per_provider[pname]["err"] += 1
 
-        # Reconcile every (ticker, field) and upsert.
+        # Reconcile every (ticker, field). Critical: a refresh that only
+        # runs SOME providers (e.g. `--only yahoo,marketscreener`) must NOT
+        # overwrite a canonical cell that a different provider populated in
+        # a previous run. We merge this-run observations with the latest
+        # observation from each OTHER provider stored in coverage_observations.
+        #
+        # Concretely: if last week's `--only investing` run made
+        # rating_split canonical=investing, today's `--only yahoo,ms` run
+        # should still respect Investing's cell as a source — and the
+        # trust ladder picks Investing as canonical.
+        from src.services.canonical_store import (
+            get_observations_by_provider as _obs_by_prov,
+        )
+        from src.services.reconcile_sources import TRUST_LADDER
+
+        # Discover every provider that has historical observations for
+        # any (ticker, field) in this batch — including providers we
+        # didn't run this time.
+        all_known_providers = set(observations_for) and set(TRUST_LADDER)
+        all_known_providers = set(TRUST_LADDER)
+
         reconciled_count = 0
         for (ticker, field), obs in observations_for.items():
+            # Backfill from coverage_observations: most-recent value per
+            # other provider for THIS field on THIS ticker.
+            for provider in all_known_providers:
+                if provider in obs:
+                    continue
+                prior = _obs_by_prov(ticker, provider)
+                if not prior or field not in prior:
+                    continue
+                value = prior[field]
+                obs[provider] = {
+                    "value": value, "source": provider,
+                    "observation_id": None,   # historical
+                }
+
             if not obs:
                 continue
             rc = reconcile_cell(obs)

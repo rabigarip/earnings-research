@@ -1,18 +1,20 @@
 {
   "ticker": "JINDALSTEL.NS",
-  "company_name": "JINDALSTEL.NS",
-  "sector": "\u2014",
-  "currency": "\u2014",
-  "cells_in_canonical_store": 4,
+  "company_name": "Jindal Steel & Power Limited",
+  "sector": "Materials",
+  "currency": "INR",
+  "cells_in_canonical_store": 14,
   "by_confidence": {
     "High": 0,
-    "Medium": 0,
-    "Low": 4
+    "Medium": 7,
+    "Low": 7
   },
   "sources": [
-    "investing"
+    "investing",
+    "marketscreener",
+    "yahoo"
   ],
-  "rendered_at": "2026-05-13T09:46:28.320917+00:00",
-  "pptx_bytes": 37964,
+  "rendered_at": "2026-05-13T10:09:05.480206+00:00",
+  "pptx_bytes": 47774,
   "pptx_filename": "JINDALSTEL.NS.pptx"
 }
