@@ -1,0 +1,20 @@
+{
+  "ticker": "0700.HK",
+  "company_name": "Tencent Holdings Limited",
+  "sector": "Communication Services",
+  "currency": "CNY",
+  "cells_in_canonical_store": 11,
+  "by_confidence": {
+    "High": 0,
+    "Medium": 3,
+    "Low": 8
+  },
+  "sources": [
+    "investing",
+    "marketscreener",
+    "yahoo"
+  ],
+  "rendered_at": "2026-05-13T09:46:28.431420+00:00",
+  "pptx_bytes": 47347,
+  "pptx_filename": "0700.HK.pptx"
+}

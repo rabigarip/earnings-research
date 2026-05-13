@@ -34,3 +34,29 @@ services:
     # Render free tier has 30s request timeout; preview can take 30–90s with LLM.
     # Increase on paid plan or use skip_llm=true from frontend for faster demos.
     healthCheckPath: /health
+
+  # ─── Cron: nightly Jabal panel-deck pre-render ───────────────────────────
+  #
+  # Runs once a day at 04:00 UTC. Refreshes canonical_store across daily +
+  # weekly + quarterly cadences for every panel ticker, then renders each
+  # ticker's Jabal preview deck into static/decks/<ticker>.pptx. The web
+  # service exposes these via /api/jabal/{ticker}/deck.pptx — INSTANT
+  # downloads on the consumer's request path (no compute at request time).
+  #
+  # Note: Investing.com (Playwright/Chromium) is intentionally excluded
+  # from the cron because Chromium isn't reliable on Render's free tier.
+  # Add `--include-investing` once a paid runtime + xvfb-run wrapper land.
+  - type: cron
+    name: jabal-panel-refresh
+    runtime: python
+    region: oregon
+    schedule: "0 4 * * *"
+    buildCommand: bash scripts/render_build.sh
+    startCommand: python -m scripts.render_panel_decks
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: DATABASE_PATH
+        value: /tmp/earnings-data/earnings.db
+      - key: REPORT_OUTPUT_DIR
+        value: /tmp/earnings-outputs

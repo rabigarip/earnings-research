@@ -474,8 +474,17 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     except (TypeError, ValueError):
         pass
 
-    # Broker actions — not in canonical store yet; placeholder for now
-    broker_actions = []
+    # Broker actions — canonical_store key 'broker_actions' carries the
+    # MS analyst-recommendations list. Each item: {date, headline, source}.
+    # The slide renders up to the 3 most recent.
+    ba_obs = cv.get("broker_actions")
+    broker_actions: list[dict] = []
+    if ba_obs and isinstance(ba_obs.value, dict):
+        for item in (ba_obs.value.get("items") or [])[:3]:
+            broker_actions.append({
+                "date": item.get("date", ""),
+                "text": item.get("headline", ""),
+            })
 
     return ValuationData(
         company_name=pname,

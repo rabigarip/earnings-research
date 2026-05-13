@@ -227,3 +227,20 @@ class MarketScreenerProvider(Provider):
     # historical_prices isn't on any MS endpoint we currently parse.
     def _fetch_historical_prices(self, ticker: str):
         raise NotImplementedError
+
+    # ── Broker actions (recent analyst recommendations) ─────────
+    def _fetch_broker_actions(self, ticker: str):
+        """Surface the "Analyst's recommendations" table from MS /consensus/.
+        Returns a list of (date, headline, source) dicts that the deck
+        renders as the "Last 3 broker actions" card on slide 3."""
+        base = self._base(ticker)
+        payload, _ = ms.fetch_analyst_recommendations(base, cache_key_prefix=ticker)
+        items = payload.get("items") or []
+        brokers = payload.get("covering_brokers") or []
+        if not items and not brokers:
+            raise ValueError("no broker actions or covering brokers in consensus payload")
+        raw_id = persist_raw(self.name, ticker, "broker_actions", payload)
+        return ({
+            "items": items[:10],            # cap for slide consumption
+            "covering_brokers": brokers,
+        }, "", "", raw_id)

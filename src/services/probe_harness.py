@@ -52,6 +52,7 @@ FIELDS = [
     # Analyst-driven
     "target_price",          # mean target + spread vs last close
     "rating_split",          # Buy/Hold/Sell counts
+    "broker_actions",        # recent analyst-recommendation rows (date/headline/source)
 ]
 
 

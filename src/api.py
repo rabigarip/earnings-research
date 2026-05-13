@@ -18,14 +18,16 @@ import os
 from pathlib import Path
 from contextlib import asynccontextmanager
 
+import json
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 # When frontend is built into static/, we serve it at / (one site on Render)
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+ROOT_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = ROOT_DIR / "static"
 STATIC_INDEX = STATIC_DIR / "index.html"
 SERVE_FRONTEND = STATIC_INDEX.exists()
 
@@ -545,6 +547,142 @@ def batch_preview_api(req: BatchPreviewRequest):
     return {"results": results}
 
 
+# ─── Jabal deck routes: pre-rendered, zero-compute consumer path ───────────
+#
+# Decks are rendered offline by `scripts/render_panel_decks.py` (run
+# nightly via Render cron). Hosting a deck is then a static-file lookup —
+# clicking a panel ticker is INSTANT for the consumer (no 30-90s pipeline
+# wait, no Cloudflare-protected source on the request path).
+#
+# Off-panel tickers still flow through /api/reports (the legacy on-demand
+# path); the Jabal panel is the **fast lane** for the curated 10.
+
+_DECKS_DIR = ROOT_DIR / "static" / "decks"
+
+
+def _decks_index() -> dict:
+    p = _DECKS_DIR / "index.json"
+    if not p.is_file():
+        return {"panel_size": 0, "rendered_at": None, "decks": []}
+    try:
+        return json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {"panel_size": 0, "rendered_at": None, "decks": []}
+
+
+@app.get("/api/jabal/panel")
+def jabal_panel_list():
+    """List all pre-rendered Jabal panel decks."""
+    return _decks_index()
+
+
+@app.get("/api/jabal/{ticker}")
+def jabal_deck_meta(ticker: str):
+    """Metadata for one ticker's pre-rendered deck (sources, confidence,
+    last refresh time, file size)."""
+    safe = ticker.strip().upper()
+    p = _DECKS_DIR / f"{safe}.meta.json"
+    if not p.is_file():
+        raise HTTPException(status_code=404,
+            detail=f"No pre-rendered deck for {safe}. "
+                   "Use POST /api/reports for on-demand rendering.")
+    try:
+        return json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/api/jabal/{ticker}/deck.pptx")
+def jabal_deck_download(ticker: str):
+    """Serve the static PPTX for one panel ticker."""
+    safe = ticker.strip().upper()
+    p = _DECKS_DIR / f"{safe}.pptx"
+    if not p.is_file():
+        raise HTTPException(status_code=404,
+            detail=f"No pre-rendered deck for {safe}.")
+    return FileResponse(
+        str(p),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        filename=f"{safe}_jabal_preview.pptx",
+    )
+
+
+@app.get("/jabal", response_class=HTMLResponse)
+def jabal_panel_page():
+    """Minimal HTML page that lists the panel with one-click download.
+
+    Exists so the panel is browseable WITHOUT a frontend build — the
+    hosted site can link to /jabal as the public "research downloads"
+    surface even before the React SPA picks up the new endpoints."""
+    idx = _decks_index()
+    decks = idx.get("decks", [])
+    rendered_at = idx.get("rendered_at", "—")
+    rows = []
+    for d in decks:
+        ticker = d.get("ticker", "")
+        name   = d.get("company_name", ticker)
+        sector = d.get("sector", "—")
+        sources = ", ".join(d.get("sources", []))
+        conf = d.get("by_confidence", {})
+        conf_str = (
+            f"<span class='conf high'>{conf.get('High', 0)} H</span>"
+            f" / <span class='conf med'>{conf.get('Medium', 0)} M</span>"
+            f" / <span class='conf low'>{conf.get('Low', 0)} L</span>"
+        )
+        rows.append(f"""
+        <tr>
+          <td><span class='tk'>{ticker}</span></td>
+          <td>{name}</td>
+          <td class='dim'>{sector}</td>
+          <td>{conf_str}</td>
+          <td class='dim'>{sources}</td>
+          <td><a href='/api/jabal/{ticker}/deck.pptx' class='dl'>Download .pptx</a></td>
+        </tr>""")
+    if not rows:
+        rows.append("<tr><td colspan='6' class='dim'>No decks rendered yet. "
+                     "Run <code>python -m scripts.render_panel_decks</code>.</td></tr>")
+    html = f"""<!doctype html>
+<html><head><meta charset='utf-8'><title>Jabal Research — Panel Decks</title>
+<style>
+  body {{ font: 14px/1.5 Calibri, sans-serif; background:#FAF8F4; color:#1A1A1A; margin:0; padding:0; }}
+  .wrap {{ max-width: 1080px; margin: 40px auto; padding: 0 24px; }}
+  h1 {{ font: 26px Georgia, serif; margin: 0 0 4px; }}
+  .sub {{ color:#5C5C5C; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 32px; }}
+  .meta {{ color:#9A9A9A; font-size: 12px; margin-bottom: 24px; }}
+  table {{ width: 100%; border-collapse: collapse; background:#fff; border: 1px solid #EFE8DC; }}
+  th, td {{ padding: 10px 14px; text-align: left; border-bottom: 1px solid #EFE8DC; }}
+  th {{ font-size: 10.5px; color:#5C5C5C; text-transform: uppercase; letter-spacing:0.5px; background:#EFE8DC; }}
+  .tk {{ font-weight: 700; font-family: Consolas, monospace; }}
+  .dim {{ color:#5C5C5C; }}
+  .conf {{ font-weight: 600; }}
+  .conf.high {{ color:#2F7D4F; }}
+  .conf.med {{ color:#A28860; }}
+  .conf.low {{ color:#9A9A9A; }}
+  .dl {{ color:#7E6849; text-decoration: none; font-weight: 600; }}
+  .dl:hover {{ text-decoration: underline; }}
+  footer {{ margin-top: 32px; color:#9A9A9A; font-size: 12px; }}
+  code {{ background: #EFE8DC; padding: 1px 4px; border-radius: 2px; }}
+</style></head>
+<body><div class='wrap'>
+<h1>Jabal Research — Panel Decks</h1>
+<div class='sub'>Institutional Research &middot; Earnings Previews</div>
+<div class='meta'>{len(decks)} ticker(s) &middot; rendered {rendered_at} &middot;
+free-source stack (yahoo, marketscreener, investing, macro, ishares, commodities, ir_pdf)</div>
+<table>
+  <thead><tr><th>Ticker</th><th>Company</th><th>Sector</th>
+       <th>Data confidence</th><th>Sources</th><th>Deck</th></tr></thead>
+  <tbody>{''.join(rows)}</tbody>
+</table>
+<footer>
+  Confidence: <span class='conf high'>H</span>igh (filing-grade or 3-source) &middot;
+  <span class='conf med'>M</span>edium (2-source ≤2% drift) &middot;
+  <span class='conf low'>L</span>ow (single-source).<br>
+  Search any other ticker via the <a href='/'>main app</a>.
+</footer>
+</div></body></html>"""
+    return html
+
+
 # ─── One site: serve frontend from static/ when present ─────────────────────
 
 if SERVE_FRONTEND:
@@ -558,5 +696,9 @@ if SERVE_FRONTEND:
         if path.startswith("api/") or path == "api":
             raise HTTPException(status_code=404, detail="Not found")
         if path.startswith("docs") or path.startswith("openapi") or path == "health":
+            raise HTTPException(status_code=404, detail="Not found")
+        # /jabal is served by an explicit handler above; the catch-all must
+        # not intercept it (otherwise FastAPI returns the SPA shell).
+        if path == "jabal" or path.startswith("jabal/"):
             raise HTTPException(status_code=404, detail="Not found")
         return FileResponse(STATIC_INDEX, media_type="text/html")

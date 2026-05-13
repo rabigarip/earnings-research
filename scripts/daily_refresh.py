@@ -63,6 +63,7 @@ CADENCE_FIELDS = {
         "valuation_forward",
         "target_price",
         "rating_split",
+        "broker_actions",
     },
     "quarterly": {
         "income_statement_annual",

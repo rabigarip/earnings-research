@@ -1,0 +1,20 @@
+{
+  "ticker": "2222.SR",
+  "company_name": "Saudi Arabian Oil Company",
+  "sector": "Energy",
+  "currency": "SAR",
+  "cells_in_canonical_store": 12,
+  "by_confidence": {
+    "High": 1,
+    "Medium": 3,
+    "Low": 8
+  },
+  "sources": [
+    "investing",
+    "marketscreener",
+    "yahoo"
+  ],
+  "rendered_at": "2026-05-13T09:46:28.068050+00:00",
+  "pptx_bytes": 47567,
+  "pptx_filename": "2222.SR.pptx"
+}

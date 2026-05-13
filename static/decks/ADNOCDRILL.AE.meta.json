@@ -1,0 +1,18 @@
+{
+  "ticker": "ADNOCDRILL.AE",
+  "company_name": "ADNOCDRILL.AE",
+  "sector": "\u2014",
+  "currency": "\u2014",
+  "cells_in_canonical_store": 4,
+  "by_confidence": {
+    "High": 0,
+    "Medium": 0,
+    "Low": 4
+  },
+  "sources": [
+    "investing"
+  ],
+  "rendered_at": "2026-05-13T09:46:28.116321+00:00",
+  "pptx_bytes": 37922,
+  "pptx_filename": "ADNOCDRILL.AE.pptx"
+}

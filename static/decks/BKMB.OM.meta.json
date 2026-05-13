@@ -1,0 +1,19 @@
+{
+  "ticker": "BKMB.OM",
+  "company_name": "Bank Muscat",
+  "sector": "Financials",
+  "currency": "OMR",
+  "cells_in_canonical_store": 9,
+  "by_confidence": {
+    "High": 0,
+    "Medium": 2,
+    "Low": 7
+  },
+  "sources": [
+    "investing",
+    "marketscreener"
+  ],
+  "rendered_at": "2026-05-13T09:46:28.225011+00:00",
+  "pptx_bytes": 39097,
+  "pptx_filename": "BKMB.OM.pptx"
+}

@@ -1,0 +1,18 @@
+{
+  "ticker": "2899.HK",
+  "company_name": "2899.HK",
+  "sector": "\u2014",
+  "currency": "\u2014",
+  "cells_in_canonical_store": 4,
+  "by_confidence": {
+    "High": 0,
+    "Medium": 0,
+    "Low": 4
+  },
+  "sources": [
+    "investing"
+  ],
+  "rendered_at": "2026-05-13T09:46:28.540283+00:00",
+  "pptx_bytes": 37887,
+  "pptx_filename": "2899.HK.pptx"
+}
