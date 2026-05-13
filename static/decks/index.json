@@ -1,6 +1,6 @@
 {
   "panel_size": 10,
-  "rendered_at": "2026-05-13T10:09:05.733040+00:00",
+  "rendered_at": "2026-05-13T10:14:01.094982+00:00",
   "decks": [
     {
       "ticker": "2222.SR",
@@ -18,8 +18,8 @@
         "marketscreener",
         "yahoo"
       ],
-      "rendered_at": "2026-05-13T10:09:05.175318+00:00",
-      "pptx_bytes": 47949,
+      "rendered_at": "2026-05-13T10:14:00.426992+00:00",
+      "pptx_bytes": 47977,
       "pptx_filename": "2222.SR.pptx"
     },
     {
@@ -38,8 +38,8 @@
         "ishares",
         "marketscreener"
       ],
-      "rendered_at": "2026-05-13T10:09:05.235014+00:00",
-      "pptx_bytes": 39749,
+      "rendered_at": "2026-05-13T10:14:00.498971+00:00",
+      "pptx_bytes": 39767,
       "pptx_filename": "ADNOCDRILL.AE.pptx"
     },
     {
@@ -58,8 +58,8 @@
         "ishares",
         "marketscreener"
       ],
-      "rendered_at": "2026-05-13T10:09:05.296512+00:00",
-      "pptx_bytes": 39619,
+      "rendered_at": "2026-05-13T10:14:00.610372+00:00",
+      "pptx_bytes": 39638,
       "pptx_filename": "ADCB.AE.pptx"
     },
     {
@@ -78,8 +78,8 @@
         "ishares",
         "marketscreener"
       ],
-      "rendered_at": "2026-05-13T10:09:05.363163+00:00",
-      "pptx_bytes": 39307,
+      "rendered_at": "2026-05-13T10:14:00.699145+00:00",
+      "pptx_bytes": 39329,
       "pptx_filename": "BKMB.OM.pptx"
     },
     {
@@ -98,8 +98,8 @@
         "ishares",
         "marketscreener"
       ],
-      "rendered_at": "2026-05-13T10:09:05.418286+00:00",
-      "pptx_bytes": 39129,
+      "rendered_at": "2026-05-13T10:14:00.776280+00:00",
+      "pptx_bytes": 39150,
       "pptx_filename": "OQEP.OM.pptx"
     },
     {
@@ -118,8 +118,8 @@
         "marketscreener",
         "yahoo"
       ],
-      "rendered_at": "2026-05-13T10:09:05.480206+00:00",
-      "pptx_bytes": 47774,
+      "rendered_at": "2026-05-13T10:14:00.841759+00:00",
+      "pptx_bytes": 47804,
       "pptx_filename": "JINDALSTEL.NS.pptx"
     },
     {
@@ -138,8 +138,8 @@
         "marketscreener",
         "yahoo"
       ],
-      "rendered_at": "2026-05-13T10:09:05.544179+00:00",
-      "pptx_bytes": 47812,
+      "rendered_at": "2026-05-13T10:14:00.907975+00:00",
+      "pptx_bytes": 47853,
       "pptx_filename": "ICICIBANK.BO.pptx"
     },
     {
@@ -158,8 +158,8 @@
         "marketscreener",
         "yahoo"
       ],
-      "rendered_at": "2026-05-13T10:09:05.609657+00:00",
-      "pptx_bytes": 47541,
+      "rendered_at": "2026-05-13T10:14:00.970308+00:00",
+      "pptx_bytes": 47566,
       "pptx_filename": "0700.HK.pptx"
     },
     {
@@ -178,8 +178,8 @@
         "marketscreener",
         "yahoo"
       ],
-      "rendered_at": "2026-05-13T10:09:05.670976+00:00",
-      "pptx_bytes": 47844,
+      "rendered_at": "2026-05-13T10:14:01.031108+00:00",
+      "pptx_bytes": 47867,
       "pptx_filename": "2899.HK.pptx"
     },
     {
@@ -198,8 +198,8 @@
         "marketscreener",
         "yahoo"
       ],
-      "rendered_at": "2026-05-13T10:09:05.732897+00:00",
-      "pptx_bytes": 47711,
+      "rendered_at": "2026-05-13T10:14:01.094817+00:00",
+      "pptx_bytes": 47732,
       "pptx_filename": "1398.HK.pptx"
     }
   ]

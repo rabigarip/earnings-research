@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import PanelDecks from "../components/PanelDecks";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -197,11 +198,14 @@ export default function GenerateReportPage() {
   };
 
   return (
-    <div className="min-h-[70vh] flex items-center justify-center px-4">
-      <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-xl p-6">
-        <h1 className="text-2xl font-semibold mb-2">Download Earnings Report</h1>
+    <div className="min-h-[70vh] px-4">
+      <PanelDecks />
+      <div className="flex items-center justify-center pt-2 pb-8">
+        <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-xl p-6">
+        <h1 className="text-2xl font-semibold mb-2">Generate a custom report</h1>
         <p className="text-sm text-slate-400 mb-6">
-          Enter any ticker (e.g. AAPL, MSFT, 2222.SR), generate report, and download.
+          Off-panel ticker? Enter any symbol (e.g. AAPL, MSFT, 2222.SR) to
+          run an on-demand preview.
         </p>
 
         <label className="block text-sm mb-2 text-slate-300" htmlFor="ticker-input">
@@ -319,6 +323,7 @@ export default function GenerateReportPage() {
 
         {status ? <p className="mt-4 text-sm text-emerald-400">{status}</p> : null}
         {error ? <p className="mt-2 text-sm text-rose-400">{error}</p> : null}
+        </div>
       </div>
     </div>
   );

@@ -5,7 +5,10 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: "../static",
-    emptyOutDir: true,
+    // Don't wipe ../static/ on build — it contains pre-rendered Jabal
+    // panel decks under ../static/decks/ that the API serves directly.
+    // Vite still overwrites index.html + assets/ which is what we want.
+    emptyOutDir: false,
   },
   server: {
     port: 3000,

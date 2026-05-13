@@ -410,24 +410,32 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
                 current_pe = v
                 break
 
-    # Peer comparables — for the proof-of-concept we use the regional
-    # iShares proxy as the headline benchmark "peer", and stub the rest.
-    # Production: fetch_peers.py already wires MS peers — to integrate.
+    # Peer comparables — for now we use the regional iShares proxy as
+    # the headline benchmark "peer". Full peer-table integration with
+    # fetch_peers.py is a follow-up.
     peers = peers_override or []
     if not peers:
-        # Build a minimal default with the iShares regional proxy
-        # so the slide isn't empty for tickers without curated peers.
         etf_profile = (ishares_obs.get("company_profile") or {})
         if etf_profile.get("etf_proxy"):
+            etf_aum = etf_profile.get("net_assets_m_usd")
+            mc_fmt = "—"
+            if isinstance(etf_aum, (int, float)) and etf_aum:
+                # iShares AUM is in $M; pretty-print as $B for billions.
+                mc_fmt = (f"${etf_aum / 1000:.1f}B" if etf_aum >= 1000
+                           else f"${etf_aum:,.0f}M")
+            one_y = etf_profile.get("1y_nav")
             peers.append({
-                "name": etf_profile.get("etf_name") or etf_profile["etf_proxy"],
-                "ticker": etf_profile["etf_proxy"],
-                "market_cap_fmt": "—",
-                "pe_fmt": "—",
-                "div_yield_fmt": "—",
-                "ret_1y_fmt": (f"{etf_profile.get('1y_pct'):+.1f}%"
-                                if etf_profile.get("1y_pct") is not None else "—"),
-                "ret_1y": etf_profile.get("1y_pct"),
+                "name":           etf_profile.get("etf_name")
+                                   or f"iShares MSCI {etf_profile['etf_proxy']}",
+                "ticker":         etf_profile["etf_proxy"],
+                "market_cap_fmt": mc_fmt,
+                "pe_fmt":         "—",
+                "div_yield_fmt":  (f"{etf_profile.get('ytd_pct'):+.1f}% YTD"
+                                    if etf_profile.get("ytd_pct") is not None
+                                    else "—"),
+                "ret_1y_fmt":     (f"{one_y:+.1f}%" if isinstance(one_y, (int, float))
+                                    else "—"),
+                "ret_1y":         one_y if isinstance(one_y, (int, float)) else None,
             })
 
     # Rating split + target price + broker actions
