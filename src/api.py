@@ -19,7 +19,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 
 import json
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -605,6 +605,92 @@ def jabal_deck_download(ticker: str):
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         filename=f"{safe}_jabal_preview.pptx",
     )
+
+
+@app.post("/api/bloomberg/upload")
+async def bloomberg_upload(file: UploadFile = File(...)):
+    """Accept a CSV (or .xlsx → converted to CSV by pandas) of Bloomberg
+    BEST consensus data, persist it to data/bloomberg/consensus.csv, run
+    a refresh + re-render for every ticker present in the file.
+
+    Returns: {tickers_updated, rows_persisted, decks_rerendered}."""
+    import csv as _csv
+    import io
+    import subprocess
+    import sys
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty upload")
+
+    # Convert .xlsx → CSV in-memory if needed.
+    filename = (file.filename or "").lower()
+    if filename.endswith(".xlsx") or filename.endswith(".xls"):
+        try:
+            import pandas as pd
+            df = pd.read_excel(io.BytesIO(raw))
+            buf = io.StringIO()
+            df.to_csv(buf, index=False)
+            text = buf.getvalue()
+        except Exception as exc:
+            raise HTTPException(status_code=400,
+                detail=f"Excel parse failed: {type(exc).__name__}: {exc}")
+    else:
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("latin-1", errors="replace")
+
+    # Validate header
+    reader = _csv.DictReader(io.StringIO(text))
+    required = {"ticker", "period_type", "metric", "mean"}
+    missing = required - set(reader.fieldnames or [])
+    if missing:
+        raise HTTPException(status_code=400,
+            detail=f"Missing required columns: {sorted(missing)}")
+
+    # Persist to data/bloomberg/consensus.csv
+    tickers_seen: set[str] = set()
+    rows = list(reader)
+    for r in rows:
+        if r.get("ticker"):
+            tickers_seen.add(r["ticker"].strip().upper())
+
+    target = ROOT_DIR / "data" / "bloomberg" / "consensus.csv"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+
+    # Refresh + re-render. Run in subprocess so the API request returns
+    # promptly; the cron path is the canonical way to refresh, this is the
+    # one-off "I just uploaded" trigger.
+    decks_rerendered = []
+    for t in sorted(tickers_seen):
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "scripts.daily_refresh",
+                 "--cadence=weekly", "--only=bloomberg", f"--tickers={t}"],
+                timeout=60, check=False, capture_output=True,
+            )
+            subprocess.run(
+                [sys.executable, "-m", "scripts.daily_refresh",
+                 "--cadence=quarterly", "--only=bloomberg", f"--tickers={t}"],
+                timeout=60, check=False, capture_output=True,
+            )
+            subprocess.run(
+                [sys.executable, "-m", "scripts.render_panel_decks",
+                 "--skip-refresh", f"--tickers={t}"],
+                timeout=60, check=False, capture_output=True,
+            )
+            decks_rerendered.append(t)
+        except Exception:
+            continue
+
+    return {
+        "tickers_in_file": sorted(tickers_seen),
+        "rows_persisted":  len(rows),
+        "decks_rerendered": decks_rerendered,
+        "file": str(target.name),
+    }
 
 
 @app.get("/jabal", response_class=HTMLResponse)

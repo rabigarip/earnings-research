@@ -76,6 +76,14 @@ def _load_providers(only: set[str] | None):
             providers["ishares"] = iSharesProvider()
         except Exception as exc:
             print(f"  [skip] ishares: {exc}", file=sys.stderr)
+    # Bloomberg consensus (user-uploaded). Quiet skip if no file present —
+    # this is normal until the analyst uploads.
+    if not only or "bloomberg" in only:
+        try:
+            from src.providers.probe_bloomberg import BloombergProvider
+            providers["bloomberg"] = BloombergProvider()
+        except Exception as exc:
+            print(f"  [skip] bloomberg: {exc}", file=sys.stderr)
     if not only or "commodities" in only:
         try:
             from src.providers.probe_commodities import CommoditiesProvider

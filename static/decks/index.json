@@ -1,6 +1,6 @@
 {
   "panel_size": 10,
-  "rendered_at": "2026-05-13T10:14:01.094982+00:00",
+  "rendered_at": "2026-05-14T17:33:18.210974+00:00",
   "decks": [
     {
       "ticker": "2222.SR",
@@ -14,12 +14,13 @@
         "Low": 6
       },
       "sources": [
+        "bloomberg",
         "investing",
         "marketscreener",
         "yahoo"
       ],
-      "rendered_at": "2026-05-13T10:14:00.426992+00:00",
-      "pptx_bytes": 47977,
+      "rendered_at": "2026-05-14T17:33:17.687986+00:00",
+      "pptx_bytes": 47976,
       "pptx_filename": "2222.SR.pptx"
     },
     {
@@ -38,7 +39,7 @@
         "ishares",
         "marketscreener"
       ],
-      "rendered_at": "2026-05-13T10:14:00.498971+00:00",
+      "rendered_at": "2026-05-14T17:33:17.742523+00:00",
       "pptx_bytes": 39767,
       "pptx_filename": "ADNOCDRILL.AE.pptx"
     },
@@ -58,8 +59,8 @@
         "ishares",
         "marketscreener"
       ],
-      "rendered_at": "2026-05-13T10:14:00.610372+00:00",
-      "pptx_bytes": 39638,
+      "rendered_at": "2026-05-14T17:33:17.812239+00:00",
+      "pptx_bytes": 39639,
       "pptx_filename": "ADCB.AE.pptx"
     },
     {
@@ -78,7 +79,7 @@
         "ishares",
         "marketscreener"
       ],
-      "rendered_at": "2026-05-13T10:14:00.699145+00:00",
+      "rendered_at": "2026-05-14T17:33:17.870362+00:00",
       "pptx_bytes": 39329,
       "pptx_filename": "BKMB.OM.pptx"
     },
@@ -98,8 +99,8 @@
         "ishares",
         "marketscreener"
       ],
-      "rendered_at": "2026-05-13T10:14:00.776280+00:00",
-      "pptx_bytes": 39150,
+      "rendered_at": "2026-05-14T17:33:17.921985+00:00",
+      "pptx_bytes": 39151,
       "pptx_filename": "OQEP.OM.pptx"
     },
     {
@@ -118,8 +119,8 @@
         "marketscreener",
         "yahoo"
       ],
-      "rendered_at": "2026-05-13T10:14:00.841759+00:00",
-      "pptx_bytes": 47804,
+      "rendered_at": "2026-05-14T17:33:17.979248+00:00",
+      "pptx_bytes": 47801,
       "pptx_filename": "JINDALSTEL.NS.pptx"
     },
     {
@@ -138,8 +139,8 @@
         "marketscreener",
         "yahoo"
       ],
-      "rendered_at": "2026-05-13T10:14:00.907975+00:00",
-      "pptx_bytes": 47853,
+      "rendered_at": "2026-05-14T17:33:18.040639+00:00",
+      "pptx_bytes": 47856,
       "pptx_filename": "ICICIBANK.BO.pptx"
     },
     {
@@ -158,7 +159,7 @@
         "marketscreener",
         "yahoo"
       ],
-      "rendered_at": "2026-05-13T10:14:00.970308+00:00",
+      "rendered_at": "2026-05-14T17:33:18.097642+00:00",
       "pptx_bytes": 47566,
       "pptx_filename": "0700.HK.pptx"
     },
@@ -178,8 +179,8 @@
         "marketscreener",
         "yahoo"
       ],
-      "rendered_at": "2026-05-13T10:14:01.031108+00:00",
-      "pptx_bytes": 47867,
+      "rendered_at": "2026-05-14T17:33:18.153898+00:00",
+      "pptx_bytes": 47868,
       "pptx_filename": "2899.HK.pptx"
     },
     {
@@ -198,8 +199,8 @@
         "marketscreener",
         "yahoo"
       ],
-      "rendered_at": "2026-05-13T10:14:01.094817+00:00",
-      "pptx_bytes": 47732,
+      "rendered_at": "2026-05-14T17:33:18.210792+00:00",
+      "pptx_bytes": 47737,
       "pptx_filename": "1398.HK.pptx"
     }
   ]

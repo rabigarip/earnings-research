@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PanelDecks from "../components/PanelDecks";
+import BloombergUpload from "../components/BloombergUpload";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
@@ -200,6 +201,7 @@ export default function GenerateReportPage() {
   return (
     <div className="min-h-[70vh] px-4">
       <PanelDecks />
+      <BloombergUpload onUploaded={() => { /* PanelDecks reloads naturally on next render */ }} />
       <div className="flex items-center justify-center pt-2 pb-8">
         <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-xl p-6">
         <h1 className="text-2xl font-semibold mb-2">Generate a custom report</h1>

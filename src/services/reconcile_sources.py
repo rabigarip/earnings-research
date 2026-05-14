@@ -41,12 +41,13 @@ from typing import Any, Optional
 TRUST_LADDER = [
     "ir_pdf",        # filed-statement PDFs — ground truth (Stage 2 wired)
     "ir_page",       # legacy alias retained for backwards compat
+    "bloomberg",     # user-uploaded BEST consensus (when present, wins
+                     # over every free source for forward estimates,
+                     # target price, and rating split).
     "adx",           # exchange direct
     "nse",
     "hkex",
-    "investing",     # Investing.com — for forward estimates / rating split
-                     # it has the richest analyst-aggregate panel of the
-                     # free sources (matches Bloomberg's BEST screen).
+    "investing",     # Investing.com — richest free panel of forward fields
     "marketscreener",
     "yahoo",
     "macro",

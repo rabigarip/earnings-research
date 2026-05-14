@@ -358,8 +358,17 @@ def _build_estimates_rows(cv: dict) -> list[dict]:
         return f"{v:,.0f}"
 
     # Two-column FY estimates: FY+1 EPS + Revenue + Next-Q EPS.
-    fy1_year = fwd.get("fy1_year") or fwd.get("fy_year") or ""
-    fy2_year = fwd.get("fy2_year") or ""
+    # Sources sometimes return "FY2026" and sometimes plain "2026" — strip
+    # an existing "FY" prefix so the renderer doesn't double it.
+    def _norm_fy(v) -> str:
+        if v in (None, ""):
+            return ""
+        s = str(v).strip()
+        if s.upper().startswith("FY"):
+            s = s[2:].lstrip()
+        return s
+    fy1_year = _norm_fy(fwd.get("fy1_year") or fwd.get("fy_year"))
+    fy2_year = _norm_fy(fwd.get("fy2_year"))
     next_q_period = fwd.get("next_q_period") or "Next Q"
 
     eps_fy1 = _firstnum("eps_fy1", "eps_2026", "eps_2027", "eps")
