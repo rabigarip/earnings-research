@@ -436,7 +436,16 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
     macro_obs       = get_observations_by_provider(ticker, "macro")
     investing_obs   = get_observations_by_provider(ticker, "investing")
 
-    summary = _template_exec_summary(cv, commodities_obs, macro_obs)
+    # Prefer the Gemini-generated summary; fall back to the auto-template
+    # when the LLM is unavailable (no API key / rate limit / parse failure).
+    llm = None
+    try:
+        from src.services.llm_summary import generate_summary
+        llm = generate_summary(ticker)
+    except Exception:
+        llm = None
+    summary = (llm or {}).get("thesis_paragraph") or _template_exec_summary(
+        cv, commodities_obs, macro_obs)
     rows = _build_estimates_rows(cv)
 
     # Compose the table footnote: lead with the next-Q anchor (date,
@@ -481,18 +490,24 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
         "Capex/project milestones tracking on schedule",
     ]
 
+    # LLM output, when present, replaces every default bullet list too —
+    # otherwise the deck mixes a fresh LLM thesis with stale boilerplate.
+    llm_catalysts = (llm or {}).get("catalysts") or []
+    llm_risks     = (llm or {}).get("risks") or []
+    llm_watch     = (llm or {}).get("watch_list") or []
+
     from datetime import datetime
     return ThesisData(
         exec_summary_body=summary,
         estimates_rows=rows,
         estimates_footnote=estimates_footnote,
-        catalysts=catalysts or default_catalysts,
-        risks=risks or [
+        catalysts=catalysts or llm_catalysts or default_catalysts,
+        risks=risks or llm_risks or [
             "Cautious management tone could validate target-price gap",
             "Feedstock / input cost volatility pressures margin trajectory",
             "Macro / commodity-price softness weighs on top-line growth",
         ],
-        watch_list=watch_list or [
+        watch_list=watch_list or llm_watch or [
             "Forward demand commentary — Q3 order book and pricing trajectory",
             "Feedstock cost outlook and supply-chain commentary",
             "Updated capex schedule and any project-pipeline updates",

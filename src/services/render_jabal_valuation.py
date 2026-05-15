@@ -382,7 +382,7 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
                             peers_override: Optional[list[dict]] = None,
                             ) -> ValuationData:
     cv = get_all_fields(ticker)
-    ishares_obs = get_observations_by_provider(ticker, "ishares")
+    # iShares overlay removed (peer table no longer pulls regional ETF).
 
     profile = cv.get("company_profile")
     pname = (profile.value.get("name") if profile and isinstance(profile.value, dict)
@@ -410,33 +410,11 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
                 current_pe = v
                 break
 
-    # Peer comparables — for now we use the regional iShares proxy as
-    # the headline benchmark "peer". Full peer-table integration with
-    # fetch_peers.py is a follow-up.
+    # Peer comparables — defer to upstream peer-set (peers_override). When
+    # nothing is curated, leave the table empty rather than fill it with
+    # a regional-ETF proxy (the iShares row was marginal value and added
+    # confusion about "what is this peer").
     peers = peers_override or []
-    if not peers:
-        etf_profile = (ishares_obs.get("company_profile") or {})
-        if etf_profile.get("etf_proxy"):
-            etf_aum = etf_profile.get("net_assets_m_usd")
-            mc_fmt = "—"
-            if isinstance(etf_aum, (int, float)) and etf_aum:
-                # iShares AUM is in $M; pretty-print as $B for billions.
-                mc_fmt = (f"${etf_aum / 1000:.1f}B" if etf_aum >= 1000
-                           else f"${etf_aum:,.0f}M")
-            one_y = etf_profile.get("1y_nav")
-            peers.append({
-                "name":           etf_profile.get("etf_name")
-                                   or f"iShares MSCI {etf_profile['etf_proxy']}",
-                "ticker":         etf_profile["etf_proxy"],
-                "market_cap_fmt": mc_fmt,
-                "pe_fmt":         "—",
-                "div_yield_fmt":  (f"{etf_profile.get('ytd_pct'):+.1f}% YTD"
-                                    if etf_profile.get("ytd_pct") is not None
-                                    else "—"),
-                "ret_1y_fmt":     (f"{one_y:+.1f}%" if isinstance(one_y, (int, float))
-                                    else "—"),
-                "ret_1y":         one_y if isinstance(one_y, (int, float)) else None,
-            })
 
     # Rating split + target price + broker actions
     rating_obs = cv.get("rating_split")

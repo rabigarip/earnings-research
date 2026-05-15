@@ -70,7 +70,9 @@ def _load_providers(only: set[str] | None):
             providers["hkex"] = HKEXProvider()
         except Exception as exc:
             print(f"  [skip] hkex: {exc}", file=sys.stderr)
-    if not only or "ishares" in only:
+    # iShares disabled — regional-proxy returns were marginal vs. complexity
+    # cost. To re-enable add to `--only` explicitly; provider file remains.
+    if "ishares" in (only or set()):
         try:
             from src.providers.probe_ishares import iSharesProvider
             providers["ishares"] = iSharesProvider()

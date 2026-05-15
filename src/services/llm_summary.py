@@ -1,0 +1,424 @@
+"""
+LLM-driven executive summary for the Jabal deck.
+
+The auto-templated paragraph on slide 2 (the prior approach) was generic
+because it pulled the same boilerplate phrases for every ticker. With
+Bloomberg consensus + IR-PDF + free-source backstops feeding the canonical
+store, we now have enough structured data per ticker to generate a real
+analyst-grade paragraph.
+
+This module builds a rich context dict per ticker, calls Gemini with a
+disciplined prompt, and returns:
+    {
+        thesis_paragraph: str   (4-6 sentences),
+        catalysts:        list[str],   (3 items)
+        risks:            list[str],   (3 items)
+        watch_list:       list[str],   (3 items, framed as questions)
+        provider:         "gemini",
+        model:            "<actual model name>",
+        as_of:            ISO timestamp,
+    }
+
+Cached to disk by (ticker, context_hash) so a re-render is free unless
+underlying data changes. Falls back gracefully to the prior template when:
+  - GEMINI_API_KEY is not set
+  - the model call fails / times out
+  - returned text fails JSON validation
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Optional
+
+from src.services.canonical_store import (
+    get_all_fields, get_observations_by_provider,
+)
+
+
+log = logging.getLogger(__name__)
+
+_CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "cache" / "llm_summary"
+
+
+# ── Context builder ──────────────────────────────────────────────
+
+def _fmt_num(v: Any, *, suffix: str = "") -> str:
+    if v is None:
+        return "—"
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if abs(f) >= 1e12: return f"{f/1e12:.2f}T{suffix}"
+    if abs(f) >= 1e9:  return f"{f/1e9:.1f}B{suffix}"
+    if abs(f) >= 1e6:  return f"{f/1e6:.0f}M{suffix}"
+    if abs(f) < 1:     return f"{f:.3f}{suffix}"
+    return f"{f:,.2f}{suffix}"
+
+
+def build_context(ticker: str) -> dict:
+    """Pull every datum the LLM might reasonably need from canonical_store
+    + observation backfills, into a single flat-ish dict. The prompt
+    references this verbatim — keys are deliberately readable."""
+    cv = get_all_fields(ticker)
+    investing_obs   = get_observations_by_provider(ticker, "investing")
+    commodities_obs = get_observations_by_provider(ticker, "commodities")
+    macro_obs       = get_observations_by_provider(ticker, "macro")
+    bloomberg_obs   = get_observations_by_provider(ticker, "bloomberg")
+
+    def _val(field):
+        c = cv.get(field)
+        return c.value if c else None
+
+    profile = _val("company_profile") or {}
+    if not isinstance(profile, dict):
+        profile = {}
+
+    target = _val("target_price") or {}
+    if not isinstance(target, dict):
+        target = {}
+
+    rating = _val("rating_split") or {}
+    if not isinstance(rating, dict):
+        rating = {}
+
+    val_fwd = _val("valuation_forward") or {}
+    if not isinstance(val_fwd, dict):
+        val_fwd = {}
+
+    val_hist = _val("valuation_historical") or {}
+    if not isinstance(val_hist, dict):
+        val_hist = {}
+
+    hist_prices = _val("historical_prices") or {}
+    if not isinstance(hist_prices, dict):
+        hist_prices = {}
+
+    # P/E recent vs 5y average
+    pe_recent = pe_avg = None
+    pe_list = val_hist.get("pe") if isinstance(val_hist, dict) else []
+    if isinstance(pe_list, list):
+        nums = [v for v in pe_list if isinstance(v, (int, float))]
+        if nums:
+            pe_recent = nums[-1]
+            pe_avg = sum(nums) / len(nums)
+
+    # Surprise history (from Investing) — most useful for the "track record" angle
+    surprise = ((investing_obs.get("income_statement_quarterly") or {})
+                .get("surprise_history", []))
+    beats = sum(1 for r in surprise[:4]
+                  if isinstance(r.get("eps_surprise_pct"), (int, float))
+                  and r["eps_surprise_pct"] > 0)
+    n_recent = min(4, len(surprise))
+    last_surprise = surprise[0] if surprise else None
+
+    # Broker actions (from MS canonical)
+    ba_val = _val("broker_actions") or {}
+    broker_items = ba_val.get("items", []) if isinstance(ba_val, dict) else []
+
+    # Commodity context (from commodities provider observations)
+    commodities = ((commodities_obs.get("company_profile") or {})
+                   .get("industry_commodities", {}))
+
+    # Macro context
+    macro = macro_obs.get("company_profile") or {}
+
+    current_price = _val("current_price")
+    target_mean = target.get("mean")
+    upside_pct = None
+    try:
+        if target_mean and current_price and float(current_price) > 0:
+            upside_pct = (float(target_mean) / float(current_price) - 1.0) * 100
+    except (TypeError, ValueError):
+        pass
+
+    # MarketScreener reports market_cap in millions of local currency; the
+    # other providers report raw. Normalize to raw before passing to prompt.
+    raw_mcap = _val("market_cap")
+    mcap_source = (cv.get("market_cap").canonical_source
+                    if cv.get("market_cap") else None)
+    if mcap_source == "marketscreener" and isinstance(raw_mcap, (int, float)):
+        raw_mcap = raw_mcap * 1_000_000
+
+    # Normalise FY year labels (strip an existing "FY" prefix so the prompt
+    # doesn't end up with "FYFY2026").
+    def _norm_fy(v):
+        s = str(v or "").strip()
+        if s.upper().startswith("FY"):
+            s = s[2:].lstrip()
+        return s
+
+    return {
+        "ticker": ticker,
+        "company_name": profile.get("name") or ticker,
+        "sector": profile.get("sector") or "—",
+        "industry": profile.get("industry") or "—",
+        "country": profile.get("country") or "—",
+        "currency": profile.get("currency") or "",
+        # Live snapshot
+        "current_price": current_price,
+        "market_cap": raw_mcap,
+        "dividend_yield_pct": _val("dividend_yield"),
+        # Bloomberg / consensus (canonical source where present)
+        "consensus_source": (cv.get("valuation_forward").canonical_source
+                              if cv.get("valuation_forward") else None),
+        "next_q_period": val_fwd.get("next_q_period"),
+        "next_q_report_date": val_fwd.get("next_q_report_date"),
+        "eps_next_q": val_fwd.get("eps_next_q"),
+        "revenue_next_q": val_fwd.get("revenue_next_q"),
+        "fy1_year": _norm_fy(val_fwd.get("fy1_year")),
+        "eps_fy1": val_fwd.get("eps_fy1"),
+        "revenue_fy1": val_fwd.get("revenue_fy1"),
+        "fy2_year": _norm_fy(val_fwd.get("fy2_year")),
+        "eps_fy2": val_fwd.get("eps_fy2"),
+        "revenue_fy2": val_fwd.get("revenue_fy2"),
+        # Target + rating
+        "target_mean": target_mean,
+        "target_high": target.get("high"),
+        "target_low":  target.get("low"),
+        "n_analysts":  rating.get("total") or target.get("n_analysts"),
+        "rating_consensus": rating.get("consensus"),
+        "buy_count":  rating.get("buy"),
+        "hold_count": rating.get("hold"),
+        "sell_count": rating.get("sell"),
+        "upside_pct": upside_pct,
+        # Valuation history
+        "pe_recent": pe_recent,
+        "pe_5y_avg": pe_avg,
+        # Surprise track record
+        "surprise_beats_last4": beats,
+        "surprise_n_recent": n_recent,
+        "last_surprise": last_surprise,
+        # Broker actions (3 most recent)
+        "recent_broker_actions": broker_items[:3],
+        # Commodity / macro overlays (optional)
+        "commodities": commodities,
+        "macro": {
+            "gdp_growth_pct": macro.get("gdp_growth_pct"),
+            "gdp_growth_fcst_next_pct": macro.get("gdp_growth_fcst_next_pct"),
+            "inflation_pct": macro.get("inflation_pct"),
+        },
+    }
+
+
+# ── Prompt ───────────────────────────────────────────────────────
+
+_SYSTEM = (
+    "You are a senior buy-side analyst at Jabal Asset Management writing an "
+    "earnings-preview note. Your prose is concise, evidence-based, and free "
+    "of marketing language. You take a clear stance — constructive, cautious, "
+    "or balanced — and back every claim with a specific number from the data "
+    "provided. You never invent numbers."
+)
+
+
+def _prompt(ctx: dict) -> str:
+    # Pre-format numeric anchors so the model sees clean strings, not raw floats.
+    cur = ctx.get("currency") or ""
+    fmt_money = lambda v: f"{cur} {_fmt_num(v)}".strip()
+    cur_price = fmt_money(ctx.get("current_price"))
+    target = fmt_money(ctx.get("target_mean"))
+    upside = (f"{ctx['upside_pct']:+.1f}%" if isinstance(ctx.get("upside_pct"), (int, float))
+              else "—")
+    next_q_eps = _fmt_num(ctx.get("eps_next_q"))
+    next_q_rev = fmt_money(ctx.get("revenue_next_q"))
+    fy1_eps = _fmt_num(ctx.get("eps_fy1"))
+    fy1_rev = fmt_money(ctx.get("revenue_fy1"))
+
+    surprise_lines = []
+    for r in (ctx.get("last_surprise") and [ctx["last_surprise"]] or []):
+        if r:
+            s = r.get("eps_surprise_pct")
+            if isinstance(s, (int, float)):
+                surprise_lines.append(
+                    f"Last quarter ({r.get('period','?')}): EPS "
+                    f"{r.get('eps_actual')} vs estimate {r.get('eps_estimate')} "
+                    f"({s:+.1f}%)."
+                )
+    beats_line = (
+        f"{ctx['surprise_beats_last4']} of last {ctx['surprise_n_recent']} "
+        f"quarters above consensus EPS."
+    ) if ctx.get("surprise_n_recent") else ""
+
+    pe_line = ""
+    if isinstance(ctx.get("pe_recent"), (int, float)) and isinstance(ctx.get("pe_5y_avg"), (int, float)):
+        avg = ctx["pe_5y_avg"]
+        rec = ctx["pe_recent"]
+        delta_pct = (rec / avg - 1.0) * 100 if avg else 0
+        pe_line = (
+            f"P/E around {rec:.1f}x vs 5-year average {avg:.1f}x "
+            f"({delta_pct:+.0f}% relative)."
+        )
+
+    commodity_lines = []
+    for tag, info in (ctx.get("commodities") or {}).items():
+        if not isinstance(info, dict):
+            continue
+        val = info.get("value")
+        yoy = info.get("yoy_pct")
+        unit = info.get("unit", "")
+        if val is None:
+            continue
+        yoy_str = f" ({yoy:+.1f}% YoY)" if isinstance(yoy, (int, float)) else ""
+        commodity_lines.append(f"{tag}: {val} {unit}{yoy_str}")
+    commodity_block = ("Commodity context: " + "; ".join(commodity_lines) + ".") if commodity_lines else ""
+
+    macro = ctx.get("macro") or {}
+    macro_parts = []
+    if isinstance(macro.get("gdp_growth_pct"), (int, float)):
+        macro_parts.append(f"GDP growth {macro['gdp_growth_pct']:.1f}%")
+    if isinstance(macro.get("gdp_growth_fcst_next_pct"), (int, float)):
+        macro_parts.append(f"IMF next-year forecast {macro['gdp_growth_fcst_next_pct']:.1f}%")
+    if isinstance(macro.get("inflation_pct"), (int, float)):
+        macro_parts.append(f"inflation {macro['inflation_pct']:.1f}%")
+    macro_block = ("Country macro: " + ", ".join(macro_parts) + ".") if macro_parts else ""
+
+    broker_block = ""
+    if ctx.get("recent_broker_actions"):
+        rows = [
+            f"  - {b.get('date','?')}: {b.get('headline','')[:120]}"
+            for b in ctx["recent_broker_actions"][:3]
+        ]
+        broker_block = "Recent broker actions:\n" + "\n".join(rows)
+
+    rating = ctx.get("rating_consensus") or "—"
+    n_an = ctx.get("n_analysts") or 0
+    b = ctx.get("buy_count") or 0
+    h = ctx.get("hold_count") or 0
+    s = ctx.get("sell_count") or 0
+
+    return f"""{_SYSTEM}
+
+COMPANY: {ctx['company_name']} ({ctx['ticker']})
+SECTOR / INDUSTRY: {ctx['sector']} / {ctx['industry']} ({ctx['country']})
+
+MARKET SNAPSHOT
+  Last close: {cur_price}
+  Market cap: {fmt_money(ctx.get('market_cap'))}
+  Dividend yield: {_fmt_num(ctx.get('dividend_yield_pct'))}%
+
+CONSENSUS (source: {ctx.get('consensus_source') or '—'}, {n_an} analysts)
+  Next print: {ctx.get('next_q_report_date') or '—'} (period {ctx.get('next_q_period') or '—'})
+  Next-Q  EPS: {next_q_eps} · Revenue: {next_q_rev}
+  FY{ctx.get('fy1_year') or '—'}  EPS: {fy1_eps} · Revenue: {fy1_rev}
+  Average target: {target} ({upside} vs last close), range {fmt_money(ctx.get('target_low'))}-{fmt_money(ctx.get('target_high'))}
+  Rating: {rating} ({b}/{h}/{s} Buy/Hold/Sell)
+
+VALUATION CONTEXT
+  {pe_line}
+
+EARNINGS TRACK RECORD
+  {beats_line}
+  {' '.join(surprise_lines)}
+
+{commodity_block}
+
+{macro_block}
+
+{broker_block}
+
+TASK
+Write an earnings-preview package as a JSON object with these keys:
+
+1. "thesis_paragraph": 4-6 sentences, institutional voice. Take a clear stance
+   (constructive / cautious / balanced). Cite at least two specific numbers
+   from above. Flag the SWING FACTOR for the upcoming print.
+2. "catalysts": list of exactly 3 specific catalyst bullets. Each one sentence,
+   with a quantitative anchor where possible (e.g. "9 Buy ratings...", "FY26
+   consensus EPS of {fy1_eps}...", "+29.8% EPS beat last quarter..."). Do NOT
+   include generic phrases like "constructive guidance."
+3. "risks": list of exactly 3 specific risk bullets. Same evidence rules.
+4. "watch_list": list of exactly 3 questions the analyst will ask on the print.
+   Phrase as questions ending in "?". Each should reference a specific data
+   point or guidance line.
+
+Return ONLY the JSON object. No commentary, no markdown fences.
+"""
+
+
+# ── Cache ────────────────────────────────────────────────────────
+
+def _cache_key(ctx: dict) -> str:
+    """Hash the context (excluding volatile fields) so equal data → same key."""
+    stable = {k: v for k, v in ctx.items() if k not in ("ticker",)}
+    payload = json.dumps(stable, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()[:16]
+
+
+def _cache_path(ticker: str, key: str) -> Path:
+    safe = ticker.replace("/", "_").replace(".", "_")
+    return _CACHE_DIR / f"{safe}__{key}.json"
+
+
+def _read_cache(path: Path) -> Optional[dict]:
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _write_cache(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, default=str))
+
+
+# ── Main entry point ─────────────────────────────────────────────
+
+def generate_summary(ticker: str, *, force_refresh: bool = False) -> Optional[dict]:
+    """Build context → optionally call Gemini → return structured summary
+    or None on failure. Caller is responsible for fallback behaviour.
+
+    Cached by (ticker, context_hash) — re-rendering the deck without
+    refreshing canonical_store is a free hit."""
+    ctx = build_context(ticker)
+    key = _cache_key(ctx)
+    path = _cache_path(ticker, key)
+    if not force_refresh:
+        cached = _read_cache(path)
+        if cached:
+            return cached
+
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        log.info("GEMINI_API_KEY not set; LLM summary unavailable for %s", ticker)
+        return None
+
+    try:
+        from src.providers.gemini import _call_gemini  # reuse the wrapper
+        prompt = _prompt(ctx)
+        out = _call_gemini(prompt, for_investment_view=True)
+    except Exception as exc:
+        log.warning("Gemini summary failed for %s: %s", ticker, exc)
+        return None
+
+    if not out or not isinstance(out, dict):
+        return None
+
+    # Validate shape
+    required = {"thesis_paragraph", "catalysts", "risks", "watch_list"}
+    missing = required - set(out.keys())
+    if missing:
+        log.warning("Gemini summary missing keys for %s: %s", ticker, missing)
+        return None
+
+    payload = {
+        "thesis_paragraph": (out.get("thesis_paragraph") or "").strip(),
+        "catalysts":  list(out.get("catalysts")  or [])[:3],
+        "risks":      list(out.get("risks")      or [])[:3],
+        "watch_list": list(out.get("watch_list") or [])[:3],
+        "provider":   "gemini",
+        "model":      "auto",
+        "ticker":     ticker,
+        "as_of":      datetime.now(timezone.utc).isoformat(),
+        "context_hash": key,
+    }
+    _write_cache(path, payload)
+    return payload
