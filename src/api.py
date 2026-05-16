@@ -185,17 +185,40 @@ def get_report(run_id: str):
 
 
 @app.get("/api/reports/{run_id}/download")
-def download_report(run_id: str):
-    """Download the earnings preview file for this run (.pptx). Returns 404 if file not found (e.g. after Render redeploy)."""
+def download_report(run_id: str, filename: str | None = None):
+    """Download the earnings preview file for this run (.pptx).
+
+    Resolution order:
+      1. `?filename=<name>` query parameter (preferred; set by POST /api/reports).
+         Path-traversal protected, must exist in report_output_dir().
+      2. DB lookup by run_id → memo_path field.
+
+    The query-param path makes downloads survive a DB-persist failure: the
+    POST response carries the actual filename, and the GET serves it without
+    a SQLite round-trip.
+    """
     from src.storage.db import load_run
-    from src.config import root, cfg, report_output_dir
-    run = load_run(run_id)
-    if not run:
-        raise HTTPException(status_code=404, detail="Report not found")
-    memo_filename = (run.get("memo_path") or "").strip()
-    if not memo_filename or ".." in memo_filename:
-        raise HTTPException(status_code=404, detail="No report file for this run")
+    from src.config import report_output_dir
     out_dir = report_output_dir()
+
+    memo_filename: str | None = None
+    if filename:
+        # Defensive: strip path separators, reject traversal.
+        candidate = filename.strip().replace("\\", "/").split("/")[-1]
+        if candidate and ".." not in candidate:
+            memo_filename = candidate
+
+    if not memo_filename:
+        run = load_run(run_id)
+        if not run:
+            raise HTTPException(
+                status_code=404,
+                detail="Report not found (run_id absent from DB and no filename provided)",
+            )
+        memo_filename = (run.get("memo_path") or "").strip()
+        if not memo_filename or ".." in memo_filename:
+            raise HTTPException(status_code=404, detail="No report file for this run")
+
     file_path = out_dir / memo_filename
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="Report file no longer available (may have been removed)")
@@ -317,6 +340,18 @@ def _run_preview_and_response(ticker: str, skip_llm: bool = True, *, raise_on_re
     }
     if run:
         row["created"] = run.get("started_at") or row["created"]
+
+    # Surface the generated filename so the frontend can download even if
+    # the DB row isn't queryable. Stored on row["filename"] for the
+    # `?filename=` query param of /api/reports/{id}/download.
+    gen_step_done = next(
+        (s for s in steps if s.get("step_name") == "generate_report" and s.get("status") == "success"),
+        None,
+    )
+    if gen_step_done and gen_step_done.get("data"):
+        from pathlib import Path as _P
+        row["filename"] = _P(str(gen_step_done["data"])).name
+
     out: dict = {"report": row, "payload": payload, "steps": steps}
     if not raise_on_readiness:
         out["readiness_error"] = err

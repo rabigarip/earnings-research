@@ -164,9 +164,13 @@ export default function GenerateReportPage() {
       if (!runId) {
         throw new Error("Report generated but run id is missing");
       }
+      // Pass filename through so download works even if DB persist failed.
+      const dlFilename = created?.report?.filename;
 
       setStatus("Downloading report...");
-      const dlRes = await fetch(`${API_BASE}/api/reports/${runId}/download?t=${Date.now()}`);
+      const dlParams = new URLSearchParams({ t: String(Date.now()) });
+      if (dlFilename) dlParams.set("filename", dlFilename);
+      const dlRes = await fetch(`${API_BASE}/api/reports/${runId}/download?${dlParams.toString()}`);
       if (!dlRes.ok) {
         const err = await dlRes.json().catch(() => ({}));
         const msg = toErrorText(
