@@ -269,7 +269,42 @@ def _run_preview_and_response(ticker: str, skip_llm: bool = True, *, raise_on_re
                 },
             )
 
+    # If the pipeline's save_run failed (now surfaced as a `save_run` step),
+    # the download endpoint would 404 with "Report not found". Try to persist
+    # here using in-memory step data; if that also fails, raise 500 with the
+    # actual DB error so the user sees something actionable.
+    save_failure = next(
+        (s for s in steps if s.get("step_name") == "save_run" and s.get("status") == "failed"),
+        None,
+    )
     run = load_run(run_id) if run_id else None
+    if run_id and run is None and raise_on_readiness:
+        from src.storage.db import save_run as _save_run
+        from datetime import datetime as _dt, timezone as _tz
+        gen_step = next((s for s in steps if s.get("step_name") == "generate_report"), None)
+        memo_path = None
+        if gen_step and gen_step.get("status") == "success" and gen_step.get("data"):
+            from pathlib import Path as _P
+            memo_path = _P(str(gen_step["data"])).name
+        try:
+            _save_run(
+                run_id, ticker, "preview",
+                _dt.now(_tz.utc).isoformat(), _dt.now(_tz.utc).isoformat(),
+                overall, steps, memo_path=memo_path,
+            )
+            run = load_run(run_id)
+        except Exception as db_exc:
+            detail = (save_failure or {}).get("error_detail") or f"{type(db_exc).__name__}: {db_exc}"
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "run_persist_failed",
+                    "summary": "Generated the report but could not persist the run record.",
+                    "reasons": [detail],
+                    "step_failures": [],
+                },
+            )
+
     company = load_company(ticker) if ticker else None
     row = _run_to_report_row(run) if run else {
         "id": run_id,
