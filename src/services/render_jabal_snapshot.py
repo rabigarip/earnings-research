@@ -535,6 +535,7 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
                           report_date: str = "TBA",
                           highlights: Optional[list[tuple[str, str]]] = None,
                           ms_price_performance: Optional[dict] = None,
+                          historical_override: Optional[dict] = None,
                           ) -> SnapshotData:
     """Translate canonical_store rows into the slide's input dataclass.
     Defensive against missing fields: every renderer-visible string has
@@ -596,6 +597,10 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
     rating_split = _val("rating_split") or {}
     div_yield = _val("dividend_yield")
     hist_prices = _val("historical_prices") or {}
+    # Prefer Investing-derived history when canonical_store is empty (the
+    # GCC ex-Saudi tickers don't reach canonical_store via yfinance).
+    if not (isinstance(hist_prices, dict) and hist_prices) and isinstance(historical_override, dict):
+        hist_prices = historical_override
 
     # Currency: try profile first, else canonical_value units
     currency = (profile.get("currency") if isinstance(profile, dict) else None) or ""
