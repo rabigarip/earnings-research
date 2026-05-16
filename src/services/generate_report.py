@@ -85,10 +85,24 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
     period_label = (memo_data or {}).get("period_label") or "Earnings Preview"
     report_date  = (memo_data or {}).get("report_date") or "TBA"
 
+    # Load curated peer tickers (from company_master.peer_group) and
+    # enrich them with yfinance — drives slide 3's peer table.
+    peer_rows: list[dict] = []
+    try:
+        from src.storage.db import load_company
+        from src.services.fetch_peers import fetch_peer_rows
+        company_row = load_company(ticker) or {}
+        peer_tickers = company_row.get("peer_group") or []
+        if peer_tickers:
+            peer_rows = fetch_peer_rows(peer_tickers)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("peer enrichment failed for %s: %s", ticker, exc)
+
     snap      = build_snapshot_data(ticker, period_label=period_label,
                                        report_date=report_date)
     thesis    = build_thesis_data(ticker, quarterly=payload.quarterly)
-    valuation = build_valuation_data(ticker)
+    valuation = build_valuation_data(ticker, peers_override=peer_rows or None)
 
     prs = Presentation()
     prs.slide_width  = _In(PAGE_W_IN)

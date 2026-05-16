@@ -507,7 +507,14 @@
     "sector": "Communication Services",
     "industry": "Internet Content & Information",
     "is_bank": false,
-    "notes": ""
+    "notes": "",
+    "peer_group": [
+      "9988.HK",
+      "3690.HK",
+      "1024.HK",
+      "BIDU",
+      "NTES"
+    ]
   },
   {
     "ticker": "0728.HK",
@@ -1137,7 +1144,14 @@
     "sector": "Financials",
     "industry": "Banks—Diversified",
     "is_bank": true,
-    "notes": ""
+    "notes": "",
+    "peer_group": [
+      "3988.HK",
+      "0939.HK",
+      "1288.HK",
+      "3328.HK",
+      "2388.HK"
+    ]
   },
   {
     "ticker": "1658.HK",
@@ -1392,7 +1406,14 @@
     "sector": "Basic Materials",
     "industry": "Agricultural Inputs",
     "is_bank": false,
-    "notes": ""
+    "notes": "",
+    "peer_group": [
+      "NTR",
+      "MOS",
+      "CF",
+      "YAR.OL",
+      "ICL"
+    ]
   },
   {
     "ticker": "2040.SR",
@@ -1572,7 +1593,14 @@
     "sector": "Energy",
     "industry": "Oil & Gas Integrated",
     "is_bank": false,
-    "notes": ""
+    "notes": "",
+    "peer_group": [
+      "XOM",
+      "CVX",
+      "SHEL",
+      "TTE",
+      "BP"
+    ]
   },
   {
     "ticker": "2223.SR",
@@ -2037,7 +2065,14 @@
     "sector": "Basic Materials",
     "industry": "Gold",
     "is_bank": false,
-    "notes": ""
+    "notes": "",
+    "peer_group": [
+      "FCX",
+      "NEM",
+      "GOLD",
+      "RIO",
+      "1818.HK"
+    ]
   },
   {
     "ticker": "300033.SZ",
@@ -6057,7 +6092,14 @@
     "sector": "Financials",
     "industry": "Banks—Diversified",
     "is_bank": true,
-    "notes": ""
+    "notes": "",
+    "peer_group": [
+      "HDFCBANK.NS",
+      "AXISBANK.NS",
+      "KOTAKBANK.NS",
+      "SBIN.NS",
+      "INDUSINDBK.NS"
+    ]
   },
   {
     "ticker": "IMP.JO",
@@ -8412,7 +8454,14 @@
     "sector": "Energy",
     "industry": "Oil & Gas Exploration",
     "is_bank": false,
-    "notes": "MSX30"
+    "notes": "MSX30",
+    "peer_group": [
+      "COP",
+      "EOG",
+      "OXY",
+      "DVN",
+      "APA"
+    ]
   },
   {
     "ticker": "BKMB.OM",
@@ -8427,7 +8476,14 @@
     "sector": "Financials",
     "industry": "Banks",
     "is_bank": true,
-    "notes": "MSX30"
+    "notes": "MSX30",
+    "peer_group": [
+      "ADCB.AE",
+      "ENBD.AE",
+      "QNBK.QA",
+      "FAB.AE",
+      "1180.SR"
+    ]
   },
   {
     "ticker": "ASCO.OM",
@@ -8994,7 +9050,14 @@
     "industry": "Oil & Gas Drilling",
     "is_bank": false,
     "isin": "",
-    "marketscreener_id": ""
+    "marketscreener_id": "",
+    "peer_group": [
+      "SLB",
+      "HAL",
+      "BKR",
+      "VAL",
+      "NE"
+    ]
   },
   {
     "ticker": "ADCB.AE",
@@ -9006,7 +9069,14 @@
     "industry": "Banks",
     "is_bank": true,
     "isin": "AEA002001013",
-    "marketscreener_id": ""
+    "marketscreener_id": "",
+    "peer_group": [
+      "ENBD.AE",
+      "FAB.AE",
+      "DIB.AE",
+      "QNBK.QA",
+      "1180.SR"
+    ]
   },
   {
     "ticker": "JINDALSTEL.NS",
@@ -9018,6 +9088,13 @@
     "industry": "Steel",
     "is_bank": false,
     "isin": "INE749A01030",
-    "marketscreener_id": ""
+    "marketscreener_id": "",
+    "peer_group": [
+      "TATASTEEL.NS",
+      "JSWSTEEL.NS",
+      "SAIL.NS",
+      "NMDC.NS",
+      "MT"
+    ]
   }
 ]
