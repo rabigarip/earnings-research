@@ -38,8 +38,8 @@ _SLUGS: dict[str, str] = {
     "OQEP.OM":        "oq-exploration-and-production-cjsc",
     # India / NSE
     "JINDALSTEL.NS":  "jindal-steel---power",
-    "ICICIBANK.NS":   "icici-bank",
-    "ICICIBANK.BO":   "icici-bank",
+    "ICICIBANK.NS":   "icici-bank-ltd",   # NSE listing in INR (not 'icici-bank' = IBN ADR in USD)
+    "ICICIBANK.BO":   "icici-bank-ltd",
     # China / Hong Kong
     "0700.HK":        "tencent-holdings-hk",
     "2899.HK":        "zijin-mining-group",
