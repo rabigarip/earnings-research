@@ -397,12 +397,18 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     if hp and isinstance(hp.value, dict):
         close_series = hp.value.get("close_series") or []
 
-    # P/E history from valuation_historical
+    # P/E history from valuation_historical. The header reads
+    # "P/E MULTIPLE · 5-YEAR RANGE" so we trim the series to the trailing
+    # 5 periods. The reference deck shows FY-4 through current; with
+    # 8 raw points the chart became unreadable and contradicted the header.
     vh = cv.get("valuation_historical")
     periods, pe_vals = [], []
     if vh and isinstance(vh.value, dict):
         periods = vh.value.get("periods", []) or []
         pe_vals = vh.value.get("pe", []) or []
+    if len(periods) > 5 and len(pe_vals) == len(periods):
+        periods = periods[-5:]
+        pe_vals = pe_vals[-5:]
     current_pe = None
     if pe_vals:
         for v in reversed(pe_vals):
