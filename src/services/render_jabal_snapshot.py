@@ -425,21 +425,42 @@ def _derive_highlights(*, cv: dict, currency: str, current_price,
 
     # RISK — analyst-distribution concentration is the most defensible
     # quantitative risk anchor (one-sided consensus = harder to surprise).
+    # Some providers (notably MS for GCC names) publish only the consensus
+    # label + analyst total without a buy/hold/sell breakdown; infer the
+    # skew from the consensus label in that case so the pill still anchors
+    # on a real signal.
     if isinstance(rs, dict):
         buy = int(rs.get("buy", 0) or 0)
         hold = int(rs.get("hold", 0) or 0)
         sell = int(rs.get("sell", 0) or 0)
-        total = max(1, buy + hold + sell)
-        if sell == 0 and total >= 5:
-            rows.append(("RISK", f"Sentiment one-sided — 0 sells across {total} analysts."))
-        elif buy / total >= 0.8 and total >= 5:
-            rows.append(("RISK", f"Crowded long — {buy}/{total} buy ratings raise expectations bar."))
-        elif sell >= 3:
-            rows.append(("RISK", f"Tape skewed bearish — {sell}/{total} sell ratings."))
+        total = buy + hold + sell
+        if total == 0 and n_analysts > 0:
+            label = (rs.get("consensus") or "").upper()
+            if any(t in label for t in ("BUY", "OUTPERFORM", "ACCUMULATE")):
+                rows.append(("RISK",
+                    f"Crowded long — consensus {label.title()} across {n_analysts} analysts raises the expectations bar."))
+            elif any(t in label for t in ("SELL", "UNDERPERFORM", "REDUCE")):
+                rows.append(("RISK",
+                    f"Tape skewed bearish — consensus {label.title()} across {n_analysts} analysts."))
+            elif label:
+                rows.append(("RISK",
+                    f"View dispersion — consensus {label.title()} across {n_analysts} analysts."))
+            else:
+                rows.append(("RISK", f"{n_analysts} analysts covering; breakdown not disclosed."))
+        elif total > 0:
+            denom = max(1, total)
+            if sell == 0 and total >= 5:
+                rows.append(("RISK", f"Sentiment one-sided — 0 sells across {total} analysts."))
+            elif buy / denom >= 0.8 and total >= 5:
+                rows.append(("RISK", f"Crowded long — {buy}/{total} buy ratings raise expectations bar."))
+            elif sell >= 3:
+                rows.append(("RISK", f"Tape skewed bearish — {sell}/{total} sell ratings."))
+            else:
+                rows.append(("RISK", f"Rating mix {buy}/{hold}/{sell} (buy/hold/sell) — view dispersion."))
         else:
-            rows.append(("RISK", f"Rating mix {buy}/{hold}/{sell} (buy/hold/sell) — view dispersion."))
+            rows.append(("RISK", "Macro / sector sensitivity; refer to thesis on slide 2."))
     else:
-        rows.append(("RISK", "Macro / commodity sensitivity; refer to thesis on slide 2."))
+        rows.append(("RISK", "Macro / sector sensitivity; refer to thesis on slide 2."))
 
     return rows
 
