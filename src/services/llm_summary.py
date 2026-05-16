@@ -210,11 +210,16 @@ def build_context(ticker: str) -> dict:
 # ── Prompt ───────────────────────────────────────────────────────
 
 _SYSTEM = (
-    "You are a senior buy-side analyst at Jabal Asset Management writing an "
-    "earnings-preview note. Your prose is concise, evidence-based, and free "
-    "of marketing language. You take a clear stance — constructive, cautious, "
-    "or balanced — and back every claim with a specific number from the data "
-    "provided. You never invent numbers."
+    "You are a senior buy-side analyst at Jabal Asset Management writing the "
+    "Investment Thesis paragraph of an institutional earnings-preview note. "
+    "Your voice is declarative and direct, like a sell-side morning note: "
+    "short sentences, no hedging adverbs, no marketing language. "
+    "Every numeric claim MUST cite a value from the data block — never invent, "
+    "round inconsistently, or extrapolate beyond what is supplied. "
+    "Forbidden phrasing: 'we believe', 'appears to', 'suggests', 'could "
+    "potentially', 'may benefit', 'remains well-positioned', 'attractive "
+    "entry point', 'compelling valuation'. If a fact is not in the data, do "
+    "not state it. If you have no number for a claim, drop the claim."
 )
 
 
@@ -326,19 +331,53 @@ EARNINGS TRACK RECORD
 TASK
 Write an earnings-preview package as a JSON object with these keys:
 
-1. "thesis_paragraph": 4-6 sentences, institutional voice. Take a clear stance
-   (constructive / cautious / balanced). Cite at least two specific numbers
-   from above. Flag the SWING FACTOR for the upcoming print.
-2. "catalysts": list of exactly 3 specific catalyst bullets. Each one sentence,
-   with a quantitative anchor where possible (e.g. "9 Buy ratings...", "FY26
-   consensus EPS of {fy1_eps}...", "+29.8% EPS beat last quarter..."). Do NOT
-   include generic phrases like "constructive guidance."
-3. "risks": list of exactly 3 specific risk bullets. Same evidence rules.
-4. "watch_list": list of exactly 3 questions the analyst will ask on the print.
-   Phrase as questions ending in "?". Each should reference a specific data
-   point or guidance line.
+1. "thesis_paragraph": EXACTLY 4 sentences, institutional sell-side voice,
+   roughly 90-130 words. The four sentences must follow this structure:
+     • S1 — Stance: state the call (constructive / cautious / balanced)
+       relative to Street consensus ({rating}). Reference the actual rating
+       label and analyst count.
+     • S2 — Valuation/positioning evidence: cite the P/E vs 5-year avg line,
+       the dividend yield, or the target-vs-current spread. At least one
+       precise number with units (x, %, or {cur}).
+     • S3 — Operating driver into the print: anchor on commodity-price moves,
+       macro context, or the consensus next-Q EPS/Revenue figure. At least
+       one precise number.
+     • S4 — Swing factor: identify the single management commentary line
+       that would shift consensus, framed as what investors will watch.
+   GROUNDING CONTRACT: every number you write must appear verbatim (or as a
+   stated derivation, e.g. "FY26 EPS of {fy1_eps}") in the data block above.
+   If a sentence cannot cite a number, rewrite it as qualitative without the
+   missing figure.
 
-Return ONLY the JSON object. No commentary, no markdown fences.
+2. "catalysts": EXACTLY 3 bullets. Each bullet is one sentence and starts
+   with the lever, then the number. Pattern: "<Lever> — <quantitative anchor>".
+   Use only the data block above; do NOT use the literal numbers in the
+   pattern examples below — those are format guides, not facts:
+     • Pattern: "Beat-streak — N of last K quarters above consensus EPS"
+     • Pattern: "Re-rate room — current P/E Xx vs 5y avg Yx"
+     • Pattern: "Capital return — Z% dividend yield"
+   Forbidden generics: "constructive guidance", "strong execution",
+   "positive momentum", "supportive backdrop". Drop any bullet you cannot
+   anchor in the data block.
+
+3. "risks": EXACTLY 3 bullets. Same pattern as catalysts. Examples (format
+   only — use real numbers from the data block):
+     • Pattern: "Margin pressure — feedstock cost Z% YoY"
+     • Pattern: "Target gap — Street PT implies X% downside vs last close"
+     • Pattern: "Miss tape — N of last K quarters below consensus"
+
+4. "watch_list": EXACTLY 3 questions ending in "?". Each must reference a
+   specific data point from the block (price, margin, capex, surprise pct,
+   broker action, etc.) — not a generic open-ended question.
+
+VALIDATION CHECKLIST (apply silently before responding):
+  □ Every numeric appearing in the JSON traces back to a value in the data block.
+  □ No forbidden phrase appears.
+  □ Sentence counts are exact (4 thesis, 3/3/3 bullets/questions).
+  □ Bullets are pattern-conformant ("<Lever> — <number with unit>").
+  □ No markdown fences, no preface, no trailing prose.
+
+Return ONLY the JSON object.
 """
 
 
