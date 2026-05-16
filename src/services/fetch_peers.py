@@ -44,12 +44,92 @@ def _fmt_mcap_usd(v) -> str:
     return f"${v:,.0f}"
 
 
-def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
-    """Fetch one peer-table row per yfinance ticker.
+def _peer_row_from_investing(ticker: str) -> dict | None:
+    """Build a peer-table row from Investing.com when yfinance can't resolve
+    the ticker (ADX / MSM listings 404 on yfinance).
 
-    Returns list of dicts with: name, ticker, market_cap_fmt, pe (raw),
-    pe_fmt, div_yield_fmt, ret_1y (raw), ret_1y_fmt. Tickers that fail
-    to resolve are skipped with a log warning.
+    Looks up the slug via investing.com's public search API, fetches the
+    equity page, decodes the __NEXT_DATA__ JSON and extracts name, market
+    cap, P/E, dividend yield, and 1Y return. Returns None if any step
+    fails — caller falls back to a ticker-only row.
+    """
+    try:
+        from curl_cffi import requests as cr
+    except ImportError:
+        return None
+    import re as _re, json as _json
+    # Use the curated slug if we have one; otherwise search by ticker symbol.
+    slug = None
+    try:
+        from src.providers.probe_investing import _SLUGS as _CURATED
+        slug = _CURATED.get(ticker.upper())
+    except Exception:
+        pass
+    if not slug:
+        try:
+            r = cr.get(
+                f"https://api.investing.com/api/search/v2/search?q={ticker.upper().replace('.','+')}&page=1&size=10",
+                impersonate="chrome120", timeout=10, headers={"domain-id": "www"},
+            )
+            quotes = (r.json() or {}).get("quotes") or []
+            for it in quotes:
+                url = it.get("url") or ""
+                if "/equities/" in url:
+                    slug = url.replace("/equities/", "")
+                    break
+        except Exception:
+            return None
+    if not slug:
+        return None
+    # Fetch the equity page and pull __NEXT_DATA__.
+    try:
+        r = cr.get(f"https://www.investing.com/equities/{slug}",
+                   impersonate="chrome120", timeout=15,
+                   headers={"Accept-Language": "en-US,en;q=0.9"})
+        if r.status_code != 200:
+            return None
+        m = _re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, _re.S)
+        if not m:
+            return None
+        d = _json.loads(m.group(1))
+        state = d.get("props", {}).get("pageProps", {}).get("state") or {}
+        eq = state.get("equityStore")
+        if isinstance(eq, str): eq = _json.loads(eq)
+        if not isinstance(eq, dict): return None
+        instr = eq.get("instrument") or {}
+        price_block = instr.get("price") or {}
+        fund = instr.get("fundamental") or {}
+        name = (instr.get("englishName") or {}).get("shortName") \
+            or (instr.get("englishName") or {}).get("fullName") \
+            or ticker
+        currency = (price_block.get("currency") or "").upper()
+        mcap = fund.get("marketCapRaw")
+        mcap_fmt = _fmt_mcap_usd(mcap) if currency == "USD" else _fmt_mcap_usd(mcap).replace("$", "")
+        pe = fund.get("ratio") if isinstance(fund.get("ratio"), (int, float)) else None
+        pe_fmt = f"{pe:.1f}x" if pe else "—"
+        div = fund.get("yield")
+        div_fmt = f"{float(div):.2f}%" if isinstance(div, (int, float)) and div > 0 else "—"
+        ret_1y = fund.get("oneYearReturn") if isinstance(fund.get("oneYearReturn"), (int, float)) else None
+        ret_1y_fmt = f"{ret_1y:+.1f}%" if isinstance(ret_1y, (int, float)) else "—"
+        return {
+            "name": name, "ticker": ticker,
+            "market_cap_fmt": mcap_fmt,
+            "pe": pe, "pe_fmt": pe_fmt,
+            "div_yield_fmt": div_fmt,
+            "ret_1y": ret_1y, "ret_1y_fmt": ret_1y_fmt,
+        }
+    except Exception as exc:
+        logger.warning("Investing peer fetch failed for %s: %s", ticker, exc)
+        return None
+
+
+def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
+    """Fetch one peer-table row per ticker.
+
+    Primary: yfinance (`Ticker(t).info` + 1y history). Falls back to
+    Investing.com for tickers yfinance can't resolve (UAE / Oman peers
+    like ENBD.AE, FAB.AE, ENBD.AD). Tickers that fail both sources are
+    skipped with a log warning.
 
     Used by the slide-3 peer comparables table.
     """
@@ -63,6 +143,20 @@ def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
             info = tk.info or {}
         except Exception as exc:
             logger.warning("peer fetch failed for %s: %s", tt, exc)
+            info = {}
+            tk = None
+        # If yfinance returned nothing usable, try Investing.com.
+        if not (info.get("longName") or info.get("shortName") or info.get("marketCap")):
+            inv_row = _peer_row_from_investing(tt)
+            if inv_row:
+                rows.append(inv_row)
+            else:
+                # Last resort: ticker-only row so the table layout doesn't break.
+                rows.append({
+                    "name": tt, "ticker": tt,
+                    "market_cap_fmt": "—", "pe": None, "pe_fmt": "—",
+                    "div_yield_fmt": "—", "ret_1y": None, "ret_1y_fmt": "—",
+                })
             continue
         name = info.get("longName") or info.get("shortName") or tt
         mcap_usd = info.get("marketCap")

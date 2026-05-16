@@ -102,11 +102,17 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
 
     report_date = (memo_data or {}).get("report_date")
     if not report_date:
-        # Try MS calendar first, then Yahoo earnings_date.
-        for key in ("ms_next_expected_earnings_date", "yahoo_earnings_date"):
-            v = getattr(payload, key, None) or mc.get(key)
-            if v:
-                report_date = str(v)
+        # MS /calendar/ block exposes next_expected_earnings_date (ISO date).
+        ms_cal = getattr(payload, "ms_calendar_events", None) or {}
+        for path in (
+            ms_cal.get("next_expected_earnings_date") if isinstance(ms_cal, dict) else None,
+            ms_cal.get("next_expected_earnings_label") if isinstance(ms_cal, dict) else None,
+            getattr(payload, "yahoo_earnings_date", None),
+            mc.get("next_earnings_date"),
+            mc.get("yahoo_earnings_date"),
+        ):
+            if path:
+                report_date = str(path)
                 break
         report_date = report_date or "TBA"
 
