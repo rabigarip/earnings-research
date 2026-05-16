@@ -87,7 +87,7 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
 
     snap      = build_snapshot_data(ticker, period_label=period_label,
                                        report_date=report_date)
-    thesis    = build_thesis_data(ticker)
+    thesis    = build_thesis_data(ticker, quarterly=payload.quarterly)
     valuation = build_valuation_data(ticker)
 
     prs = Presentation()
