@@ -354,13 +354,19 @@ def _yoy_bps(curr_pct, prev_pct) -> float | None:
         return None
 
 
-def _build_estimates_rows(cv: dict, quarterly: list | None = None) -> list[dict]:
-    """Standard 5-row table: Revenue / EBITDA / Net Income / EPS / EBITDA Margin.
+def _build_estimates_rows(cv: dict, quarterly: list | None = None,
+                            is_bank: bool = False) -> list[dict]:
+    """Estimates table rows.
+
+    Non-bank: Revenue / EBITDA / Net Income / EPS / EBITDA Margin.
+    Bank:     Revenue / NII / Net Income / EPS  (EBITDA & Margin dropped —
+              banks have no EBITDA; cost-to-income / NIM need balance-sheet
+              data we don't fetch yet).
 
     Columns by source:
       • JABAL EST — always '—' (analyst types it in the .pptx post-generation).
-      • CONSENSUS — from MS/Yahoo forwards for Revenue and EPS; EBITDA / NI /
-        Margin stay '—' unless populated by a future Bloomberg overlay.
+      • CONSENSUS — from MS/Yahoo forwards for Revenue and EPS; EBITDA / NII /
+        NI / Margin stay '—' unless populated by a future Bloomberg overlay.
       • Δ vs CONSENSUS — '—' until the analyst fills the Jabal column.
       • YoY — computed from `quarterly` history (latest actual vs prior-year
         same quarter). Falls back to '—' when we lack the prior-year row.
@@ -374,7 +380,7 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None) -> list[dict]
                             if isinstance(fwd.get(k), (int, float))), None)
 
     # YoY: pull latest actual + prior-year same quarter from passed history.
-    yoy_rev = yoy_ebitda = yoy_ni = yoy_eps = yoy_margin = None
+    yoy_rev = yoy_ebitda = yoy_nii = yoy_ni = yoy_eps = yoy_margin = None
     if quarterly:
         # Quarterly list is expected to be FinancialPeriod objects (or dicts);
         # render side accepts both since serialization paths differ.
@@ -388,6 +394,7 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None) -> list[dict]
         if latest and prior:
             yoy_rev    = _yoy_pct(_g(latest, "revenue"),    _g(prior, "revenue"))
             yoy_ebitda = _yoy_pct(_g(latest, "ebitda"),     _g(prior, "ebitda"))
+            yoy_nii    = _yoy_pct(_g(latest, "nii"),        _g(prior, "nii"))
             yoy_ni     = _yoy_pct(_g(latest, "net_income"), _g(prior, "net_income"))
             yoy_eps    = _yoy_pct(_g(latest, "eps"),        _g(prior, "eps"))
             # Margin YoY is computed as a bps delta, but we render it as a
@@ -409,13 +416,24 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None) -> list[dict]
             "yoy": yoy_val if yoy_val is not None else "—",
         }
 
+    eps_consensus_str = (f"{eps_q_consensus:.2f}"
+                          if isinstance(eps_q_consensus, (int, float))
+                          else None)
+    if is_bank:
+        # Banks: NII replaces EBITDA; drop the EBITDA-Margin row since the
+        # bank equivalents (NIM, cost-to-income) need balance-sheet data
+        # the free providers don't reliably expose.
+        return [
+            _row("Revenue",     _fmt_money_b(rev_q_consensus), yoy_rev),
+            _row("NII",         None,                          yoy_nii),
+            _row("Net Income",  None,                          yoy_ni),
+            _row("EPS",         eps_consensus_str,             yoy_eps),
+        ]
     return [
         _row("Revenue",        _fmt_money_b(rev_q_consensus), yoy_rev),
         _row("EBITDA",         None,                          yoy_ebitda),
         _row("Net Income",     None,                          yoy_ni),
-        _row("EPS",            (f"{eps_q_consensus:.2f}"
-                                 if isinstance(eps_q_consensus, (int, float))
-                                 else None),                 yoy_eps),
+        _row("EPS",            eps_consensus_str,             yoy_eps),
         _row("EBITDA Margin",  None,                          yoy_margin),
     ]
 
@@ -426,6 +444,7 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
                         risks: Optional[list[str]] = None,
                         watch_list: Optional[list[str]] = None,
                         quarterly: Optional[list] = None,
+                        is_bank: bool = False,
                         ) -> ThesisData:
     cv = get_all_fields(ticker)
     commodities_obs = get_observations_by_provider(ticker, "commodities")
@@ -442,7 +461,7 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
         llm = None
     summary = (llm or {}).get("thesis_paragraph") or _template_exec_summary(
         cv, commodities_obs, macro_obs)
-    rows = _build_estimates_rows(cv, quarterly=quarterly)
+    rows = _build_estimates_rows(cv, quarterly=quarterly, is_bank=is_bank)
 
     # Compose the table footnote: lead with the next-Q anchor (date,
     # consensus source, analyst count) since that's the strongest data

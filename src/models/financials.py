@@ -40,6 +40,7 @@ class FinancialPeriod(BaseModel):
     is_consensus:      bool = False
     revenue:           float | None = None
     ebitda:            float | None = None    # None for banks
+    nii:               float | None = None    # Net Interest Income; banks only
     ebit:              float | None = None
     net_income:        float | None = None
     eps:               float | None = None

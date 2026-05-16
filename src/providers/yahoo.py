@@ -130,6 +130,7 @@ def fetch_quote(ticker: str) -> QuoteSnapshot | None:
 
 _REV  = ["Total Revenue", "TotalRevenue", "Revenue"]
 _EBITDA = ["EBITDA", "Ebitda", "Normalized EBITDA"]
+_NII  = ["Net Interest Income", "NetInterestIncome", "NII"]
 _EBIT = ["EBIT", "Operating Income", "OperatingIncome"]
 _NI   = ["Net Income", "NetIncome", "Net Income Common Stockholders"]
 _EPS  = ["Basic EPS", "BasicEPS", "Diluted EPS", "DilutedEPS"]
@@ -160,6 +161,7 @@ def _extract(df: pd.DataFrame | None, period_type: str, currency: str,
 
     rev = _find(df, _REV)
     ebitda = _find(df, _EBITDA)
+    nii = _find(df, _NII)
     ebit = _find(df, _EBIT)
     ni  = _find(df, _NI)
     eps = _find(df, _EPS)
@@ -178,6 +180,7 @@ def _extract(df: pd.DataFrame | None, period_type: str, currency: str,
             source="yahoo",
             revenue=_safe(df, rev, col_ts),
             ebitda=None if is_bank else _safe(df, ebitda, col_ts),
+            nii=_safe(df, nii, col_ts) if is_bank else None,
             ebit=_safe(df, ebit, col_ts),
             net_income=_safe(df, ni, col_ts),
             eps=_safe(df, eps, col_ts),
