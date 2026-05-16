@@ -81,9 +81,34 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
             except Exception:
                 continue
 
-    # Stage 2 period defaulting — caller can override via memo_data.
-    period_label = (memo_data or {}).get("period_label") or "Earnings Preview"
-    report_date  = (memo_data or {}).get("report_date") or "TBA"
+    # Stage 2 period defaulting — caller can override via memo_data. When
+    # memo_data doesn't carry an explicit period_label / report_date, derive
+    # them from payload.memo_computed (preview_quarter_short, next_quarter_label)
+    # and payload.yahoo_earnings_date so the snapshot never reads "Earnings
+    # Preview · TBA" for a ticker we already have calendar data on.
+    mc = getattr(payload, "memo_computed", {}) or {}
+    period_label = (memo_data or {}).get("period_label")
+    if not period_label:
+        # Prefer the explicit "Q<n> <YYYY>" form to the short "<n>Q<YY>"
+        nql = mc.get("next_quarter_label") or ""  # e.g. "2026 Q2"
+        import re as _rqp
+        m = _rqp.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})", nql, _rqp.I)
+        if m:
+            yr = m.group(1) or m.group(4)
+            qn = m.group(2) or m.group(3)
+            period_label = f"Q{qn} {yr} Earnings Preview"
+        else:
+            period_label = mc.get("preview_quarter_label") or "Earnings Preview"
+
+    report_date = (memo_data or {}).get("report_date")
+    if not report_date:
+        # Try MS calendar first, then Yahoo earnings_date.
+        for key in ("ms_next_expected_earnings_date", "yahoo_earnings_date"):
+            v = getattr(payload, key, None) or mc.get(key)
+            if v:
+                report_date = str(v)
+                break
+        report_date = report_date or "TBA"
 
     # Load curated peer tickers (from company_master.peer_group) and
     # enrich them with yfinance — drives slide 3's peer table.

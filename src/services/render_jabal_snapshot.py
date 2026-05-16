@@ -380,6 +380,46 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
     profile = _val("company_profile") or {}
     if not isinstance(profile, dict):
         profile = {}
+
+    # Backfill profile from company_master when canonical_store hasn't been
+    # populated by a recent yfinance probe (common on first-run tickers and
+    # after a Render restart that wiped /tmp). This gives us at minimum a
+    # sector / industry / exchange / country / company name to render in the
+    # header subtitle — preventing the "· —" tail seen on fresh runs.
+    try:
+        from src.storage.db import load_company as _load_company
+        cm = _load_company(ticker) or {}
+        if cm:
+            profile.setdefault("name", cm.get("company_name") or "")
+            profile.setdefault("sector", cm.get("sector") or "")
+            profile.setdefault("industry", cm.get("industry") or "")
+            profile.setdefault("currency", cm.get("currency") or "")
+            # Exchange suffix: friendly-name + country, e.g. "Tadawul (Saudi Arabia)".
+            # The DB stores 3-letter codes (SAU, ADX, NSE, HKG, ...) — map to
+            # human-readable bourse names. Unknown codes fall through to the raw code.
+            _EX_NAMES = {
+                "SAU": "Tadawul", "ADX": "ADX", "DFM": "DFM",
+                "MSM": "MSX",  "DSM": "QSE", "BHB": "Bahrain Bourse",
+                "KSE": "Boursa Kuwait", "EGX": "EGX",
+                "NSE": "NSE",  "BSE": "BSE",
+                "HKG": "HKEX", "SHA": "SSE", "SHZ": "SZSE",
+                "TYO": "TSE",  "KRX": "KRX",
+                "JNB": "JSE",
+                "NMS": "NASDAQ", "NCM": "NASDAQ", "NGM": "NASDAQ",
+                "NYQ": "NYSE", "NYS": "NYSE", "ASE": "NYSE American",
+                "LON": "LSE", "PAR": "Euronext Paris",
+                "AMS": "Euronext Amsterdam", "BRU": "Euronext Brussels",
+                "FRA": "Frankfurt", "STO": "Nasdaq Stockholm",
+                "ASX": "ASX", "TSE": "TSX",
+            }
+            xcode = (cm.get("exchange") or "").strip().upper()
+            country = (cm.get("country") or "").strip()
+            if xcode and country:
+                profile["exchange"] = f"{_EX_NAMES.get(xcode, xcode)} ({country})"
+            elif xcode:
+                profile["exchange"] = _EX_NAMES.get(xcode, xcode)
+    except Exception:
+        pass
     last_price = _val("current_price")
     mcap = _val("market_cap")
     val_hist = _val("valuation_historical") or {}
