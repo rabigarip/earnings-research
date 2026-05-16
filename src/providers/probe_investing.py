@@ -112,8 +112,21 @@ def _cache_dir() -> Path:
     return cache_root() / "investing"
 
 
+def _tracked_dir() -> Path:
+    """Repo-tracked Investing snapshot dir. Pre-warmed locally and committed
+    so the Render deploy (whose egress IP is Cloudflare-blocked by
+    Investing.com) reads from it instead of failing on the network call.
+    Refreshed via `python -m scripts.refresh_investing_cache`."""
+    from src.config import root
+    return root() / "data" / "investing"
+
+
 def _cache_path(slug: str, kind: str) -> Path:
     return _cache_dir() / f"{slug}__{kind}.json"
+
+
+def _tracked_path(slug: str, kind: str) -> Path:
+    return _tracked_dir() / f"{slug}__{kind}.json"
 
 
 def _read_cache(slug: str, kind: str, ttl_hours: float = 24) -> Optional[dict]:
@@ -129,49 +142,72 @@ def _read_cache(slug: str, kind: str, ttl_hours: float = 24) -> Optional[dict]:
         return None
 
 
+def _read_tracked(slug: str, kind: str) -> Optional[dict]:
+    """Read the repo-committed snapshot for a slug/kind, or None if absent.
+    No TTL — the snapshot is treated as the authoritative-for-now fallback
+    when the network is unreachable from this host."""
+    p = _tracked_path(slug, kind)
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def _write_cache(slug: str, kind: str, payload: dict) -> None:
     p = _cache_path(slug, kind)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(payload, indent=2, default=str))
+    except (OSError, PermissionError):
+        # Render's project dir is read-only; cache write failure is non-fatal.
+        pass
+
+
+def _write_tracked(slug: str, kind: str, payload: dict) -> None:
+    """Write a snapshot to the repo-tracked dir (used by the refresh script
+    only — not from request-path code, since the deployed host is read-only)."""
+    p = _tracked_path(slug, kind)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(payload, indent=2, default=str))
 
 
 # ── Page-level fetchers (cached) ─────────────────────────────────────────
 
-def _fetch_equity_page(slug: str) -> Optional[dict]:
-    """Equity landing page → returns the JSON-decoded store dict, or None."""
-    cached = _read_cache(slug, "equity")
+def _fetch_with_fallback(slug: str, kind: str, url_suffix: str) -> Optional[dict]:
+    """Three-layer fetch:
+      1. 24h fresh cache (cache/probe/investing/...)
+      2. Network via curl_cffi (Cloudflare bypass via TLS impersonation)
+      3. Repo-tracked snapshot (data/investing/...) — used when the runtime
+         egress IP is blocked by Cloudflare (e.g. Render's cloud range).
+    Returns the decoded __NEXT_DATA__ state dict or None when all three miss.
+    """
+    cached = _read_cache(slug, kind)
     if cached:
         return cached
-    html = _get(f"{_BASE}/{slug}")
+    html = _get(f"{_BASE}/{slug}{url_suffix}")
     state = _next_data(html) if html else None
-    if not state:
-        return None
-    _write_cache(slug, "equity", state)
-    return state
+    if state:
+        _write_cache(slug, kind, state)
+        return state
+    # Network failed (Cloudflare 403 etc.). Try the repo-tracked snapshot.
+    tracked = _read_tracked(slug, kind)
+    if tracked:
+        return tracked
+    return None
+
+
+def _fetch_equity_page(slug: str) -> Optional[dict]:
+    return _fetch_with_fallback(slug, "equity", "")
 
 
 def _fetch_consensus_page(slug: str) -> Optional[dict]:
-    cached = _read_cache(slug, "consensus")
-    if cached:
-        return cached
-    html = _get(f"{_BASE}/{slug}-consensus-estimates")
-    state = _next_data(html) if html else None
-    if not state:
-        return None
-    _write_cache(slug, "consensus", state)
-    return state
+    return _fetch_with_fallback(slug, "consensus", "-consensus-estimates")
 
 
 def _fetch_earnings_page(slug: str) -> Optional[dict]:
-    cached = _read_cache(slug, "earnings")
-    if cached:
-        return cached
-    html = _get(f"{_BASE}/{slug}-earnings")
-    state = _next_data(html) if html else None
-    if not state:
-        return None
-    _write_cache(slug, "earnings", state)
-    return state
+    return _fetch_with_fallback(slug, "earnings", "-earnings")
 
 
 # ── Field extractors ─────────────────────────────────────────────────────
@@ -248,18 +284,22 @@ def fetch_historical_prices(ticker: str, *, days: int = 380) -> Optional[dict]:
     slug = _slug(ticker)
     if not slug:
         return None
+    # Disk cache (24h) -> tracked snapshot (no TTL) -> network.
+    cached = _read_cache(slug, "historical")
+    if cached:
+        return cached
     # First fetch the equity page once to grab the instrumentId.
     state = _fetch_equity_page(slug)
     if not state:
-        return None
+        # No equity page at all — fall back to tracked historical if present.
+        return _read_tracked(slug, "historical")
     eq = state.get("equityStore") or {}
     iid = eq.get("instrumentId") if isinstance(eq, dict) else None
     if not iid:
         instr = _equity_instrument(state)
-        # Fall back to the price block (instrument.price.instrumentId)
         iid = (instr.get("price") or {}).get("instrumentId")
     if not iid:
-        return None
+        return _read_tracked(slug, "historical")
     from datetime import datetime as _dt, timedelta as _td
     end = _dt.utcnow().date()
     start = end - _td(days=days)
@@ -280,13 +320,13 @@ def fetch_historical_prices(ticker: str, *, days: int = 380) -> Optional[dict]:
                    headers={"domain-id": "www",
                             "Accept-Language": "en-US,en;q=0.9"})
     except Exception:
-        return None
+        return _read_tracked(slug, "historical")
     if r.status_code != 200:
-        return None
+        return _read_tracked(slug, "historical")
     try:
         rows = (json.loads(r.text).get("data") or [])
     except json.JSONDecodeError:
-        return None
+        return _read_tracked(slug, "historical")
     def _to_float(v):
         if v is None: return None
         if isinstance(v, (int, float)): return float(v)
@@ -334,6 +374,13 @@ def fetch_historical_prices(ticker: str, *, days: int = 380) -> Optional[dict]:
         prev = _close_at_or_before(anchor_date)
         if prev and prev > 0:
             out[key] = (today_close / prev - 1.0) * 100
+    # Persist successful network fetches to the disk cache so subsequent
+    # calls hit (free local) instead of (paid network) — and so the local
+    # refresh script can collect them all for committing to data/investing.
+    try:
+        _write_cache(slug, "historical", out)
+    except Exception:
+        pass
     return out
 
 
