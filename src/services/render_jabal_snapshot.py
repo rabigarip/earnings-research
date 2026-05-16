@@ -361,6 +361,46 @@ def render_snapshot_slide(prs, data: SnapshotData):
     return slide
 
 
+# ── Sources-line builder ──────────────────────────────────────
+
+def _sources_line(cv: dict) -> str:
+    """Build the slide-footer "Source:" line.
+
+    Lists every provider that contributed a value to ANY canonical field
+    (i.e. the union of `sources_with_value`), not just the per-field
+    winners. This means Investing.com / Yahoo / MarketScreener all show
+    up when they fed the deck, even when only one of them won the
+    reconciliation for a given cell.
+    """
+    seen: set[str] = set()
+    for c in cv.values():
+        winner = getattr(c, "canonical_source", "") or ""
+        if winner:
+            seen.add(winner)
+        for s in (getattr(c, "sources_with_value", None) or []):
+            if s:
+                seen.add(s)
+    # Prefer human-readable order: Yahoo, MarketScreener, Investing.com, others
+    pretty = {
+        "yahoo": "Yahoo Finance",
+        "marketscreener": "MarketScreener",
+        "investing": "Investing.com",
+        "macro": "World Bank / IMF",
+        "ishares": "iShares",
+        "commodities": "World Bank / OPEC / EIA",
+        "bloomberg": "Bloomberg",
+        "ir_pdf": "Company IR",
+    }
+    ordered = sorted(seen, key=lambda s: (
+        0 if s == "yahoo" else
+        1 if s == "marketscreener" else
+        2 if s == "investing" else
+        3, s,
+    ))
+    labels = [pretty.get(s, s) for s in ordered]
+    return ", ".join(labels) or "free-source stack"
+
+
 # ── Highlight derivation ──────────────────────────────────────
 
 def _derive_highlights(*, cv: dict, currency: str, current_price,
@@ -706,9 +746,7 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
             range_low=low, range_high=high,
             n_analysts=n_analysts, rs=rating_split,
         ),
-        sources_line=", ".join(sorted({
-            c.canonical_source for c in cv.values()
-        })) or "free-source stack",
+        sources_line=_sources_line(cv),
         analyst_name=analyst_name,
         gen_date=datetime.utcnow().strftime("%d %b %Y"),
     )
