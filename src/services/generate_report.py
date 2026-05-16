@@ -64,11 +64,23 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
     )
 
     ticker = payload.company.ticker
-    if not get_all_fields(ticker):
-        # Run a quick refresh across the default-on providers so the slides
-        # populate. We intentionally exclude Investing.com (Playwright) and
-        # IR-PDF (needs curated URL) from the auto-bootstrap.
-        import subprocess, sys
+    # Bootstrap the canonical_store on first run for this ticker (cold cache).
+    # We also force-include Investing.com on every subsequent run because
+    # earlier generations may have warmed the cache from yahoo+MS only,
+    # leaving Investing entries permanently absent. Running the Investing
+    # provider on every render is cheap (one HTTP call per page, all cached
+    # 24h on disk under cache/investing/).
+    import subprocess, sys
+    cv_existing = get_all_fields(ticker)
+    has_investing_in_cv = any(
+        "investing" in (
+            (getattr(c, "sources_with_value", []) or []) +
+            ([getattr(c, "canonical_source", "")] if getattr(c, "canonical_source", "") else [])
+        )
+        for c in cv_existing.values()
+    )
+    if not cv_existing:
+        # Cold start — full refresh across cadences.
         for cadence in ("daily", "weekly", "quarterly"):
             try:
                 subprocess.run(
@@ -80,6 +92,19 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
                 )
             except Exception:
                 continue
+    elif not has_investing_in_cv:
+        # Cache is warm but Investing was never recorded — backfill once so
+        # the deck (and source attribution) include it.
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "scripts.daily_refresh",
+                 "--cadence=daily",
+                 f"--tickers={ticker}",
+                 "--only=investing"],
+                timeout=120, check=False,
+            )
+        except Exception:
+            pass
 
     # Stage 2 period defaulting — caller can override via memo_data. When
     # memo_data doesn't carry an explicit period_label / report_date, derive
