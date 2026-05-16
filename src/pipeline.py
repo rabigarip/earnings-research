@@ -310,7 +310,17 @@ def _finish(run_id: str, ticker: str, t0: datetime,
                  t0.isoformat(), t1.isoformat(),
                  overall, [r.to_log_dict() for r in results], memo_path=memo_path)
     except Exception as exc:
-        logger.warning("Could not save run to DB: %s", exc)
+        # Was silently swallowed; that handed the API a run_id the DB didn't
+        # have, so downloads 404'd with "Report not found". Now surface as a
+        # step so the API can return the real error to the caller.
+        logger.exception("Could not save run %s to DB", run_id)
+        results.append(StepResult(
+            step_name="save_run",
+            status=Status.FAILED,
+            source="sqlite",
+            message="DB save failed; run_id not persisted",
+            error_detail=f"{type(exc).__name__}: {exc}",
+        ))
 
     print(f"\n{'█' * 66}")
     print(f"  PIPELINE COMPLETE — {overall.upper()}")
