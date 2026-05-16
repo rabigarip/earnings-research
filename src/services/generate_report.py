@@ -25,14 +25,19 @@ STEP = "generate_report"
 def _use_jabal_renderer() -> bool:
     """Switch which renderer drives the final PPTX output.
 
-    Order: env override > config flag > default off.
+    Order: env override > config flag > default ON.
+
+    The Jabal 3-slide deck is the only user-visible product. Legacy stays
+    importable for back-compat but is off by default; set
+    `JABAL_RENDERER=0` (or `[report] renderer = "legacy"`) to force it on.
     """
-    if os.environ.get("JABAL_RENDERER") in {"1", "true", "yes", "on"}:
-        return True
+    env_val = os.environ.get("JABAL_RENDERER")
+    if env_val is not None:
+        return env_val.strip().lower() in {"1", "true", "yes", "on"}
     try:
-        return getattr(cfg.report, "renderer", "legacy") == "jabal"
-    except (AttributeError, KeyError):
-        return False
+        return (cfg().get("report", {}) or {}).get("renderer", "jabal") == "jabal"
+    except Exception:
+        return True
 
 
 def _write_jabal_preview(payload: ReportPayload, out_path: Path,

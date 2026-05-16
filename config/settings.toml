@@ -173,6 +173,10 @@ path = "data/earnings.db"
 
 [report]
 output_dir = "outputs"
+# Renderer for the final PPTX. "jabal" = 3-slide Jabal preview deck (default).
+# "legacy" = original multi-slide deck (kept for back-compat).
+# Override: env JABAL_RENDERER=0 forces legacy; JABAL_RENDERER=1 forces Jabal.
+renderer = "jabal"
 # readiness_mode: strict = block thin Yahoo+MS decks; permissive = only hard pipeline failures (mapping, quote, build, QA).
 # Override on deploy: REPORT_READINESS_MODE=permissive
 readiness_mode = "permissive"
