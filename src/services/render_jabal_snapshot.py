@@ -361,12 +361,96 @@ def render_snapshot_slide(prs, data: SnapshotData):
     return slide
 
 
+# ── Highlight derivation ──────────────────────────────────────
+
+def _derive_highlights(*, cv: dict, currency: str, current_price,
+                         mcap, target_mean, upside_pct, pe_fwd,
+                         div_yield, range_low, range_high,
+                         n_analysts: int, rs: dict) -> list[tuple[str, str]]:
+    """Derive 5 highlight pills from real numbers in canonical_store.
+    Each row is anchored to a specific figure that also appears in the
+    rest of the deck — keeps the slide internally consistent and avoids
+    hardcoded boilerplate. Falls back to a short generic line only when
+    no numeric anchor is available."""
+    cur = currency or ""
+    rows: list[tuple[str, str]] = []
+
+    # EARNINGS — anchor on consensus rating + analyst count, with a fallback
+    # to the Investing surprise track when present.
+    rating_label = ""
+    if isinstance(rs, dict):
+        rating_label = (rs.get("consensus") or "").upper()
+    if rating_label and n_analysts:
+        rows.append(("EARNINGS", f"Consensus {rating_label} from {n_analysts} analysts covering."))
+    elif n_analysts:
+        rows.append(("EARNINGS", f"{n_analysts} analysts covering — view dispersion still narrow."))
+    else:
+        rows.append(("EARNINGS", "Awaiting next print; consensus build-up tracked across runs."))
+
+    # VALUATION — P/E (FY est) is the most universally available figure.
+    if isinstance(pe_fwd, (int, float)) and pe_fwd > 0:
+        rows.append(("VALUATION", f"Forward P/E {float(pe_fwd):.1f}x — anchor for re-rate / de-rate debate."))
+    elif isinstance(mcap, (int, float)) and mcap > 0:
+        # No P/E available — fall back to market-cap framing.
+        if mcap >= 1e12:
+            rows.append(("VALUATION", f"Market cap {cur} {mcap/1e12:.2f}T — index-eligible scale."))
+        elif mcap >= 1e9:
+            rows.append(("VALUATION", f"Market cap {cur} {mcap/1e9:.1f}B — institutional-grade liquidity."))
+        else:
+            rows.append(("VALUATION", "Valuation context limited; awaiting MS / Investing refresh."))
+    else:
+        rows.append(("VALUATION", "Valuation context limited; awaiting MS / Investing refresh."))
+
+    # POSITIONING — dividend yield is the strongest single signal for GCC banks,
+    # SOEs, and dividend-heavy names. Fall back to current vs 52-week high
+    # for growth names with no dividend.
+    if isinstance(div_yield, (int, float)) and div_yield > 0:
+        rows.append(("POSITIONING", f"Dividend yield {float(div_yield):.2f}% supports income mandate fit."))
+    elif (isinstance(current_price, (int, float)) and current_price > 0
+          and isinstance(range_high, (int, float)) and range_high > 0):
+        gap = (current_price / range_high - 1.0) * 100
+        rows.append(("POSITIONING", f"Trades {gap:+.1f}% versus 52-week high — entry-point context."))
+    else:
+        rows.append(("POSITIONING", "Range-trading context; refer to slide 3 for the 52-week band."))
+
+    # WATCH — the target-vs-price gap is the cleanest forward-looking number
+    # the audience asks about. Fall back to "next print awaited" line.
+    if (isinstance(upside_pct, (int, float))
+        and isinstance(target_mean, (int, float)) and target_mean > 0):
+        rows.append(("WATCH", f"Target {cur} {target_mean:,.2f} ({upside_pct:+.1f}% vs last close)."))
+    elif isinstance(target_mean, (int, float)) and target_mean > 0:
+        rows.append(("WATCH", f"Consensus target sits at {cur} {target_mean:,.2f}."))
+    else:
+        rows.append(("WATCH", "Management commentary on forward outlook is the swing factor."))
+
+    # RISK — analyst-distribution concentration is the most defensible
+    # quantitative risk anchor (one-sided consensus = harder to surprise).
+    if isinstance(rs, dict):
+        buy = int(rs.get("buy", 0) or 0)
+        hold = int(rs.get("hold", 0) or 0)
+        sell = int(rs.get("sell", 0) or 0)
+        total = max(1, buy + hold + sell)
+        if sell == 0 and total >= 5:
+            rows.append(("RISK", f"Sentiment one-sided — 0 sells across {total} analysts."))
+        elif buy / total >= 0.8 and total >= 5:
+            rows.append(("RISK", f"Crowded long — {buy}/{total} buy ratings raise expectations bar."))
+        elif sell >= 3:
+            rows.append(("RISK", f"Tape skewed bearish — {sell}/{total} sell ratings."))
+        else:
+            rows.append(("RISK", f"Rating mix {buy}/{hold}/{sell} (buy/hold/sell) — view dispersion."))
+    else:
+        rows.append(("RISK", "Macro / commodity sensitivity; refer to thesis on slide 2."))
+
+    return rows
+
+
 # ── Data adapter: canonical_store → SnapshotData ──────────────
 
 def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
                           period_label: str = "Q2 2026 Earnings Preview",
                           report_date: str = "TBA",
                           highlights: Optional[list[tuple[str, str]]] = None,
+                          ms_price_performance: Optional[dict] = None,
                           ) -> SnapshotData:
     """Translate canonical_store rows into the slide's input dataclass.
     Defensive against missing fields: every renderer-visible string has
@@ -501,14 +585,29 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
                 pe_fwd = v
                 break
 
-    # Performance deltas — try historical_prices "perf_*" keys; else None
+    # Performance deltas — try Yahoo's hist_prices "perf_*" keys first;
+    # fall back to MS price_performance block (perf_1d_pct etc.) when the
+    # canonical historical_prices is empty (yfinance-blocked tickers).
+    _ms_perf = (ms_price_performance or {}).get("performance") or {} \
+        if isinstance(ms_price_performance, dict) else {}
+    _ms_perf_keymap = {
+        "perf_1d":  "perf_1d_pct",
+        "perf_1w":  "perf_1w_pct",
+        "perf_1m":  "perf_1m_pct",
+        "perf_3m":  "perf_3m_pct",
+        "perf_6m":  "perf_6m_pct",
+        "perf_ytd": "perf_ytd_pct",
+    }
+
     def _perf(key):
         if isinstance(hist_prices, dict):
             v = hist_prices.get(key)
-            try:
-                return float(v) if v is not None else None
-            except (TypeError, ValueError):
-                return None
+            if v is not None:
+                try: return float(v)
+                except (TypeError, ValueError): pass
+        ms_key = _ms_perf_keymap.get(key)
+        if ms_key and isinstance(_ms_perf.get(ms_key), (int, float)):
+            return float(_ms_perf[ms_key])
         return None
 
     # 52-week range
@@ -579,13 +678,13 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
         perf_6m=_perf("perf_6m"),
         perf_ytd=_perf("perf_ytd"),
         range_low=float(low), range_high=float(high), range_current=float(current),
-        highlights=highlights or [
-            ("EARNINGS",   "Awaiting next print; consensus updates trickling in."),
-            ("VALUATION",  "Multiple sits in mid-range vs. 5-year history."),
-            ("POSITIONING", "Dividend yield in line with sector peers."),
-            ("WATCH",      "Management commentary on forward demand is key."),
-            ("RISK",       "Macro and feedstock-cost volatility remain top risks."),
-        ],
+        highlights=highlights or _derive_highlights(
+            cv=cv, currency=currency, current_price=current,
+            mcap=mcap, target_mean=target_mean, upside_pct=upside_pct,
+            pe_fwd=pe_fwd, div_yield=div_yield,
+            range_low=low, range_high=high,
+            n_analysts=n_analysts, rs=rating_split,
+        ),
         sources_line=", ".join(sorted({
             c.canonical_source for c in cv.values()
         })) or "free-source stack",

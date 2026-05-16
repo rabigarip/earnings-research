@@ -125,7 +125,8 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
         logging.getLogger(__name__).warning("peer enrichment failed for %s: %s", ticker, exc)
 
     snap      = build_snapshot_data(ticker, period_label=period_label,
-                                       report_date=report_date)
+                                       report_date=report_date,
+                                       ms_price_performance=getattr(payload, "ms_price_performance", None))
     is_bank = bool(getattr(payload.company, "is_bank", False))
     thesis    = build_thesis_data(ticker,
                                      quarterly=getattr(payload, "quarterly_actuals", None) or [],
