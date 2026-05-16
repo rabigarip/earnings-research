@@ -68,15 +68,12 @@ def _body_card(slide, left: float, top: float, width: float, height: float,
 
 
 def _estimates_table(slide, top: float, rows: list[dict]):
-    """Borderless 3-column table: METRIC | CONSENSUS | YoY.
+    """Borderless 4-column table.
 
-    The Jabal-estimate and delta-vs-consensus columns were dropped because
-    we don't have a credible source for Jabal's own estimates per ticker
-    on-demand. Bloomberg upload can populate them later when wired in.
-    rows: list of dicts {metric, consensus, yoy_pct}. Width sums to
-    CONTENT_W (6.60)."""
-    headers = ["METRIC", "CONSENSUS", "YoY"]
-    col_w   = [3.80, 1.70, 1.10]
+    rows: list of dicts {metric, jabal, consensus, delta_bps_or_pct, yoy_pct}
+    Column widths sum to CONTENT_W."""
+    headers = ["METRIC", "JABAL EST.", "CONSENSUS", "Δ vs CONSENSUS", "YoY"]
+    col_w   = [2.40, 1.10, 1.10, 1.10, 0.90]
     row_h   = 0.30
     header_top = top
     # Header
@@ -100,11 +97,14 @@ def _estimates_table(slide, top: float, rows: list[dict]):
             band.fill.solid(); band.fill.fore_color.rgb = CARD
             band.line.fill.background()
         x = MARGIN_L
-        for i, key in enumerate(["metric", "consensus", "yoy"]):
+        for i, key in enumerate(["metric", "jabal", "consensus", "delta", "yoy"]):
             val = row.get(key, "—")
             align = PP_ALIGN.LEFT if i == 0 else PP_ALIGN.RIGHT
             color = BLACK
-            if key == "yoy" and isinstance(val, (int, float)):
+            if key == "delta" and isinstance(val, (int, float)):
+                color = signed_color(val)
+                val = f"{val:+.1f}%"
+            elif key == "yoy" and isinstance(val, (int, float)):
                 color = signed_color(val)
                 val = f"{val:+.1f}%"
             elif val is None:
@@ -198,7 +198,7 @@ def render_thesis_slide(prs, data: ThesisData):
     # Q2 estimates
     _section_label(slide, MARGIN_L, 3.96, CONTENT_W, "Q2 2026 Earnings Expectations")
     _text(slide, MARGIN_L, 4.26, CONTENT_W, 0.18,
-          "Street consensus  ·  Local currency unless stated",
+          "Jabal estimates vs. consensus  ·  Local currency unless stated",
           size=Pt(9), color=GRAY)
     _estimates_table(slide, 4.48, data.estimates_rows)
     _text(slide, MARGIN_L, 6.88, CONTENT_W, 0.18,
