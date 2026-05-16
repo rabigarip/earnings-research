@@ -30,12 +30,18 @@ _SLUGS: dict[str, str] = {
     # Saudi / Tadawul
     "2222.SR":        "saudi-aramco",
     "2020.SR":        "sa-fertilizers",
-    # UAE / ADX
+    # UAE / ADX + DFM (subject + peer tickers used in slide-3 peer table)
     "ADCB.AE":        "ad-commercial",
     "ADNOCDRILL.AE":  "adnoc-drilling",
+    "ENBD.AE":        "emirates-nbd",            # Emirates NBD (peer)
+    "FAB.AE":         "natl-bk-of-ad",           # First Abu Dhabi Bank (peer)
+    "DIB.AE":         "db-islamic-bk",           # Dubai Islamic Bank (peer)
     # Oman / MSM
     "BKMB.OM":        "bank-muscat",
     "OQEP.OM":        "oq-exploration-and-production-cjsc",
+    # Qatar / Kuwait (peer tickers)
+    "QNBK.QA":        "qnb",                    # Qatar National Bank
+    "NBKK.KW":        "national-bank-kt",       # National Bank of Kuwait
     # India / NSE
     "JINDALSTEL.NS":  "jindal-steel---power",
     "ICICIBANK.NS":   "icici-bank-ltd",   # NSE listing in INR (not 'icici-bank' = IBN ADR in USD)
