@@ -382,6 +382,7 @@ def render_valuation_slide(prs, data: ValuationData):
 def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
                             gen_date: str = "",
                             peers_override: Optional[list[dict]] = None,
+                            historical_override: Optional[dict] = None,
                             ) -> ValuationData:
     cv = get_all_fields(ticker)
     # iShares overlay removed (peer table no longer pulls regional ETF).
@@ -393,11 +394,15 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     if profile and isinstance(profile.value, dict):
         currency = profile.value.get("currency") or ""
 
-    # 52w close series from yahoo's compact summary
+    # 52w close series. Prefer canonical_store; fall back to the Investing
+    # override fetched by the writer (used for yfinance-blocked tickers
+    # whose historical_prices field never reaches the canonical store).
     hp = cv.get("historical_prices")
     close_series = []
     if hp and isinstance(hp.value, dict):
         close_series = hp.value.get("close_series") or []
+    if not close_series and isinstance(historical_override, dict):
+        close_series = historical_override.get("close_series") or []
 
     # P/E history from valuation_historical. The header reads
     # "P/E MULTIPLE · 5-YEAR RANGE" so we trim the series to the trailing

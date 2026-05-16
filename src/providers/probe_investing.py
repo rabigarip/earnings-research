@@ -225,6 +225,118 @@ def _earnings_history(state: dict) -> list[dict]:
     return eh if isinstance(eh, list) else []
 
 
+# ── Historical-prices helper (used by the deck writer directly, not as a
+#   Provider field; lives here for proximity to the rest of the Investing
+#   plumbing). ─────────────────────────────────────────────────────────────
+
+def fetch_historical_prices(ticker: str, *, days: int = 380) -> Optional[dict]:
+    """Return a 52-week close series for `ticker` from Investing.com.
+
+    Output matches the canonical `historical_prices` shape the slide
+    renderers already consume:
+        {
+          "close_series": [{"date": "YYYY-MM-DD", "close": float}, ...],
+          "range_52w_low":  float,
+          "range_52w_high": float,
+          "perf_1d":  float, "perf_1w": float, "perf_1m": float,
+          "perf_3m":  float, "perf_6m": float, "perf_ytd": float,
+        }
+
+    Returns None when the ticker has no Investing.com slug or the API
+    rejects the request.
+    """
+    slug = _slug(ticker)
+    if not slug:
+        return None
+    # First fetch the equity page once to grab the instrumentId.
+    state = _fetch_equity_page(slug)
+    if not state:
+        return None
+    eq = state.get("equityStore") or {}
+    iid = eq.get("instrumentId") if isinstance(eq, dict) else None
+    if not iid:
+        instr = _equity_instrument(state)
+        # Fall back to the price block (instrument.price.instrumentId)
+        iid = (instr.get("price") or {}).get("instrumentId")
+    if not iid:
+        return None
+    from datetime import datetime as _dt, timedelta as _td
+    end = _dt.utcnow().date()
+    start = end - _td(days=days)
+    # api.investing.com requires a `domain-id` header (the public endpoints
+    # validate against the WAF "Request.Domain" field) — calling without it
+    # returns 400. Bypass _get and set the header explicitly.
+    url = (
+        f"https://api.investing.com/api/financialdata/historical/{iid}"
+        f"?start-date={start.isoformat()}&end-date={end.isoformat()}"
+        f"&time-frame=Daily&add-missing-rows=false"
+    )
+    try:
+        from curl_cffi import requests as cr
+    except ImportError:
+        return None
+    try:
+        r = cr.get(url, impersonate="chrome120", timeout=15,
+                   headers={"domain-id": "www",
+                            "Accept-Language": "en-US,en;q=0.9"})
+    except Exception:
+        return None
+    if r.status_code != 200:
+        return None
+    try:
+        rows = (json.loads(r.text).get("data") or [])
+    except json.JSONDecodeError:
+        return None
+    def _to_float(v):
+        if v is None: return None
+        if isinstance(v, (int, float)): return float(v)
+        try: return float(str(v))
+        except (TypeError, ValueError): return None
+
+    series: list[dict] = []
+    for r in rows:
+        ts = r.get("rowDateTimestamp") or ""
+        close = _to_float(r.get("last_closeRaw"))
+        if not ts or close is None:
+            continue
+        # API returns newest-first; sort oldest-first below.
+        series.append({"date": ts[:10], "close": close})
+    series.sort(key=lambda x: x["date"])
+    if not series:
+        return None
+    closes = [x["close"] for x in series]
+    out: dict[str, Any] = {
+        "close_series":   series,
+        "range_52w_low":  min(closes),
+        "range_52w_high": max(closes),
+    }
+    # Perf bands — anchor everything off the latest close to keep them
+    # internally consistent. Falls back silently when a band is shorter
+    # than the requested window (e.g. recent IPO).
+    today_close = closes[-1]
+    today_date  = series[-1]["date"]
+    def _close_at_or_before(target_date_str: str) -> Optional[float]:
+        for entry in reversed(series):
+            if entry["date"] <= target_date_str:
+                return entry["close"]
+        return None
+    from datetime import date as _date
+    today_d = _date.fromisoformat(today_date)
+    deltas = {
+        "perf_1d":  1, "perf_1w": 7, "perf_1m": 30,
+        "perf_3m":  90, "perf_6m": 182, "perf_ytd": 0,
+    }
+    for key, delta_days in deltas.items():
+        if key == "perf_ytd":
+            anchor_date = _date(today_d.year, 1, 1).isoformat()
+        else:
+            anchor_date = (today_d - _td(days=delta_days)).isoformat()
+        prev = _close_at_or_before(anchor_date)
+        if prev and prev > 0:
+            out[key] = (today_close / prev - 1.0) * 100
+    return out
+
+
 # ── Public Provider ──────────────────────────────────────────────────────
 
 class InvestingProvider(Provider):

@@ -130,15 +130,28 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
         import logging
         logging.getLogger(__name__).warning("peer enrichment failed for %s: %s", ticker, exc)
 
+    # Investing.com 52w history — drives slide 3's price chart and the
+    # snapshot performance row when yfinance has no data. Cached on disk
+    # per ticker so subsequent runs cost a single HTTP roundtrip.
+    historical_override: dict | None = None
+    try:
+        from src.providers.probe_investing import fetch_historical_prices
+        historical_override = fetch_historical_prices(ticker)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("historical prices fetch failed for %s: %s", ticker, exc)
+
     snap      = build_snapshot_data(ticker, period_label=period_label,
                                        report_date=report_date,
-                                       ms_price_performance=getattr(payload, "ms_price_performance", None))
+                                       ms_price_performance=getattr(payload, "ms_price_performance", None),
+                                       historical_override=historical_override)
     is_bank = bool(getattr(payload.company, "is_bank", False))
     thesis    = build_thesis_data(ticker,
                                      quarterly=getattr(payload, "quarterly_actuals", None) or [],
                                      is_bank=is_bank,
                                      ms_quarterly_forecasts=getattr(payload, "ms_quarterly_forecasts", None))
-    valuation = build_valuation_data(ticker, peers_override=peer_rows or None)
+    valuation = build_valuation_data(ticker, peers_override=peer_rows or None,
+                                       historical_override=historical_override)
 
     prs = Presentation()
     prs.slide_width  = _In(PAGE_W_IN)
