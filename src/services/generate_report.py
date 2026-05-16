@@ -126,7 +126,9 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
 
     snap      = build_snapshot_data(ticker, period_label=period_label,
                                        report_date=report_date)
-    thesis    = build_thesis_data(ticker, quarterly=payload.quarterly)
+    is_bank = bool(getattr(payload.company, "is_bank", False))
+    thesis    = build_thesis_data(ticker, quarterly=payload.quarterly,
+                                     is_bank=is_bank)
     valuation = build_valuation_data(ticker, peers_override=peer_rows or None)
 
     prs = Presentation()
