@@ -106,6 +106,52 @@ def health():
         return {"status": "ok"}
 
 
+@app.get("/api/diag/investing/{ticker}")
+def diag_investing(ticker: str):
+    """Diagnostic: try every Investing.com call we make for a ticker and
+    report which succeed and which fail with what error. Used to verify
+    whether Investing.com is reachable from this deploy's egress IP."""
+    out: dict = {"ticker": ticker, "investing": {}}
+    # 1. Equity page (Cloudflare challenge bypass test)
+    try:
+        from src.providers.probe_investing import (
+            _slug, _fetch_equity_page, fetch_historical_prices,
+            InvestingProvider,
+        )
+        slug = _slug(ticker.upper())
+        out["slug"] = slug
+        if not slug:
+            out["investing"]["error"] = "No curated slug — add to _SLUGS map"
+            return out
+        # equity page
+        state = _fetch_equity_page(slug)
+        out["investing"]["equity_page"] = "ok" if state else "FAILED — Cloudflare or HTTP error"
+        if state:
+            eq = state.get("equityStore") or {}
+            instr = eq.get("instrument") or {} if isinstance(eq, dict) else {}
+            price = (instr.get("price") or {}).get("last") if instr else None
+            out["investing"]["last_price"] = price
+            out["investing"]["instrument_id"] = eq.get("instrumentId") if isinstance(eq, dict) else None
+        # historical
+        hp = fetch_historical_prices(ticker.upper())
+        out["investing"]["historical"] = (
+            f"ok ({len(hp['close_series'])} bars)" if hp and hp.get("close_series")
+            else "FAILED — empty"
+        )
+        # consensus + earnings
+        p = InvestingProvider()
+        for method_name in ("_fetch_target_price", "_fetch_rating_split",
+                            "_fetch_valuation_forward"):
+            try:
+                v, _, _, _ = getattr(p, method_name)(ticker.upper())
+                out["investing"][method_name.lstrip("_")] = "ok"
+            except Exception as e:
+                out["investing"][method_name.lstrip("_")] = f"FAILED — {type(e).__name__}: {str(e)[:120]}"
+    except Exception as e:
+        out["investing"]["fatal"] = f"{type(e).__name__}: {str(e)[:200]}"
+    return out
+
+
 class LoginRequest(BaseModel):
     accessCode: str = ""
 
