@@ -313,116 +313,111 @@ def _template_exec_summary(cv: dict, commodities: dict,
     return body
 
 
-def _build_estimates_rows(cv: dict) -> list[dict]:
-    """Build the Q2 estimates table from canonical_store + Jabal stub.
+def _fmt_money_b(v):
+    """Render a raw money value as 'X.YB' / 'X.YT' / 'X,Y00M'. None on bad input."""
+    if not isinstance(v, (int, float)):
+        return None
+    if abs(v) >= 1e12: return f"{v/1e12:,.2f}T"
+    if abs(v) >= 1e9:  return f"{v/1e9:,.1f}B"
+    if abs(v) >= 1e6:  return f"{v/1e6:,.0f}M"
+    return f"{v:,.0f}"
 
-    For the proof-of-concept Jabal estimate column derives from MS forward
-    consensus with a slight bias adjustment — in production this is the
-    analyst's own model. Falls back to '—' for any metric we don't have."""
-    val_fwd = cv.get("valuation_forward")
-    fwd = val_fwd.value if val_fwd and isinstance(val_fwd.value, dict) else {}
-    val_hist = cv.get("valuation_historical")
-    hist = val_hist.value if val_hist and isinstance(val_hist.value, dict) else {}
 
-    def _pair(name: str, jabal_v, consensus_v, yoy_pct=None) -> dict:
-        delta = None
-        try:
-            if jabal_v is not None and consensus_v is not None and consensus_v != 0:
-                delta = (float(jabal_v) / float(consensus_v) - 1.0) * 100
-        except (TypeError, ValueError):
-            pass
-        return {
-            "metric":    name,
-            "jabal":     "—" if jabal_v is None else f"{jabal_v:,.2f}",
-            "consensus": "—" if consensus_v is None else f"{consensus_v:,.2f}",
-            "delta":     delta if delta is not None else "—",
-            "yoy":       yoy_pct if yoy_pct is not None else "—",
-        }
-
-    rows = []
-
-    def _firstnum(*keys):
-        for k in keys:
-            v = fwd.get(k)
-            if isinstance(v, (int, float)):
-                return v
+def _prior_year_same_q(period_label: str) -> str | None:
+    """'2024-Q3' -> '2023-Q3'; '2024-Q3 (Mar)' -> '2023-Q3 (Mar)'. None on bad input."""
+    import re as _re
+    m = _re.match(r"^\s*(\d{4})(\D.*)$", str(period_label or ""))
+    if not m:
+        return None
+    try:
+        return f"{int(m.group(1)) - 1}{m.group(2)}"
+    except ValueError:
         return None
 
-    def _fmt_money_b(v):
-        """Render a raw money value as e.g. 'SAR 493.3B' when large."""
-        if not isinstance(v, (int, float)):
+
+def _yoy_pct(curr, prev) -> float | None:
+    try:
+        if curr is None or prev in (None, 0):
             return None
-        if abs(v) >= 1e12: return f"{v/1e12:,.2f}T"
-        if abs(v) >= 1e9:  return f"{v/1e9:,.1f}B"
-        if abs(v) >= 1e6:  return f"{v/1e6:,.0f}M"
-        return f"{v:,.0f}"
+        return (float(curr) / float(prev) - 1.0) * 100
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
 
-    # Two-column FY estimates: FY+1 EPS + Revenue + Next-Q EPS.
-    # Sources sometimes return "FY2026" and sometimes plain "2026" — strip
-    # an existing "FY" prefix so the renderer doesn't double it.
-    def _norm_fy(v) -> str:
-        if v in (None, ""):
-            return ""
-        s = str(v).strip()
-        if s.upper().startswith("FY"):
-            s = s[2:].lstrip()
-        return s
-    fy1_year = _norm_fy(fwd.get("fy1_year") or fwd.get("fy_year"))
-    fy2_year = _norm_fy(fwd.get("fy2_year"))
-    next_q_period = fwd.get("next_q_period") or "Next Q"
 
-    eps_fy1 = _firstnum("eps_fy1", "eps_2026", "eps_2027", "eps")
-    rev_fy1 = _firstnum("revenue_fy1", "revenue_2026", "revenue_2027", "revenue")
-    eps_fy2 = _firstnum("eps_fy2", "eps_2027", "eps_2028")
-    rev_fy2 = _firstnum("revenue_fy2", "revenue_2027", "revenue_2028")
-    eps_q   = _firstnum("eps_next_q")
-    rev_q   = _firstnum("revenue_next_q")
+def _yoy_bps(curr_pct, prev_pct) -> float | None:
+    """Margin YoY in basis points (return as percentage for unified rendering)."""
+    try:
+        if curr_pct is None or prev_pct is None:
+            return None
+        return float(curr_pct) - float(prev_pct)
+    except (TypeError, ValueError):
+        return None
 
-    rows.append({
-        "metric": f"EPS — {next_q_period}",
-        "jabal": "—",
-        "consensus": (f"{eps_q:.3f}" if eps_q else "—"),
-        "delta": "—", "yoy": "—",
-    })
-    rows.append({
-        "metric": f"Revenue — {next_q_period}",
-        "jabal": "—",
-        "consensus": (_fmt_money_b(rev_q) or "—"),
-        "delta": "—", "yoy": "—",
-    })
-    rows.append({
-        "metric": f"EPS — FY{fy1_year}" if fy1_year else "EPS (FY est.)",
-        "jabal": "—",
-        "consensus": (f"{eps_fy1:.3f}" if eps_fy1 else "—"),
-        "delta": "—", "yoy": "—",
-    })
-    rows.append({
-        "metric": f"Revenue — FY{fy1_year}" if fy1_year else "Revenue (FY est.)",
-        "jabal": "—",
-        "consensus": (_fmt_money_b(rev_fy1) or "—"),
-        "delta": "—", "yoy": "—",
-    })
-    if eps_fy2 or rev_fy2:
-        rows.append({
-            "metric": f"EPS — FY{fy2_year}" if fy2_year else "EPS (FY+1 est.)",
-            "jabal": "—",
-            "consensus": (f"{eps_fy2:.3f}" if eps_fy2 else "—"),
-            "delta": "—", "yoy": "—",
-        })
-        rows.append({
-            "metric": f"Revenue — FY{fy2_year}" if fy2_year else "Revenue (FY+1)",
-            "jabal": "—",
-            "consensus": (_fmt_money_b(rev_fy2) or "—"),
-            "delta": "—", "yoy": "—",
-        })
-    # Dividend yield (TTM, from canonical)
-    div_y = (cv.get("dividend_yield").value
-              if cv.get("dividend_yield") else None)
-    rows.append({"metric": "Dividend yield (TTM)",
-                  "jabal": "—",
-                  "consensus": (f"{float(div_y):.2f}%" if div_y is not None else "—"),
-                  "delta": "—", "yoy": "—"})
-    return rows
+
+def _build_estimates_rows(cv: dict, quarterly: list | None = None) -> list[dict]:
+    """Standard 5-row table: Revenue / EBITDA / Net Income / EPS / EBITDA Margin.
+
+    Columns by source:
+      • JABAL EST — always '—' (analyst types it in the .pptx post-generation).
+      • CONSENSUS — from MS/Yahoo forwards for Revenue and EPS; EBITDA / NI /
+        Margin stay '—' unless populated by a future Bloomberg overlay.
+      • Δ vs CONSENSUS — '—' until the analyst fills the Jabal column.
+      • YoY — computed from `quarterly` history (latest actual vs prior-year
+        same quarter). Falls back to '—' when we lack the prior-year row.
+    """
+    val_fwd = cv.get("valuation_forward")
+    fwd = val_fwd.value if val_fwd and isinstance(val_fwd.value, dict) else {}
+
+    rev_q_consensus = next((fwd.get(k) for k in ("revenue_next_q",)
+                            if isinstance(fwd.get(k), (int, float))), None)
+    eps_q_consensus = next((fwd.get(k) for k in ("eps_next_q",)
+                            if isinstance(fwd.get(k), (int, float))), None)
+
+    # YoY: pull latest actual + prior-year same quarter from passed history.
+    yoy_rev = yoy_ebitda = yoy_ni = yoy_eps = yoy_margin = None
+    if quarterly:
+        # Quarterly list is expected to be FinancialPeriod objects (or dicts);
+        # render side accepts both since serialization paths differ.
+        def _g(rec, key):
+            return getattr(rec, key, None) if not isinstance(rec, dict) else rec.get(key)
+        recs_by_period = {(_g(r, "period_label") or "").strip(): r for r in quarterly}
+        sorted_periods = sorted(recs_by_period.keys(), reverse=True)
+        latest = recs_by_period.get(sorted_periods[0]) if sorted_periods else None
+        prior_key = _prior_year_same_q(sorted_periods[0]) if sorted_periods else None
+        prior = recs_by_period.get(prior_key) if prior_key else None
+        if latest and prior:
+            yoy_rev    = _yoy_pct(_g(latest, "revenue"),    _g(prior, "revenue"))
+            yoy_ebitda = _yoy_pct(_g(latest, "ebitda"),     _g(prior, "ebitda"))
+            yoy_ni     = _yoy_pct(_g(latest, "net_income"), _g(prior, "net_income"))
+            yoy_eps    = _yoy_pct(_g(latest, "eps"),        _g(prior, "eps"))
+            # Margin YoY is computed as a bps delta, but we render it as a
+            # percent-point change to keep the column format uniform.
+            curr_rev = _g(latest, "revenue") or 0
+            prev_rev = _g(prior, "revenue") or 0
+            curr_eb  = _g(latest, "ebitda")
+            prev_eb  = _g(prior, "ebitda")
+            curr_margin = (curr_eb / curr_rev * 100) if curr_eb and curr_rev else None
+            prev_margin = (prev_eb / prev_rev * 100) if prev_eb and prev_rev else None
+            yoy_margin = _yoy_bps(curr_margin, prev_margin)
+
+    def _row(metric: str, consensus_str: str | None, yoy_val) -> dict:
+        return {
+            "metric": metric,
+            "jabal": "—",                                  # analyst fills post-prod
+            "consensus": consensus_str if consensus_str else "—",
+            "delta": "—",                                  # auto only when Jabal is filled
+            "yoy": yoy_val if yoy_val is not None else "—",
+        }
+
+    return [
+        _row("Revenue",        _fmt_money_b(rev_q_consensus), yoy_rev),
+        _row("EBITDA",         None,                          yoy_ebitda),
+        _row("Net Income",     None,                          yoy_ni),
+        _row("EPS",            (f"{eps_q_consensus:.2f}"
+                                 if isinstance(eps_q_consensus, (int, float))
+                                 else None),                 yoy_eps),
+        _row("EBITDA Margin",  None,                          yoy_margin),
+    ]
 
 
 def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
@@ -430,6 +425,7 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
                         catalysts: Optional[list[str]] = None,
                         risks: Optional[list[str]] = None,
                         watch_list: Optional[list[str]] = None,
+                        quarterly: Optional[list] = None,
                         ) -> ThesisData:
     cv = get_all_fields(ticker)
     commodities_obs = get_observations_by_provider(ticker, "commodities")
@@ -446,7 +442,7 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
         llm = None
     summary = (llm or {}).get("thesis_paragraph") or _template_exec_summary(
         cv, commodities_obs, macro_obs)
-    rows = _build_estimates_rows(cv)
+    rows = _build_estimates_rows(cv, quarterly=quarterly)
 
     # Compose the table footnote: lead with the next-Q anchor (date,
     # consensus source, analyst count) since that's the strongest data
