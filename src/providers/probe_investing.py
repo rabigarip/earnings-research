@@ -1,37 +1,21 @@
-"""
-Investing.com probe provider — Stage 1, conservative scope.
+"""Investing.com probe provider — HTTP-only via curl_cffi.
 
-Two big design constraints discovered during probing:
+Rewritten 2026-05 to drop Playwright. Cloudflare's bot challenge is bypassed
+by curl_cffi's Chrome TLS impersonation, which means this module works on
+any Python host (Render, local, CI) without a Chromium install.
 
-1. **Cloudflare wall.** Headless Chromium hits a "Just a moment..." CF
-   challenge page on every request. Non-headless Chromium passes the
-   challenge within 1-2 seconds (the CF JS check runs and grants
-   cookies). So this provider runs Playwright with `headless=False`.
-   On a server with no display, this needs `xvfb-run` in front.
+Source of truth on each Investing equity page is the `<script id="__NEXT_DATA__">`
+JSON blob — every store (equityStore, companyProfileStore, consensusEstimatesStore,
+earningsStore) is serialized inside it. We parse the JSON directly rather than
+scraping rendered text, which makes parsing far more stable.
 
-2. **Slug is not guessable.** Investing.com slugs are curated by
-   their editors — Tencent is `/equities/tencent-holdings-ltd` but
-   could equally be `/equities/tencent-holdings` (which 404s).
-   We require an explicit slug per ticker in `config/investing_slugs.toml`.
-
-For Stage 1, we wire the 4 panel tickers where the slug was found
-during discovery (ICICIBANK, JINDALSTEL, plus placeholders for ones
-that need manual lookup). Anything else gets `not_implemented`.
-
-Caching: each ticker's quote page response is disk-cached for 24h so
-re-probes are zero-network.
-
-Fields covered: current_price, dividend_yield, target_price.
-Identity (company_profile, market_cap) could be added — Investing
-has it — but the field is already at 10/10 elsewhere, so the marginal
-value of duplicating it here is low.
+Caching: 24h disk cache keyed by slug + page-kind so re-probes are zero-network.
 """
 
 from __future__ import annotations
 
 import json
 import re
-import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -39,37 +23,95 @@ from typing import Any, Optional
 from src.services.probe_harness import Provider, persist_raw, cache_root
 
 
-# Curated slug map. Add tickers here as their Investing.com slug is
-# discovered (one-time manual lookup; the slug doesn't change).
-# Format: company_master ticker -> Investing.com URL slug.
+# ── Slug map ─────────────────────────────────────────────────────────────
+# Curated Investing.com slug per Yahoo ticker. Add new tickers here after
+# verifying the slug at https://www.investing.com/equities/<slug>.
 _SLUGS: dict[str, str] = {
-    # India (originally curated Stage 1)
-    "ICICIBANK.BO":   "icici-bank-ltd",
-    "JINDALSTEL.NS":  "jindal-steel---power",
-    # Stage 2: panel-wide curation. Confirmed via investing.com search
-    # (slugs cross-checked against each /equities/<slug> landing page).
+    # Saudi / Tadawul
     "2222.SR":        "saudi-aramco",
-    "0700.HK":        "tencent-holdings-hk",
-    "1398.HK":        "icbc",
-    "2899.HK":        "zijin-mining-group",
+    "2020.SR":        "sa-fertilizers",
+    # UAE / ADX
     "ADCB.AE":        "ad-commercial",
     "ADNOCDRILL.AE":  "adnoc-drilling",
+    # Oman / MSM
     "BKMB.OM":        "bank-muscat",
     "OQEP.OM":        "oq-exploration-and-production-cjsc",
+    # India / NSE
+    "JINDALSTEL.NS":  "jindal-steel---power",
+    "ICICIBANK.NS":   "icici-bank",
+    "ICICIBANK.BO":   "icici-bank",
+    # China / Hong Kong
+    "0700.HK":        "tencent-holdings-hk",
+    "2899.HK":        "zijin-mining-group",
+    "1398.HK":        "icbc",
 }
 
 
 def _slug(ticker: str) -> Optional[str]:
-    """Resolve the Investing.com slug for a ticker, or None if not curated."""
     return _SLUGS.get(ticker.upper())
 
 
-def _cache_path(slug: str) -> Path:
-    return cache_root() / "investing" / f"{slug}.json"
+# ── HTTP layer (curl_cffi) ───────────────────────────────────────────────
+
+_BASE = "https://www.investing.com/equities"
 
 
-def _read_cache(slug: str, ttl_hours: float = 24) -> Optional[dict]:
-    p = _cache_path(slug)
+def _get(url: str, *, timeout: float = 15.0) -> Optional[str]:
+    """Single HTTP GET via curl_cffi with Chrome120 TLS fingerprint. Returns
+    the response body string on 200, or None on any failure. Cloudflare's
+    automated-traffic check is satisfied by the TLS fingerprint alone — no
+    cookie or challenge solver is needed."""
+    try:
+        from curl_cffi import requests as cr
+    except ImportError:
+        return None
+    try:
+        r = cr.get(url, impersonate="chrome120", timeout=timeout,
+                   headers={"Accept-Language": "en-US,en;q=0.9"})
+    except Exception:
+        return None
+    if r.status_code != 200:
+        return None
+    return r.text
+
+
+def _next_data(html: str) -> Optional[dict]:
+    """Parse the __NEXT_DATA__ JSON blob; return the `pageProps.state` dict
+    (with every store JSON-decoded). Returns None on shape problems."""
+    if not html:
+        return None
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
+    if not m:
+        return None
+    try:
+        root = json.loads(m.group(1))
+    except json.JSONDecodeError:
+        return None
+    state = (root.get("props") or {}).get("pageProps", {}).get("state") or {}
+    out: dict[str, Any] = {}
+    for key, raw in state.items():
+        if isinstance(raw, str):
+            try:
+                out[key] = json.loads(raw)
+            except json.JSONDecodeError:
+                out[key] = raw
+        else:
+            out[key] = raw
+    return out
+
+
+# ── Disk cache ───────────────────────────────────────────────────────────
+
+def _cache_dir() -> Path:
+    return cache_root() / "investing"
+
+
+def _cache_path(slug: str, kind: str) -> Path:
+    return _cache_dir() / f"{slug}__{kind}.json"
+
+
+def _read_cache(slug: str, kind: str, ttl_hours: float = 24) -> Optional[dict]:
+    p = _cache_path(slug, kind)
     if not p.exists():
         return None
     age = datetime.now(timezone.utc) - datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
@@ -81,497 +123,270 @@ def _read_cache(slug: str, ttl_hours: float = 24) -> Optional[dict]:
         return None
 
 
-def _write_cache(slug: str, payload: dict) -> None:
-    p = _cache_path(slug)
+def _write_cache(slug: str, kind: str, payload: dict) -> None:
+    p = _cache_path(slug, kind)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(payload, indent=2, default=str))
 
 
-_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+# ── Page-level fetchers (cached) ─────────────────────────────────────────
 
-
-def _new_browser_context():
-    """Launch Playwright Chromium (non-headless first; fall back to headless
-    if the host has no display). Returns (sync_playwright_ctx, browser, ctx)
-    or raises so the caller can short-circuit."""
-    from playwright.sync_api import sync_playwright
-    spc = sync_playwright().start()
-    browser = None
-    last_err = None
-    for headless in (False, True):
-        try:
-            browser = spc.chromium.launch(
-                headless=headless,
-                args=["--disable-blink-features=AutomationControlled"],
-            )
-            break
-        except Exception as exc:
-            last_err = exc
-            continue
-    if browser is None:
-        spc.stop()
-        raise RuntimeError(f"Could not launch Chromium: {last_err}")
-    ctx = browser.new_context(
-        user_agent=_UA, viewport={"width": 1366, "height": 900}, locale="en-US",
-    )
-    ctx.add_init_script(
-        "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-    )
-    return spc, browser, ctx
-
-
-def _load_through_cf(page, url: str, max_wait_s: int = 20) -> bool:
-    """Navigate to `url` and wait through any Cloudflare challenge.
-    Returns True if the real page loaded, False if we hit 404 / CF wall."""
-    try:
-        page.goto(url, wait_until="domcontentloaded", timeout=30000)
-    except Exception:
-        return False
-    for _ in range(max_wait_s):
-        if "Just a moment" not in page.title():
-            break
-        time.sleep(1)
-    if "Just a moment" in page.title() or "Error 404" in page.title():
-        return False
-    return True
-
-
-def _fetch_quote(slug: str) -> Optional[dict]:
-    """Use Playwright to load the equity page and extract a small set of
-    quote fields from the DOM. Returns dict or None."""
-    try:
-        from playwright.sync_api import sync_playwright  # noqa: F401
-    except ImportError:
-        return None
-
-    url = f"https://www.investing.com/equities/{slug}"
-    extracted: dict[str, Any] = {"url": url, "fetched_at": datetime.now(timezone.utc).isoformat()}
-
-    spc = browser = ctx = None
-    try:
-        spc, browser, ctx = _new_browser_context()
-    except Exception:
-        return None
-    try:
-        page = ctx.new_page()
-        if not _load_through_cf(page, url):
-            return None
-
-        extracted["title"] = page.title()
-        data = page.evaluate(
-            """
-            () => {
-                function findFirst(selectors) {
-                  for (const sel of selectors) {
-                    const el = document.querySelector(sel);
-                    if (el && el.innerText) return el.innerText.trim();
-                  }
-                  return null;
-                }
-                return {
-                  price: findFirst([
-                      '[data-test="instrument-price-last"]',
-                      '.text-5xl', '.text-2xl',
-                      'span[class*="instrument-price"]'
-                  ]),
-                  change: findFirst([
-                      '[data-test="instrument-price-change"]',
-                      '[class*="instrument-price-change"]'
-                  ]),
-                  change_pct: findFirst([
-                      '[data-test="instrument-price-change-percent"]',
-                      '[class*="instrument-price-change-percent"]'
-                  ]),
-                  currency: (document.querySelector('[data-test="currency-in"]') || {}).innerText || null,
-                  kv: (() => {
-                      const rows = document.querySelectorAll('[data-test*="key-info"] li, .key-info li, dt');
-                      const out = {};
-                      rows.forEach(r => {
-                          const k = r.querySelector('span, dt') ? r.querySelector('span').innerText : null;
-                          const v = r.querySelector('strong, dd');
-                          if (k && v) out[k.trim()] = v.innerText.trim();
-                      });
-                      return out;
-                  })(),
-                };
-            }
-            """
-        )
-        extracted.update(data or {})
-    finally:
-        try:
-            browser.close()
-        finally:
-            spc.stop()
-
-    return extracted if extracted.get("price") else None
-
-
-# ── Consensus + earnings sub-page fetchers ─────────────────────
-
-def _consensus_cache_path(slug: str) -> Path:
-    return cache_root() / "investing" / f"{slug}__consensus.json"
-
-
-def _earnings_cache_path(slug: str) -> Path:
-    return cache_root() / "investing" / f"{slug}__earnings.json"
-
-
-def _read_subpage_cache(path: Path, ttl_hours: float = 24) -> Optional[dict]:
-    if not path.exists():
-        return None
-    age = datetime.now(timezone.utc) - datetime.fromtimestamp(
-        path.stat().st_mtime, tz=timezone.utc)
-    if age > timedelta(hours=ttl_hours):
-        return None
-    try:
-        return json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-def _write_subpage_cache(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, default=str))
-
-
-def _fetch_sub_pages(slug: str) -> dict:
-    """Single Playwright session that visits BOTH the consensus-estimates
-    and earnings sub-pages, extracting:
-      - consensus: rating distribution (buy/hold/sell counts) + 12m target
-        + analyst count
-      - earnings:  forward EPS + revenue for next quarter & next 2 FYs,
-                    + EPS surprise history (last 4–8 quarters)
-
-    Cached separately per sub-page so a partial failure still preserves
-    the other page's data. Returns dict with `consensus` and `earnings`
-    keys (each may be None on failure)."""
-    out: dict[str, Any] = {"slug": slug,
-                           "fetched_at": datetime.now(timezone.utc).isoformat()}
-    cons_path = _consensus_cache_path(slug)
-    earn_path = _earnings_cache_path(slug)
-    cached_cons = _read_subpage_cache(cons_path)
-    cached_earn = _read_subpage_cache(earn_path)
-    if cached_cons and cached_earn:
-        out["consensus"] = cached_cons
-        out["earnings"]  = cached_earn
-        return out
-
-    spc = browser = ctx = None
-    try:
-        spc, browser, ctx = _new_browser_context()
-    except Exception:
-        out["consensus"] = cached_cons
-        out["earnings"]  = cached_earn
-        return out
-    try:
-        page = ctx.new_page()
-
-        # ── 1. Consensus-estimates page ──
-        if not cached_cons:
-            url = f"https://www.investing.com/equities/{slug}-consensus-estimates"
-            if _load_through_cf(page, url):
-                cons = page.evaluate(
-                    """
-                    () => {
-                        // Grab the rating distribution counts. The page renders
-                        // "X Buy   Y Hold   Z Sell" alongside an aggregate
-                        // total. We pull every visible numeric near those keywords.
-                        const body = document.body.innerText || "";
-                        const grab = (re) => {
-                            const m = body.match(re);
-                            return m ? parseFloat(m[1].replace(/,/g, '')) : null;
-                        };
-                        return {
-                            n_buy:        grab(/(\\d+)\\s+Buy\\b/i),
-                            n_hold:       grab(/(\\d+)\\s+Hold\\b/i),
-                            n_sell:       grab(/(\\d+)\\s+Sell\\b/i),
-                            target_mean:  grab(/Average[^0-9]{0,40}([0-9][0-9,]*\\.?\\d*)/i),
-                            target_high:  grab(/High[^0-9]{0,40}([0-9][0-9,]*\\.?\\d*)/i),
-                            target_low:   grab(/Low[^0-9]{0,40}([0-9][0-9,]*\\.?\\d*)/i),
-                            consensus_label: (body.match(/Consensus\\s+Rating[^A-Za-z]*([A-Za-z\\s]+?)(?:\\n|$)/i) || [])[1] || null,
-                        };
-                    }
-                    """
-                )
-                if cons and (cons.get("n_buy") is not None or cons.get("target_mean") is not None):
-                    _write_subpage_cache(cons_path, cons)
-                    cached_cons = cons
-
-        # ── 2. Earnings page ──
-        if not cached_earn:
-            url = f"https://www.investing.com/equities/{slug}-earnings"
-            if _load_through_cf(page, url):
-                earn = page.evaluate(
-                    """
-                    () => {
-                        const body = document.body.innerText || "";
-                        const scaled = s => {
-                            if (!s) return null;
-                            const m = String(s).match(/([0-9][0-9.,]*)\\s*([BMT]?)/i);
-                            if (!m) return null;
-                            const v = parseFloat(m[1].replace(/,/g,''));
-                            const u = (m[2]||'').toUpperCase();
-                            return u==='T'?v*1e12 : u==='B'?v*1e9 : u==='M'?v*1e6 : v;
-                        };
-
-                        // FY guidance summary — companies phrase it many ways.
-                        // Try the most common variants in order; each must
-                        // anchor on "FY<year>" + an EPS-like float + a
-                        // revenue-like dollar amount.
-                        //
-                        // Variant A (Aramco): "FY2026 EPS guidance set at $0.52
-                        //   with revenue forecast of $493.34B; FY2027 targets
-                        //   $0.58 EPS and $544.09B revenue"
-                        // Variant B (Tencent etc.): "FY2026 EPS of HK$22.10 ...
-                        //   revenue of HK$700.0B"
-                        // Variant C (banks): "FY2026 EPS guidance $1.18 ...
-                        //   revenue $14.2B"
-                        const fyForecasts = [];
-                        const fyVariants = [
-                            // FY<yr> ... <eps> ... <revenue>
-                            /FY\\s*(\\d{4})[^.;]{0,80}?\\$?([0-9]+\\.[0-9]+)[^.;]{0,80}?\\$?([0-9][0-9.,]*\\s*[BMT])/gi,
-                            // FY<yr> targets <eps> EPS and <revenue>
-                            /FY\\s*(\\d{4})\\s+targets[^.;]{0,40}?\\$?([0-9]+\\.[0-9]+)\\s*EPS[^.;]{0,40}?\\$?([0-9][0-9.,]*\\s*[BMT])/gi,
-                        ];
-                        for (const re of fyVariants) {
-                            re.lastIndex = 0;
-                            const seenYears = new Set();
-                            let m;
-                            while ((m = re.exec(body)) !== null && fyForecasts.length < 4) {
-                                const yr = parseInt(m[1]);
-                                if (seenYears.has(yr)) continue;
-                                seenYears.add(yr);
-                                fyForecasts.push({
-                                    year: yr,
-                                    eps:  parseFloat(m[2]),
-                                    revenue: scaled(m[3]),
-                                });
-                            }
-                            if (fyForecasts.length >= 2) break;
-                        }
-                        fyForecasts.sort((a, b) => a.year - b.year);
-
-                        // Next quarter — pulled DIRECTLY from the upcoming
-                        // row in the surprise/forecast table, which is the
-                        // most reliable place. The row has "--" for actuals.
-                        //
-                        // Layout: <date>\\t<period>\\t--\\t/<eps_est>\\t--\\t/<rev_est>
-                        const upcomingRE = /([A-Z][a-z]{2}\\s+\\d{1,2},\\s+\\d{4})\\t([\\d\\/A-Za-z]+)\\t--\\t\\/([0-9.]+)\\t--\\t\\/([0-9.,]+[BMT]?)/;
-                        const upcomingMatch = body.match(upcomingRE);
-                        const upcoming = upcomingMatch ? {
-                            report_date: upcomingMatch[1],
-                            period: upcomingMatch[2],
-                            eps_estimate: parseFloat(upcomingMatch[3]),
-                            revenue_estimate: scaled(upcomingMatch[4]),
-                        } : null;
-
-                        // Surprise history table — rows are tab-separated:
-                        //   <date>\\t<period>\\t<eps_actual>\\t/<eps_forecast>\\t<rev_actual>\\t/<rev_forecast>\\t<eps_surprise%>\\t<rev_surprise%>
-                        // Period column is "MM/YYYY" or sometimes "Q# YYYY".
-                        const surprise_rows = [];
-                        const rowRE = /([A-Z][a-z]{2}\\s+\\d{1,2},\\s+\\d{4})\\t([\\d/A-Za-z]+)\\t([\\d.,-]+)\\t\\/([\\d.,-]+)\\t([\\d.,-]+B?M?T?)\\t\\/([\\d.,-]+B?M?T?)\\t([+-]?[\\d.]+%|0%)\\t([+-]?[\\d.]+%|0%)/g;
-                        while ((m = rowRE.exec(body)) !== null && surprise_rows.length < 8) {
-                            const eps_actual = parseFloat(m[3]);
-                            const eps_est    = parseFloat(m[4]);
-                            const eps_sur    = parseFloat(m[7].replace('%',''));
-                            if (isNaN(eps_actual)) continue;
-                            surprise_rows.push({
-                                report_date: m[1],
-                                period:      m[2],
-                                eps_actual:  eps_actual,
-                                eps_estimate: eps_est,
-                                revenue_actual:   scaled(m[5]),
-                                revenue_estimate: scaled(m[6]),
-                                eps_surprise_pct: eps_sur,
-                                rev_surprise_pct: parseFloat(m[8].replace('%','')),
-                            });
-                        }
-
-                        const fy1 = fyForecasts[0] || {};
-                        const fy2 = fyForecasts[1] || {};
-                        return {
-                            next_q_eps:         upcoming ? upcoming.eps_estimate     : null,
-                            next_q_revenue:     upcoming ? upcoming.revenue_estimate : null,
-                            next_q_period:      upcoming ? upcoming.period           : null,
-                            next_q_report_date: upcoming ? upcoming.report_date      : null,
-                            fy1_year:    fy1.year || null,
-                            fy1_eps:     fy1.eps  || null,
-                            fy1_revenue: fy1.revenue || null,
-                            fy2_year:    fy2.year || null,
-                            fy2_eps:     fy2.eps  || null,
-                            fy2_revenue: fy2.revenue || null,
-                            surprise_history: surprise_rows,
-                        };
-                    }
-                    """
-                )
-                if earn and (earn.get("next_q_eps") is not None or earn.get("surprise_history")):
-                    _write_subpage_cache(earn_path, earn)
-                    cached_earn = earn
-    finally:
-        try:
-            browser.close()
-        finally:
-            spc.stop()
-
-    out["consensus"] = cached_cons
-    out["earnings"]  = cached_earn
-    return out
-
-
-def _get_quote(ticker: str) -> dict:
-    slug = _slug(ticker)
-    if not slug:
-        raise NotImplementedError(f"No Investing.com slug curated for {ticker}")
-    cached = _read_cache(slug)
+def _fetch_equity_page(slug: str) -> Optional[dict]:
+    """Equity landing page → returns the JSON-decoded store dict, or None."""
+    cached = _read_cache(slug, "equity")
     if cached:
         return cached
-    q = _fetch_quote(slug)
-    if not q:
-        raise ValueError(f"Investing.com fetch failed or 404 for slug={slug}")
-    _write_cache(slug, q)
-    return q
+    html = _get(f"{_BASE}/{slug}")
+    state = _next_data(html) if html else None
+    if not state:
+        return None
+    _write_cache(slug, "equity", state)
+    return state
 
 
-def _parse_number(s: Any) -> Optional[float]:
-    """'1,240.30' -> 1240.30; '+5.20 (+1.23%)' -> 5.20; None -> None."""
-    if s is None:
+def _fetch_consensus_page(slug: str) -> Optional[dict]:
+    cached = _read_cache(slug, "consensus")
+    if cached:
+        return cached
+    html = _get(f"{_BASE}/{slug}-consensus-estimates")
+    state = _next_data(html) if html else None
+    if not state:
         return None
-    if isinstance(s, (int, float)):
-        return float(s)
-    m = re.search(r"[-+]?\d[\d,]*\.?\d*", str(s).replace(",", ""))
-    if not m:
-        return None
-    try:
-        return float(m.group())
-    except ValueError:
-        return None
+    _write_cache(slug, "consensus", state)
+    return state
 
+
+def _fetch_earnings_page(slug: str) -> Optional[dict]:
+    cached = _read_cache(slug, "earnings")
+    if cached:
+        return cached
+    html = _get(f"{_BASE}/{slug}-earnings")
+    state = _next_data(html) if html else None
+    if not state:
+        return None
+    _write_cache(slug, "earnings", state)
+    return state
+
+
+# ── Field extractors ─────────────────────────────────────────────────────
+
+def _equity_instrument(state: dict) -> dict:
+    eq = state.get("equityStore") or {}
+    return (eq.get("instrument") or {}) if isinstance(eq, dict) else {}
+
+
+def _equity_price(state: dict) -> dict:
+    instr = _equity_instrument(state)
+    return instr.get("price") or {}
+
+
+def _equity_fundamental(state: dict) -> dict:
+    instr = _equity_instrument(state)
+    return instr.get("fundamental") or {}
+
+
+def _equity_key_metrics(state: dict) -> dict:
+    eq = state.get("equityStore") or {}
+    return (eq.get("keyMetrics") or {}) if isinstance(eq, dict) else {}
+
+
+def _equity_price_changes(state: dict) -> dict:
+    eq = state.get("equityStore") or {}
+    return (eq.get("priceChanges") or {}) if isinstance(eq, dict) else {}
+
+
+def _company_profile(state: dict) -> dict:
+    cp = state.get("companyProfileStore") or {}
+    return (cp.get("profile") or {}) if isinstance(cp, dict) else {}
+
+
+def _forecast_summary(state: dict) -> dict:
+    ce = state.get("consensusEstimatesStore") or {}
+    return (ce.get("forecastSummary") or {}) if isinstance(ce, dict) else {}
+
+
+def _earnings_forecasts(state: dict) -> list[dict]:
+    es = state.get("earningsStore") or {}
+    fc = es.get("forecasts") if isinstance(es, dict) else None
+    return fc if isinstance(fc, list) else []
+
+
+def _earnings_history(state: dict) -> list[dict]:
+    """Historical earnings rows with surprise %, used for the surprise-track
+    line. Investing's `earnings` list includes reported vs estimated EPS."""
+    es = state.get("earningsStore") or {}
+    eh = es.get("earnings") if isinstance(es, dict) else None
+    return eh if isinstance(eh, list) else []
+
+
+# ── Public Provider ──────────────────────────────────────────────────────
 
 class InvestingProvider(Provider):
     name = "investing"
 
     def __init__(self):
-        self._cache: dict[str, Optional[dict]] = {}
+        # Per-process in-memory cache. Disk cache (24h) sits underneath.
+        self._mem: dict[str, dict] = {}
 
-    def _quote(self, ticker: str) -> dict:
-        if ticker not in self._cache:
-            try:
-                self._cache[ticker] = _get_quote(ticker)
-            except NotImplementedError:
-                self._cache[ticker] = None
-                raise
-        if not self._cache[ticker]:
-            raise ValueError(f"Investing.com had no data for {ticker}")
-        return self._cache[ticker]
+    def _state(self, ticker: str, kind: str) -> dict:
+        slug = _slug(ticker)
+        if not slug:
+            raise NotImplementedError(f"No Investing.com slug for {ticker}")
+        key = f"{slug}::{kind}"
+        if key in self._mem:
+            return self._mem[key]
+        if kind == "equity":
+            state = _fetch_equity_page(slug)
+        elif kind == "consensus":
+            state = _fetch_consensus_page(slug)
+        elif kind == "earnings":
+            state = _fetch_earnings_page(slug)
+        else:
+            raise ValueError(f"unknown kind {kind!r}")
+        if not state:
+            raise ValueError(f"Investing.com {kind} page returned no usable data for {ticker}")
+        self._mem[key] = state
+        return state
+
+    # ── Required value-fetching methods (Provider interface) ─────────────
 
     def _fetch_current_price(self, ticker: str):
-        q = self._quote(ticker)
-        raw_id = persist_raw(self.name, ticker, "current_price", q)
-        price = _parse_number(q.get("price"))
-        if price is None:
-            raise ValueError("no parseable price field")
-        return price, (q.get("currency") or ""), "", raw_id
+        state = self._state(ticker, "equity")
+        price = _equity_price(state)
+        last = price.get("last")
+        if not isinstance(last, (int, float)):
+            raise ValueError("equity page had no `last` price")
+        raw_id = persist_raw(self.name, ticker, "current_price", price)
+        return float(last), (price.get("currency") or ""), "", raw_id
 
     def _fetch_dividend_yield(self, ticker: str):
-        q = self._quote(ticker)
-        raw_id = persist_raw(self.name, ticker, "dividend_yield", q)
-        kv = q.get("kv") or {}
-        for key in ("Dividend Yield", "Div Yield", "Dividend yield"):
-            if key in kv:
-                v = _parse_number(kv[key])
-                if v is not None:
-                    return v, "%", "", raw_id
-        raise ValueError("dividend yield not present in KV block")
-
-    # ── Sub-page-backed fields (consensus + earnings) ────────────
-
-    def _sub_pages(self, ticker: str) -> dict:
-        """Return the cached consensus+earnings bundle for this ticker.
-        Cached on the instance to avoid double-loading within one probe
-        run (Playwright is the expensive call)."""
-        attr = f"_sub_{ticker}"
-        if not hasattr(self, attr):
-            slug = _slug(ticker)
-            if not slug:
-                raise NotImplementedError(f"No slug for {ticker}")
-            setattr(self, attr, _fetch_sub_pages(slug))
-        return getattr(self, attr)
+        state = self._state(ticker, "equity")
+        fundamental = _equity_fundamental(state)
+        # Investing's fundamental block exposes the yield (in percent, already
+        # scaled) under the key `yield`. The legacy names are kept as fallbacks
+        # so a future Investing schema change doesn't break this provider.
+        for key in ("yield", "dividend_yield", "dividendYield", "div_yield"):
+            v = fundamental.get(key)
+            if isinstance(v, (int, float)) and v > 0:
+                return float(v), "%", "", persist_raw(self.name, ticker, "dividend_yield", fundamental)
+        km = _equity_key_metrics(state)
+        for key in ("dividendYield", "dividend_yield", "yield"):
+            v = km.get(key)
+            if isinstance(v, (int, float)) and v > 0:
+                return float(v), "%", "", persist_raw(self.name, ticker, "dividend_yield", km)
+        raise ValueError("dividend yield not in equity page fundamentals")
 
     def _fetch_target_price(self, ticker: str):
-        bundle = self._sub_pages(ticker)
-        cons = bundle.get("consensus") or {}
-        mean = cons.get("target_mean")
-        if mean is None:
-            raise ValueError("Investing.com consensus page had no target_mean")
-        raw_id = persist_raw(self.name, ticker, "target_price", bundle)
-        # Add n_analysts derived from buy/hold/sell counts so the renderer
-        # can show "X analysts covering" without falling back to MS.
-        n = sum(int(cons.get(k) or 0) for k in ("n_buy", "n_hold", "n_sell"))
+        state = self._state(ticker, "consensus")
+        fs = _forecast_summary(state)
+        mean = fs.get("target_price_consensus_mean")
+        if not isinstance(mean, (int, float)):
+            raise ValueError("Investing.com consensus page had no target_price_consensus_mean")
+        raw_id = persist_raw(self.name, ticker, "target_price", fs)
         return {
             "mean": float(mean),
-            "high": cons.get("target_high"),
-            "low":  cons.get("target_low"),
-            "n_analysts": n or None,
+            "high": fs.get("target_price_consensus_high"),
+            "low":  fs.get("target_price_consensus_low"),
+            "n_analysts": fs.get("number_of_estimates")
+                          or sum(int(fs.get(k) or 0) for k in (
+                              "number_of_analysts_buy", "number_of_analysts_hold",
+                              "number_of_analysts_sell")),
         }, "", "", raw_id
 
     def _fetch_rating_split(self, ticker: str):
-        bundle = self._sub_pages(ticker)
-        cons = bundle.get("consensus") or {}
-        if not any(cons.get(k) is not None for k in ("n_buy", "n_hold", "n_sell")):
-            raise ValueError("Investing.com consensus page had no buy/hold/sell counts")
-        raw_id = persist_raw(self.name, ticker, "rating_split", bundle)
-        buy  = int(cons.get("n_buy")  or 0)
-        hold = int(cons.get("n_hold") or 0)
-        sell = int(cons.get("n_sell") or 0)
-        consensus_label = (cons.get("consensus_label") or "").strip() or None
-        # Derive label from majority if not explicitly published.
-        if not consensus_label:
+        state = self._state(ticker, "consensus")
+        fs = _forecast_summary(state)
+        buy  = int(fs.get("number_of_analysts_buy")  or 0)
+        hold = int(fs.get("number_of_analysts_hold") or 0)
+        sell = int(fs.get("number_of_analysts_sell") or 0)
+        if not (buy or hold or sell):
+            raise ValueError("Investing.com consensus page had no analyst counts")
+        consensus = (fs.get("consensus_recommendation") or "").strip() or None
+        if not consensus:
             total = max(1, buy + hold + sell)
-            if buy / total >= 0.6: consensus_label = "BUY"
-            elif sell / total >= 0.4: consensus_label = "SELL"
-            elif buy > sell: consensus_label = "OUTPERFORM"
-            else: consensus_label = "HOLD"
+            if buy / total >= 0.6:   consensus = "BUY"
+            elif sell / total >= 0.4: consensus = "SELL"
+            elif buy > sell:          consensus = "OUTPERFORM"
+            else:                     consensus = "HOLD"
+        raw_id = persist_raw(self.name, ticker, "rating_split", fs)
         return {
             "buy": buy, "hold": hold, "sell": sell,
-            "total": buy + hold + sell, "consensus": consensus_label,
+            "total": buy + hold + sell, "consensus": consensus,
         }, "", "", raw_id
 
     def _fetch_valuation_forward(self, ticker: str):
-        bundle = self._sub_pages(ticker)
-        earn = bundle.get("earnings") or {}
-        if not any(earn.get(k) is not None for k in
-                    ("next_q_eps", "fy1_eps", "next_q_revenue", "fy1_revenue")):
-            raise ValueError("Investing.com earnings page had no forward estimates")
-        raw_id = persist_raw(self.name, ticker, "valuation_forward", bundle)
+        state = self._state(ticker, "earnings")
+        forecasts = _earnings_forecasts(state)
+        if not forecasts:
+            raise ValueError("Investing.com earnings page had no forecasts")
+        # Sort forecasts in calendar order so we know which is the next print
+        # and which roll up into FY+1 / FY+2 totals.
+        rows = sorted(
+            (f for f in forecasts if isinstance(f.get("reportYear"), int)),
+            key=lambda f: (f["reportYear"], f.get("reportMonth") or 0),
+        )
+        if not rows:
+            raise ValueError("Investing.com forecasts had no parseable rows")
+        nxt = rows[0]
+        # FY aggregates: sum the first 4 quarters that fall in the same year
+        # as the next-Q's row (or the next 4 calendar quarters if year split).
+        def _fy_agg(year: int) -> tuple[Optional[float], Optional[float]]:
+            year_rows = [r for r in rows if r.get("reportYear") == year]
+            if not year_rows:
+                return None, None
+            rev = sum(r["revenue"] for r in year_rows if isinstance(r.get("revenue"), (int, float))) or None
+            eps = sum(r["eps"]     for r in year_rows if isinstance(r.get("eps"),     (int, float))) or None
+            return rev, eps
+        fy1_year = nxt["reportYear"]
+        fy2_year = fy1_year + 1
+        rev_fy1, eps_fy1 = _fy_agg(fy1_year)
+        rev_fy2, eps_fy2 = _fy_agg(fy2_year)
+        # "Period" string Investing implies: Q from reportMonth.
+        rm = nxt.get("reportMonth") or 0
+        qn = ((rm - 1) // 3 + 1) if rm else 0
+        next_q_period = f"Q{qn} {nxt['reportYear']}" if qn else ""
+        raw_id = persist_raw(self.name, ticker, "valuation_forward", {"forecasts": rows})
         return {
-            # FY+1
-            "fy1_year":   earn.get("fy1_year"),
-            "eps_fy1":    earn.get("fy1_eps"),
-            "revenue_fy1": earn.get("fy1_revenue"),
-            # FY+2
-            "fy2_year":   earn.get("fy2_year"),
-            "eps_fy2":    earn.get("fy2_eps"),
-            "revenue_fy2": earn.get("fy2_revenue"),
-            # Next reported quarter
-            "next_q_period":      earn.get("next_q_period"),
-            "next_q_report_date": earn.get("next_q_report_date"),
-            "eps_next_q":         earn.get("next_q_eps"),
-            "revenue_next_q":     earn.get("next_q_revenue"),
+            "fy1_year":   fy1_year,
+            "eps_fy1":    eps_fy1,
+            "revenue_fy1": rev_fy1,
+            "fy2_year":   fy2_year,
+            "eps_fy2":    eps_fy2,
+            "revenue_fy2": rev_fy2,
+            "next_q_period":  next_q_period,
+            "next_q_report_date": None,
+            "eps_next_q":     nxt.get("eps"),
+            "revenue_next_q": nxt.get("revenue"),
         }, "", "", raw_id
 
     def _fetch_income_statement_quarterly(self, ticker: str):
-        """Surprise history is a quarterly fact, not a forecast, so we
-        map it to income_statement_quarterly. The renderer can use the
-        last-4 rows for slide-2 "track record" context."""
-        bundle = self._sub_pages(ticker)
-        earn = bundle.get("earnings") or {}
-        history = earn.get("surprise_history") or []
+        """Surprise history — used by the thesis renderer as a track-record
+        anchor. Investing's `earnings` list pre-computes the surprise%."""
+        state = self._state(ticker, "earnings")
+        history = _earnings_history(state)
         if not history:
-            raise ValueError("Investing.com earnings page had no surprise history")
-        raw_id = persist_raw(self.name, ticker, "income_statement_quarterly", bundle)
-        return {
-            "surprise_history": history,
-        }, "", "", raw_id
+            raise ValueError("Investing.com earnings page had no history rows")
+        # Normalize to the shape the renderer already consumes (period_end,
+        # eps_actual, eps_estimate, eps_surprise_pct, revenue_actual,
+        # revenue_estimate, revenue_surprise_pct).
+        out: list[dict] = []
+        for row in history:
+            if not isinstance(row, dict):
+                continue
+            yr = row.get("reportYear")
+            mo = row.get("reportMonth") or 0
+            qn = ((mo - 1) // 3 + 1) if isinstance(mo, int) and mo else 0
+            period = f"Q{qn} {yr}" if qn and yr else ""
+            out.append({
+                "period": period,
+                "eps_actual":    row.get("eps") or row.get("epsActual"),
+                "eps_estimate":  row.get("epsForecast") or row.get("epsEstimate"),
+                "eps_surprise_pct":      row.get("epsSurprisePct"),
+                "revenue_actual":        row.get("revenue") or row.get("revenueActual"),
+                "revenue_estimate":      row.get("revenueForecast") or row.get("revenueEstimate"),
+                "revenue_surprise_pct":  row.get("revenueSurprisePct"),
+            })
+        if not out:
+            raise ValueError("Investing.com history could not be normalised")
+        raw_id = persist_raw(self.name, ticker, "income_statement_quarterly", {"surprise_history": out})
+        return {"surprise_history": out}, "", "", raw_id

@@ -75,7 +75,7 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
                     [sys.executable, "-m", "scripts.daily_refresh",
                      f"--cadence={cadence}",
                      f"--tickers={ticker}",
-                     "--only=yahoo,marketscreener,macro,ishares,commodities"],
+                     "--only=yahoo,marketscreener,investing,macro,ishares,commodities"],
                     timeout=180, check=False,
                 )
             except Exception:
