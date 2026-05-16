@@ -48,6 +48,17 @@ _CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "cache" / "llm_summ
 
 # ── Context builder ──────────────────────────────────────────────
 
+def _pretty_rating_label(raw) -> Optional[str]:
+    """Normalise rating enums like 'STRONG_BUY' -> 'Strong Buy' so the LLM
+    prompt and the slide labels agree. Returns None for empty input."""
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    return " ".join(p.capitalize() for p in s.replace("_", " ").replace("-", " ").split())
+
+
 def _fmt_num(v: Any, *, suffix: str = "") -> str:
     if v is None:
         return "—"
@@ -183,7 +194,7 @@ def build_context(ticker: str) -> dict:
         "target_high": target.get("high"),
         "target_low":  target.get("low"),
         "n_analysts":  rating.get("total") or target.get("n_analysts"),
-        "rating_consensus": rating.get("consensus"),
+        "rating_consensus": _pretty_rating_label(rating.get("consensus")),
         "buy_count":  rating.get("buy"),
         "hold_count": rating.get("hold"),
         "sell_count": rating.get("sell"),
