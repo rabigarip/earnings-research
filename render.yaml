@@ -46,9 +46,10 @@ services:
   # service exposes these via /api/jabal/{ticker}/deck.pptx — INSTANT
   # downloads on the consumer's request path (no compute at request time).
   #
-  # Note: Investing.com (Playwright/Chromium) is intentionally excluded
-  # from the cron because Chromium isn't reliable on Render's free tier.
-  # Add `--include-investing` once a paid runtime + xvfb-run wrapper land.
+  # Investing.com is now included by default — the provider uses curl_cffi
+  # (Chrome TLS impersonation) to bypass Cloudflare, no headless browser
+  # needed. Adds price / dividend / target / ratings / forecasts for every
+  # ticker that has a curated slug in probe_investing._SLUGS.
   - type: cron
     name: jabal-panel-refresh
     runtime: python

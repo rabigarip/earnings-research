@@ -92,10 +92,10 @@ def _load_providers(only: set[str] | None):
             providers["commodities"] = CommoditiesProvider()
         except Exception as exc:
             print(f"  [skip] commodities: {exc}", file=sys.stderr)
-    # Investing.com is opt-in by default because the Playwright launch
-    # is expensive and (when not headless) pops a visible browser. Pass
-    # `--only ...,investing` to enable.
-    if "investing" in (only or set()):
+    # Investing.com: HTTP-only via curl_cffi (Cloudflare-bypass through
+    # Chrome TLS impersonation). Cheap to run, default-on. The provider
+    # short-circuits on tickers with no curated slug.
+    if not only or "investing" in only:
         try:
             from src.providers.probe_investing import InvestingProvider
             providers["investing"] = InvestingProvider()
