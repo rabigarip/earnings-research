@@ -361,6 +361,28 @@ def render_snapshot_slide(prs, data: SnapshotData):
     return slide
 
 
+# ── Rating-label prettifier ───────────────────────────────────
+
+def _pretty_rating(raw) -> str:
+    """Normalise consensus-rating strings from any provider into the
+    title-case form analysts use in print: e.g.
+        'STRONG_BUY' -> 'Strong Buy'
+        'OUTPERFORM' -> 'Outperform'
+        'buy'        -> 'Buy'
+        'hold/maintain' -> 'Hold/Maintain'
+    Returns '' on empty/None input. Underscores and lower-case bleed
+    through from Investing.com's enum (consensus_recommendation).
+    """
+    if raw is None:
+        return ""
+    s = str(raw).strip()
+    if not s:
+        return ""
+    s = s.replace("_", " ").replace("-", " ")
+    # Title-case but preserve runs of letters as words
+    return " ".join(part.capitalize() for part in s.split())
+
+
 # ── Sources-line builder ──────────────────────────────────────
 
 def _sources_line(cv: dict) -> str:
@@ -419,7 +441,7 @@ def _derive_highlights(*, cv: dict, currency: str, current_price,
     # to the Investing surprise track when present.
     rating_label = ""
     if isinstance(rs, dict):
-        rating_label = (rs.get("consensus") or "").upper()
+        rating_label = _pretty_rating(rs.get("consensus"))
     if rating_label and n_analysts:
         rows.append(("EARNINGS", f"Consensus {rating_label} from {n_analysts} analysts covering."))
     elif n_analysts:
@@ -475,16 +497,17 @@ def _derive_highlights(*, cv: dict, currency: str, current_price,
         sell = int(rs.get("sell", 0) or 0)
         total = buy + hold + sell
         if total == 0 and n_analysts > 0:
-            label = (rs.get("consensus") or "").upper()
-            if any(t in label for t in ("BUY", "OUTPERFORM", "ACCUMULATE")):
+            raw = (rs.get("consensus") or "").upper()
+            pretty = _pretty_rating(rs.get("consensus"))
+            if any(t in raw for t in ("BUY", "OUTPERFORM", "ACCUMULATE")):
                 rows.append(("RISK",
-                    f"Crowded long — consensus {label.title()} across {n_analysts} analysts raises the expectations bar."))
-            elif any(t in label for t in ("SELL", "UNDERPERFORM", "REDUCE")):
+                    f"Crowded long — consensus {pretty} across {n_analysts} analysts raises the expectations bar."))
+            elif any(t in raw for t in ("SELL", "UNDERPERFORM", "REDUCE")):
                 rows.append(("RISK",
-                    f"Tape skewed bearish — consensus {label.title()} across {n_analysts} analysts."))
-            elif label:
+                    f"Tape skewed bearish — consensus {pretty} across {n_analysts} analysts."))
+            elif pretty:
                 rows.append(("RISK",
-                    f"View dispersion — consensus {label.title()} across {n_analysts} analysts."))
+                    f"View dispersion — consensus {pretty} across {n_analysts} analysts."))
             else:
                 rows.append(("RISK", f"{n_analysts} analysts covering; breakdown not disclosed."))
         elif total > 0:
@@ -624,7 +647,7 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
         # MS shape varies: ideally {"buy":6,"hold":3,"sell":1,"total":10,"consensus":"OUTPERFORM"}
         # but sometimes only {"consensus":"OUTPERFORM"}.
         n_analysts = int(rating_split.get("total", 0) or 0)
-        rating = (rating_split.get("consensus") or "").upper() or "—"
+        rating = _pretty_rating(rating_split.get("consensus")) or "—"
     # Fall back to target_price.n_analysts if rating_split didn't carry the total.
     if not n_analysts and isinstance(target, dict):
         n_analysts = int(target.get("n_analysts", 0) or 0)
