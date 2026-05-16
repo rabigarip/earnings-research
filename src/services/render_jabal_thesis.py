@@ -648,9 +648,15 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
             "Feedstock cost outlook and supply-chain commentary",
             "Updated capex schedule and any project-pipeline updates",
         ],
-        sources_line=", ".join(sorted({
-            c.canonical_source for c in cv.values()
-        })) or "free-source stack",
+        sources_line=_sources_line_from_cv(cv),
         analyst_name=analyst_name,
         gen_date=gen_date or datetime.utcnow().strftime("%d %b %Y"),
     )
+
+
+def _sources_line_from_cv(cv: dict) -> str:
+    """Re-export of render_jabal_snapshot._sources_line so all three
+    slide builders attribute the same way (every contributing provider,
+    not just per-field winners)."""
+    from src.services.render_jabal_snapshot import _sources_line
+    return _sources_line(cv)

@@ -22,6 +22,8 @@ from datetime import datetime
 from typing import Optional
 
 from pptx.enum.shapes import MSO_SHAPE
+
+from src.services.render_jabal_snapshot import _sources_line
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 from pptx.util import Inches, Pt
 
@@ -492,9 +494,7 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
         target_range=(target_low, target_high) if (target_low or target_high) else None,
         target_implied_pct=implied,
         broker_actions=broker_actions,
-        sources_line=", ".join(sorted({
-            c.canonical_source for c in cv.values()
-        })) or "free-source stack",
+        sources_line=_sources_line(cv),
         analyst_name=analyst_name,
         gen_date=gen_date or datetime.utcnow().strftime("%d %b %Y"),
     )
