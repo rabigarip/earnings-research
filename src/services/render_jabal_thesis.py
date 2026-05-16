@@ -354,8 +354,88 @@ def _yoy_bps(curr_pct, prev_pct) -> float | None:
         return None
 
 
+def _ms_quarterly_split(ms_q: dict | None) -> tuple[dict, dict, dict]:
+    """From `ms_quarterly_forecasts.quarterly`, return (next_est, latest_actual,
+    prior_year_actual). Each is a dict {metric_key: value}.
+
+    MS interleaves actuals and forecasts in one period list. We split by
+    whether the announcement_date is in the past (actual) or future
+    (estimate). Falls back to empty dicts on any shape problem.
+    """
+    empty = ({}, {}, {})
+    if not isinstance(ms_q, dict):
+        return empty
+    q = ms_q.get("quarterly") or {}
+    if not isinstance(q, dict):
+        return empty
+    periods   = q.get("periods")  or []
+    net_sales = q.get("net_sales") or []
+    ebitda    = q.get("ebitda")   or []
+    nii       = q.get("nii")      or []   # banks (when MS publishes it)
+    net_inc   = q.get("net_income") or []
+    eps       = q.get("eps")      or []
+    ann       = q.get("announcement_dates") or []
+    n = len(periods)
+    if not n:
+        return empty
+    # Pad short lists with None so zip aligns.
+    def _pad(xs): return list(xs) + [None] * (n - len(xs))
+    rows = list(zip(periods, _pad(net_sales), _pad(ebitda), _pad(nii),
+                     _pad(net_inc), _pad(eps), _pad(ann)))
+
+    from datetime import datetime as _dt
+    today = _dt.now().date()
+
+    def _is_estimate(date_str) -> bool:
+        if not date_str:
+            # No announcement date — assume estimate if any other estimate-like
+            # value still pending.
+            return True
+        try:
+            d = _dt.fromisoformat(str(date_str)[:10]).date()
+            return d >= today
+        except Exception:
+            return True
+
+    actuals = [r for r in rows if not _is_estimate(r[6])]
+    estimates = [r for r in rows if _is_estimate(r[6])]
+
+    def _to_dict(r):
+        p, rev, eb, n_, ni, e, ad = r
+        return {
+            "period": p, "revenue": rev, "ebitda": eb,
+            "nii": n_, "net_income": ni, "eps": e, "ann": ad,
+        }
+
+    next_est = _to_dict(estimates[0]) if estimates else {}
+    latest_actual = _to_dict(actuals[-1]) if actuals else {}
+
+    # Prior-year same quarter: parse "Q1 2025" / "1Q25" / "2025-Q1" formats.
+    import re as _r
+    prior = {}
+    if latest_actual.get("period"):
+        s = str(latest_actual["period"])
+        m = _r.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})", s, _r.I) or _r.search(r"(\d{4})-Q(\d)", s, _r.I)
+        if m:
+            year = int(m.group(1) or m.group(4))
+            qn = int(m.group(2) or m.group(3))
+            target_year = year - 1
+            for a in actuals:
+                ap = str(a[0])
+                am = _r.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})", ap, _r.I) or _r.search(r"(\d{4})-Q(\d)", ap, _r.I)
+                if not am:
+                    continue
+                a_year = int(am.group(1) or am.group(4))
+                a_q = int(am.group(2) or am.group(3))
+                if a_year == target_year and a_q == qn:
+                    prior = _to_dict(a)
+                    break
+    return next_est, latest_actual, prior
+
+
 def _build_estimates_rows(cv: dict, quarterly: list | None = None,
-                            is_bank: bool = False) -> list[dict]:
+                            is_bank: bool = False,
+                            ms_quarterly_forecasts: dict | None = None) -> list[dict]:
     """Estimates table rows.
 
     Non-bank: Revenue / EBITDA / Net Income / EPS / EBITDA Margin.
@@ -378,10 +458,49 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
                             if isinstance(fwd.get(k), (int, float))), None)
     eps_q_consensus = next((fwd.get(k) for k in ("eps_next_q",)
                             if isinstance(fwd.get(k), (int, float))), None)
+    ebitda_q_consensus = None
+    ni_q_consensus = None
+    nii_q_consensus = None
 
-    # YoY: pull latest actual + prior-year same quarter from passed history.
+    # MS /finances/ quarterly forecasts — the canonical_store doesn't carry
+    # Revenue/EBITDA/NI consensus for the next quarter, but the MS payload
+    # does. When the upstream pipeline passed it through, use it to populate
+    # the CONSENSUS column AND to compute YoY (latest actual vs prior-year
+    # same quarter from the same MS table). Falls back to canonical_store +
+    # payload.quarterly_actuals otherwise.
     yoy_rev = yoy_ebitda = yoy_nii = yoy_ni = yoy_eps = yoy_margin = None
-    if quarterly:
+    used_ms = False
+    if ms_quarterly_forecasts:
+        next_est, latest, prior = _ms_quarterly_split(ms_quarterly_forecasts)
+        unit_scale = 1.0
+        if isinstance(ms_quarterly_forecasts.get("unit_scale"), (int, float)):
+            unit_scale = float(ms_quarterly_forecasts["unit_scale"]) or 1.0
+        def _scale(v):
+            return v * unit_scale if isinstance(v, (int, float)) else v
+        if next_est:
+            rev_q_consensus    = rev_q_consensus    or _scale(next_est.get("revenue"))
+            ebitda_q_consensus = _scale(next_est.get("ebitda"))
+            ni_q_consensus     = _scale(next_est.get("net_income"))
+            nii_q_consensus    = _scale(next_est.get("nii"))
+            eps_q_consensus    = eps_q_consensus    or next_est.get("eps")
+        if latest and prior:
+            yoy_rev    = _yoy_pct(latest.get("revenue"),    prior.get("revenue"))
+            yoy_ebitda = _yoy_pct(latest.get("ebitda"),     prior.get("ebitda"))
+            yoy_nii    = _yoy_pct(latest.get("nii"),        prior.get("nii"))
+            yoy_ni     = _yoy_pct(latest.get("net_income"), prior.get("net_income"))
+            yoy_eps    = _yoy_pct(latest.get("eps"),        prior.get("eps"))
+            curr_rev = latest.get("revenue") or 0
+            prev_rev = prior.get("revenue")  or 0
+            curr_eb  = latest.get("ebitda")
+            prev_eb  = prior.get("ebitda")
+            curr_margin = (curr_eb / curr_rev * 100) if curr_eb and curr_rev else None
+            prev_margin = (prev_eb / prev_rev * 100) if prev_eb and prev_rev else None
+            yoy_margin = _yoy_bps(curr_margin, prev_margin)
+            used_ms = True
+
+    # Yahoo quarterly_actuals fallback (used when MS forecast block was empty
+    # or didn't yield a YoY pair).
+    if not used_ms and quarterly:
         # Quarterly list is expected to be FinancialPeriod objects (or dicts);
         # render side accepts both since serialization paths differ.
         def _g(rec, key):
@@ -425,16 +544,16 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
         # the free providers don't reliably expose.
         return [
             _row("Revenue",     _fmt_money_b(rev_q_consensus), yoy_rev),
-            _row("NII",         None,                          yoy_nii),
-            _row("Net Income",  None,                          yoy_ni),
+            _row("NII",         _fmt_money_b(nii_q_consensus), yoy_nii),
+            _row("Net Income",  _fmt_money_b(ni_q_consensus),  yoy_ni),
             _row("EPS",         eps_consensus_str,             yoy_eps),
         ]
     return [
-        _row("Revenue",        _fmt_money_b(rev_q_consensus), yoy_rev),
-        _row("EBITDA",         None,                          yoy_ebitda),
-        _row("Net Income",     None,                          yoy_ni),
-        _row("EPS",            eps_consensus_str,             yoy_eps),
-        _row("EBITDA Margin",  None,                          yoy_margin),
+        _row("Revenue",        _fmt_money_b(rev_q_consensus),   yoy_rev),
+        _row("EBITDA",         _fmt_money_b(ebitda_q_consensus), yoy_ebitda),
+        _row("Net Income",     _fmt_money_b(ni_q_consensus),    yoy_ni),
+        _row("EPS",            eps_consensus_str,                yoy_eps),
+        _row("EBITDA Margin",  None,                             yoy_margin),
     ]
 
 
@@ -445,6 +564,7 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
                         watch_list: Optional[list[str]] = None,
                         quarterly: Optional[list] = None,
                         is_bank: bool = False,
+                        ms_quarterly_forecasts: Optional[dict] = None,
                         ) -> ThesisData:
     cv = get_all_fields(ticker)
     commodities_obs = get_observations_by_provider(ticker, "commodities")
@@ -461,7 +581,8 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
         llm = None
     summary = (llm or {}).get("thesis_paragraph") or _template_exec_summary(
         cv, commodities_obs, macro_obs)
-    rows = _build_estimates_rows(cv, quarterly=quarterly, is_bank=is_bank)
+    rows = _build_estimates_rows(cv, quarterly=quarterly, is_bank=is_bank,
+                                    ms_quarterly_forecasts=ms_quarterly_forecasts)
 
     # Compose the table footnote: lead with the next-Q anchor (date,
     # consensus source, analyst count) since that's the strongest data
