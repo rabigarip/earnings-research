@@ -45,28 +45,27 @@ def _fmt_mcap_usd(v) -> str:
 
 
 def _peer_row_from_investing(ticker: str) -> dict | None:
-    """Build a peer-table row from Investing.com when yfinance can't resolve
-    the ticker (ADX / MSM listings 404 on yfinance).
+    """Build a peer-table row from Investing.com using the same three-layer
+    fallback as probe_investing (24h cache → live network → repo-tracked
+    snapshot under data/investing/). Returns None when the ticker has no
+    curated slug AND no snapshot.
 
-    Looks up the slug via investing.com's public search API, fetches the
-    equity page, decodes the __NEXT_DATA__ JSON and extracts name, market
-    cap, P/E, dividend yield, and 1Y return. Returns None if any step
-    fails — caller falls back to a ticker-only row.
+    Critically, this routes through _fetch_equity_page rather than its own
+    curl_cffi call so it picks up the data/investing/ snapshot on Render
+    (Cloudflare blocks Render's egress IP from reaching Investing live).
     """
     try:
-        from curl_cffi import requests as cr
+        from src.providers.probe_investing import (
+            _slug, _fetch_equity_page, _equity_instrument,
+        )
     except ImportError:
         return None
-    import re as _re, json as _json
-    # Use the curated slug if we have one; otherwise search by ticker symbol.
-    slug = None
-    try:
-        from src.providers.probe_investing import _SLUGS as _CURATED
-        slug = _CURATED.get(ticker.upper())
-    except Exception:
-        pass
+    slug = _slug(ticker)
     if not slug:
+        # Search the API only as last resort — it also fails from Render's
+        # blocked IP, so most non-curated tickers can't be resolved live.
         try:
+            from curl_cffi import requests as cr
             r = cr.get(
                 f"https://api.investing.com/api/search/v2/search?q={ticker.upper().replace('.','+')}&page=1&size=10",
                 impersonate="chrome120", timeout=10, headers={"domain-id": "www"},
@@ -81,46 +80,33 @@ def _peer_row_from_investing(ticker: str) -> dict | None:
             return None
     if not slug:
         return None
-    # Fetch the equity page and pull __NEXT_DATA__.
-    try:
-        r = cr.get(f"https://www.investing.com/equities/{slug}",
-                   impersonate="chrome120", timeout=15,
-                   headers={"Accept-Language": "en-US,en;q=0.9"})
-        if r.status_code != 200:
-            return None
-        m = _re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, _re.S)
-        if not m:
-            return None
-        d = _json.loads(m.group(1))
-        state = d.get("props", {}).get("pageProps", {}).get("state") or {}
-        eq = state.get("equityStore")
-        if isinstance(eq, str): eq = _json.loads(eq)
-        if not isinstance(eq, dict): return None
-        instr = eq.get("instrument") or {}
-        price_block = instr.get("price") or {}
-        fund = instr.get("fundamental") or {}
-        name = (instr.get("englishName") or {}).get("shortName") \
-            or (instr.get("englishName") or {}).get("fullName") \
-            or ticker
-        currency = (price_block.get("currency") or "").upper()
-        mcap = fund.get("marketCapRaw")
-        mcap_fmt = _fmt_mcap_usd(mcap) if currency == "USD" else _fmt_mcap_usd(mcap).replace("$", "")
-        pe = fund.get("ratio") if isinstance(fund.get("ratio"), (int, float)) else None
-        pe_fmt = f"{pe:.1f}x" if pe else "—"
-        div = fund.get("yield")
-        div_fmt = f"{float(div):.2f}%" if isinstance(div, (int, float)) and div > 0 else "—"
-        ret_1y = fund.get("oneYearReturn") if isinstance(fund.get("oneYearReturn"), (int, float)) else None
-        ret_1y_fmt = f"{ret_1y:+.1f}%" if isinstance(ret_1y, (int, float)) else "—"
-        return {
-            "name": name, "ticker": ticker,
-            "market_cap_fmt": mcap_fmt,
-            "pe": pe, "pe_fmt": pe_fmt,
-            "div_yield_fmt": div_fmt,
-            "ret_1y": ret_1y, "ret_1y_fmt": ret_1y_fmt,
-        }
-    except Exception as exc:
-        logger.warning("Investing peer fetch failed for %s: %s", ticker, exc)
+    state = _fetch_equity_page(slug)
+    if not state:
         return None
+    instr = _equity_instrument(state)
+    if not instr:
+        return None
+    price_block = instr.get("price") or {}
+    fund = instr.get("fundamental") or {}
+    name = (instr.get("englishName") or {}).get("shortName") \
+        or (instr.get("englishName") or {}).get("fullName") \
+        or ticker
+    currency = (price_block.get("currency") or "").upper()
+    mcap = fund.get("marketCapRaw")
+    mcap_fmt = _fmt_mcap_usd(mcap) if currency == "USD" else _fmt_mcap_usd(mcap).replace("$", "")
+    pe = fund.get("ratio") if isinstance(fund.get("ratio"), (int, float)) else None
+    pe_fmt = f"{pe:.1f}x" if pe else "—"
+    div = fund.get("yield")
+    div_fmt = f"{float(div):.2f}%" if isinstance(div, (int, float)) and div > 0 else "—"
+    ret_1y = fund.get("oneYearReturn") if isinstance(fund.get("oneYearReturn"), (int, float)) else None
+    ret_1y_fmt = f"{ret_1y:+.1f}%" if isinstance(ret_1y, (int, float)) else "—"
+    return {
+        "name": name, "ticker": ticker,
+        "market_cap_fmt": mcap_fmt,
+        "pe": pe, "pe_fmt": pe_fmt,
+        "div_yield_fmt": div_fmt,
+        "ret_1y": ret_1y, "ret_1y_fmt": ret_1y_fmt,
+    }
 
 
 def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
