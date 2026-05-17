@@ -433,9 +433,64 @@ def _ms_quarterly_split(ms_q: dict | None) -> tuple[dict, dict, dict]:
     return next_est, latest_actual, prior
 
 
+def _investing_actuals_yoy(ticker: str) -> dict:
+    """Pull latest-actual + prior-year-same-quarter from Investing.com's
+    earnings page snapshot, returning {revenue, eps} YoY percentages.
+
+    This is the third-tier YoY fallback for the slide-2 table: used when
+    Yahoo's quarterly_actuals are empty (yfinance-blocked tickers) AND MS
+    /finances/ didn't yield a clean actual/forecast split. Investing's
+    earnings history exposes the same shape (epsActual, revenueActual,
+    reportYear, reportMonth) for all 11 target tickers.
+
+    Returns {} when the snapshot is missing or two actuals can't be paired.
+    """
+    try:
+        from src.providers.probe_investing import _fetch_earnings_page, _slug
+    except ImportError:
+        return {}
+    slug = _slug(ticker)
+    if not slug:
+        return {}
+    state = _fetch_earnings_page(slug)
+    if not state:
+        return {}
+    es = state.get("earningsStore") or {}
+    if not isinstance(es, dict):
+        return {}
+    rows = es.get("earnings") or []
+    actuals = [r for r in rows
+                if isinstance(r, dict)
+                and isinstance(r.get("epsActual"), (int, float))
+                and isinstance(r.get("reportYear"), int)
+                and isinstance(r.get("reportMonth"), int)]
+    if not actuals:
+        return {}
+    # actuals come newest-first; latest is the head
+    latest = actuals[0]
+    latest_year = latest["reportYear"]
+    latest_qm = ((latest["reportMonth"] - 1) // 3 + 1)
+    prior = next((
+        r for r in actuals[1:]
+        if r["reportYear"] == latest_year - 1
+        and ((r["reportMonth"] - 1) // 3 + 1) == latest_qm
+    ), None)
+    if not prior:
+        return {}
+    out = {}
+    rev_l, rev_p = latest.get("revenueActual"), prior.get("revenueActual")
+    if isinstance(rev_l, (int, float)) and isinstance(rev_p, (int, float)) and rev_p:
+        out["revenue"] = (rev_l / rev_p - 1.0) * 100
+    eps_l, eps_p = latest.get("epsActual"), prior.get("epsActual")
+    if isinstance(eps_l, (int, float)) and isinstance(eps_p, (int, float)) and eps_p:
+        out["eps"] = (eps_l / eps_p - 1.0) * 100
+    return out
+
+
 def _build_estimates_rows(cv: dict, quarterly: list | None = None,
                             is_bank: bool = False,
-                            ms_quarterly_forecasts: dict | None = None) -> list[dict]:
+                            ms_quarterly_forecasts: dict | None = None,
+                            ticker: str = "") -> list[dict]:
     """Estimates table rows.
 
     Non-bank: Revenue / EBITDA / Net Income / EPS / EBITDA Margin.
@@ -526,6 +581,16 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
             prev_margin = (prev_eb / prev_rev * 100) if prev_eb and prev_rev else None
             yoy_margin = _yoy_bps(curr_margin, prev_margin)
 
+    # Investing.com earnings page as last-resort YoY (revenue + eps only).
+    # Required for yfinance-blocked tickers where MS forecast block lacks
+    # historical actuals or the announcement-date split fails.
+    if (yoy_rev is None or yoy_eps is None) and ticker:
+        inv = _investing_actuals_yoy(ticker)
+        if yoy_rev is None and isinstance(inv.get("revenue"), (int, float)):
+            yoy_rev = inv["revenue"]
+        if yoy_eps is None and isinstance(inv.get("eps"), (int, float)):
+            yoy_eps = inv["eps"]
+
     def _row(metric: str, consensus_str: str | None, yoy_val) -> dict:
         return {
             "metric": metric,
@@ -582,7 +647,8 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
     summary = (llm or {}).get("thesis_paragraph") or _template_exec_summary(
         cv, commodities_obs, macro_obs)
     rows = _build_estimates_rows(cv, quarterly=quarterly, is_bank=is_bank,
-                                    ms_quarterly_forecasts=ms_quarterly_forecasts)
+                                    ms_quarterly_forecasts=ms_quarterly_forecasts,
+                                    ticker=ticker)
 
     # Compose the table footnote: lead with the next-Q anchor (date,
     # consensus source, analyst count) since that's the strongest data
