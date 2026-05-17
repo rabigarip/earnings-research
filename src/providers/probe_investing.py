@@ -424,6 +424,24 @@ class InvestingProvider(Provider):
         raw_id = persist_raw(self.name, ticker, "current_price", price)
         return float(last), (price.get("currency") or ""), "", raw_id
 
+    def _fetch_market_cap(self, ticker: str):
+        """Market cap in raw listing-currency units (e.g. HKD for HK names).
+
+        Important for HK tickers where MarketScreener appears to report only
+        the H-share count, underestimating total market cap by ~13%.
+        Investing's fundamental.marketCapRaw includes both A- and H-share
+        floats and matches the live equity page.
+        """
+        state = self._state(ticker, "equity")
+        fund = _equity_fundamental(state)
+        mcap = fund.get("marketCapRaw")
+        if not isinstance(mcap, (int, float)) or mcap <= 0:
+            raise ValueError("equity page had no marketCapRaw")
+        price = _equity_price(state)
+        currency = (price.get("currency") or "").upper()
+        raw_id = persist_raw(self.name, ticker, "market_cap", fund)
+        return float(mcap), currency, "", raw_id
+
     def _fetch_dividend_yield(self, ticker: str):
         state = self._state(ticker, "equity")
         fundamental = _equity_fundamental(state)
