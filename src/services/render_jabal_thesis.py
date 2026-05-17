@@ -427,40 +427,60 @@ def _ms_quarterly_split(ms_q: dict | None) -> tuple[dict, dict, dict]:
     next_est = _to_dict(estimates[0]) if estimates else {}
     latest_actual = _to_dict(actuals[-1]) if actuals else {}
 
-    # Prior-year same quarter: parse "Q1 2025" / "1Q25" / "2025-Q1" formats.
+    # Helper: parse a period label ("Q2 2026" / "2Q26" / "2026-Q2" / "2026Q2")
+    # into (year, quarter). Returns None on no match.
     import re as _r
+    def _parse_q(period: str):
+        s = str(period or "")
+        m = (_r.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})", s, _r.I)
+             or _r.search(r"(\d{4})-Q(\d)", s, _r.I)
+             or _r.search(r"(\d{4})Q(\d)", s, _r.I))
+        if not m:
+            return None
+        y = int(m.group(1) or m.group(4))
+        q = int(m.group(2) or m.group(3))
+        return (y, q)
+
+    def _find_in_actuals(target_year, target_q):
+        for a in actuals:
+            yq = _parse_q(a[0])
+            if yq == (target_year, target_q):
+                return _to_dict(a)
+        return None
+
+    # Prior-year-same-Q for the LATEST actual (used for last-reported YoY).
     prior = {}
     if latest_actual.get("period"):
-        s = str(latest_actual["period"])
-        m = _r.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})", s, _r.I) or _r.search(r"(\d{4})-Q(\d)", s, _r.I)
-        if m:
-            year = int(m.group(1) or m.group(4))
-            qn = int(m.group(2) or m.group(3))
-            target_year = year - 1
-            for a in actuals:
-                ap = str(a[0])
-                am = _r.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})", ap, _r.I) or _r.search(r"(\d{4})-Q(\d)", ap, _r.I)
-                if not am:
-                    continue
-                a_year = int(am.group(1) or am.group(4))
-                a_q = int(am.group(2) or am.group(3))
-                if a_year == target_year and a_q == qn:
-                    prior = _to_dict(a)
-                    break
-    return next_est, latest_actual, prior
+        yq = _parse_q(latest_actual["period"])
+        if yq:
+            prior = _find_in_actuals(yq[0] - 1, yq[1]) or {}
+
+    # Prior-year-same-Q for the NEXT estimate (used for forecast-YoY in the
+    # "Q<n> Earnings Expectations" table — the analytically correct YoY for
+    # a preview note). Returned as a third element so callers can pick the
+    # right pairing.
+    prior_of_next = {}
+    if next_est.get("period"):
+        yq = _parse_q(next_est["period"])
+        if yq:
+            prior_of_next = _find_in_actuals(yq[0] - 1, yq[1]) or {}
+
+    return next_est, latest_actual, prior, prior_of_next
 
 
 def _investing_actuals_yoy(ticker: str) -> dict:
-    """Pull latest-actual + prior-year-same-quarter from Investing.com's
-    earnings page snapshot, returning {revenue, eps} YoY percentages.
+    """Pull NEXT forecast vs prior-year-same-quarter actual from Investing's
+    earnings page, returning {revenue, eps} YoY percentages.
 
-    This is the third-tier YoY fallback for the slide-2 table: used when
-    Yahoo's quarterly_actuals are empty (yfinance-blocked tickers) AND MS
-    /finances/ didn't yield a clean actual/forecast split. Investing's
-    earnings history exposes the same shape (epsActual, revenueActual,
-    reportYear, reportMonth) for all 11 target tickers.
+    Third-tier fallback for the slide-2 forecast-YoY column when MS doesn't
+    publish a clean quarterly forecast block. Forecast row is the first
+    earnings_history entry where epsActual is None (the upcoming print);
+    prior_actual is the entry with reportYear = forecast_year - 1 and the
+    same quarter.
 
-    Returns {} when the snapshot is missing or two actuals can't be paired.
+    Falls back to (latest actual vs prior-year actual) only when no
+    forecast row exists at all (rare; some thinly-covered names have only
+    actuals on the Investing page).
     """
     try:
         from src.providers.probe_investing import _fetch_earnings_page, _slug
@@ -481,9 +501,44 @@ def _investing_actuals_yoy(ticker: str) -> dict:
                 and isinstance(r.get("epsActual"), (int, float))
                 and isinstance(r.get("reportYear"), int)
                 and isinstance(r.get("reportMonth"), int)]
+    # Forecast = first row with epsActual None / epsForecast present.
+    forecast = None
+    for r in rows or []:
+        if not isinstance(r, dict): continue
+        if r.get("epsActual") is None and isinstance(r.get("reportYear"), int):
+            if (isinstance(r.get("epsForecast"), (int, float))
+                or isinstance(r.get("revenueForecast"), (int, float))):
+                forecast = r
+                break
+
+    # Prefer forecast-vs-prior-year-actual when both exist. Falls back to
+    # latest-actual-vs-prior-year-actual when no forecast on the page.
+    if forecast:
+        ny = forecast["reportYear"]
+        nq = ((forecast["reportMonth"] - 1) // 3 + 1)
+        prior = next((
+            r for r in actuals
+            if r["reportYear"] == ny - 1
+            and ((r["reportMonth"] - 1) // 3 + 1) == nq
+        ), None)
+        if not prior:
+            return {}
+        latest = forecast
+        # Forecast row uses different key names — adapt below.
+        rev_l = forecast.get("revenueForecast")
+        rev_p = prior.get("revenueActual")
+        eps_l = forecast.get("epsForecast")
+        eps_p = prior.get("epsActual")
+        out = {}
+        if isinstance(rev_l, (int, float)) and isinstance(rev_p, (int, float)) and rev_p:
+            out["revenue"] = (rev_l / rev_p - 1.0) * 100
+        if isinstance(eps_l, (int, float)) and isinstance(eps_p, (int, float)) and eps_p:
+            out["eps"] = (eps_l / eps_p - 1.0) * 100
+        return out
+
+    # No forecast row — fall back to last-actual-vs-prior-year-actual.
     if not actuals:
         return {}
-    # actuals come newest-first; latest is the head
     latest = actuals[0]
     latest_year = latest["reportYear"]
     latest_qm = ((latest["reportMonth"] - 1) // 3 + 1)
@@ -561,7 +616,7 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
     yoy_rev = yoy_ebitda = yoy_nii = yoy_ni = yoy_eps = yoy_margin = None
     used_ms = False
     if ms_quarterly_forecasts:
-        next_est, latest, prior = _ms_quarterly_split(ms_quarterly_forecasts)
+        next_est, latest, prior, prior_of_next = _ms_quarterly_split(ms_quarterly_forecasts)
         # MS publishes unit_scale as a *string* ("million", "billion",
         # "thousand"). Map it to a numeric multiplier so the formatter
         # renders absolute values (e.g. 2614M -> "2.6B").
@@ -583,19 +638,33 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
             ni_q_consensus     = _scale(next_est.get("net_income"))
             nii_q_consensus    = _scale(next_est.get("nii"))
             eps_q_consensus    = eps_q_consensus    or next_est.get("eps")
-        if latest and prior:
-            yoy_rev    = _yoy_pct(latest.get("revenue"),    prior.get("revenue"))
-            yoy_ebitda = _yoy_pct(latest.get("ebitda"),     prior.get("ebitda"))
-            yoy_nii    = _yoy_pct(latest.get("nii"),        prior.get("nii"))
-            yoy_ni     = _yoy_pct(latest.get("net_income"), prior.get("net_income"))
-            yoy_eps    = _yoy_pct(latest.get("eps"),        prior.get("eps"))
-            curr_rev = latest.get("revenue") or 0
-            prev_rev = prior.get("revenue")  or 0
-            curr_eb  = latest.get("ebitda")
-            prev_eb  = prior.get("ebitda")
-            curr_margin = (curr_eb / curr_rev * 100) if curr_eb and curr_rev else None
-            prev_margin = (prev_eb / prev_rev * 100) if prev_eb and prev_rev else None
+        # ANALYTICAL CONTRACT: YoY in a "Q<n> Earnings Expectations" table
+        # is the forecast-vs-prior-year-actual comparison — what the next
+        # quarter's consensus implies vs the same quarter last year. Falling
+        # back to last-reported YoY would mislabel the column.
+        # Use same-source pairing: MS forecast vs MS prior-year actual.
+        if next_est and prior_of_next:
+            yoy_ebitda = _yoy_pct(next_est.get("ebitda"),     prior_of_next.get("ebitda"))
+            yoy_nii    = _yoy_pct(next_est.get("nii"),        prior_of_next.get("nii"))
+            yoy_ni     = _yoy_pct(next_est.get("net_income"), prior_of_next.get("net_income"))
+            # Revenue + EPS: skip MS pairing for now. They'll be filled by
+            # the Investing forecast-vs-prior path below using the same
+            # source as the displayed consensus (the deck displays
+            # Investing's revenue/eps for the consensus column when Investing
+            # wins the trust ladder, so YoY must use Investing for the
+            # numerator's source).
+            curr_rev_ms = next_est.get("revenue") or 0
+            prev_rev_ms = prior_of_next.get("revenue") or 0
+            curr_eb_ms  = next_est.get("ebitda")
+            prev_eb_ms  = prior_of_next.get("ebitda")
+            curr_margin = (curr_eb_ms / curr_rev_ms * 100) if curr_eb_ms and curr_rev_ms else None
+            prev_margin = (prev_eb_ms / prev_rev_ms * 100) if prev_eb_ms and prev_rev_ms else None
             yoy_margin = _yoy_bps(curr_margin, prev_margin)
+            used_ms = True
+        elif latest and prior:
+            # No forecast available for the next quarter (e.g. BKMB has no
+            # MS Q2 forecast). Leave YoY blank rather than show a misleading
+            # last-reported YoY in a forecast-labeled table.
             used_ms = True
 
     # Yahoo quarterly_actuals fallback (used when MS forecast block was empty

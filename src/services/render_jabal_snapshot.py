@@ -521,14 +521,26 @@ def _derive_highlights(*, cv: dict, currency: str, current_price,
                 rows.append(("RISK", f"{n_analysts} analysts covering; breakdown not disclosed."))
         elif total > 0:
             denom = max(1, total)
-            if sell == 0 and total >= 5:
-                rows.append(("RISK", f"Sentiment one-sided — 0 sells across {total} analysts."))
-            elif buy / denom >= 0.8 and total >= 5:
-                rows.append(("RISK", f"Crowded long — {buy}/{total} buy ratings raise expectations bar."))
-            elif sell >= 3:
-                rows.append(("RISK", f"Tape skewed bearish — {sell}/{total} sell ratings."))
+            buy_share  = buy  / denom
+            hold_share = hold / denom
+            sell_share = sell / denom
+            # Order matters: detect dominant Hold first (60%+ Hold isn't
+            # "one-sided Buy" even when sells are 0).
+            if hold_share >= 0.50 and total >= 5:
+                rows.append(("RISK",
+                    f"Consensus mixed — {hold}/{total} ratings are Hold despite Buy screen ({buy} Buy · {sell} Sell)."))
+            elif buy_share >= 0.80 and total >= 5:
+                rows.append(("RISK",
+                    f"Crowded long — {buy}/{total} buy ratings raise the expectations bar."))
+            elif sell_share >= 0.30 and total >= 5:
+                rows.append(("RISK",
+                    f"Tape skewed bearish — {sell}/{total} sell ratings ({sell_share*100:.0f}%)."))
+            elif sell == 0 and buy_share >= 0.60 and total >= 5:
+                rows.append(("RISK",
+                    f"No bears in the tape — {buy}/{total} buys, 0 sells across {total} analysts."))
             else:
-                rows.append(("RISK", f"Rating mix {buy}/{hold}/{sell} (buy/hold/sell) — view dispersion."))
+                rows.append(("RISK",
+                    f"Rating mix {buy}/{hold}/{sell} (buy/hold/sell) — view dispersion."))
         else:
             rows.append(("RISK", "Macro / sector sensitivity; refer to thesis on slide 2."))
     else:
@@ -671,22 +683,41 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
     if not n_analysts and isinstance(target, dict):
         n_analysts = int(target.get("n_analysts", 0) or 0)
 
-    # P/E forward — try MS forward dict first, then fall back to the
-    # most recent valid value in valuation_historical.pe
+    # P/E forward — first try MS's historical P/E series picked at the
+    # current fiscal year. Previously we read `reversed()` and took the
+    # last entry, which is the FURTHEST forecast year (e.g. FY2028 for a
+    # FY24-28 series). The slide-1 chip should reflect the next reporting
+    # FY, not the multi-year-out estimate. Falls through to valuation_forward
+    # (Investing-derived pe_fy1) when historical isn't loaded.
     pe_fwd = None
-    if isinstance(val_fwd, dict):
+    if isinstance(val_hist, dict):
+        periods = val_hist.get("periods", []) or []
+        pe_vals = val_hist.get("pe", []) or []
+        if len(periods) == len(pe_vals):
+            from datetime import datetime as _dt
+            cur_year = _dt.now().year
+            # Pick the entry whose period label contains the current year
+            # (FY2026), or the closest next year if none matches.
+            best_idx, best_diff = None, None
+            for i, p in enumerate(periods):
+                import re as _r
+                m = _r.search(r"(\d{4})", str(p) or "")
+                if not m: continue
+                yr = int(m.group(1))
+                if not isinstance(pe_vals[i], (int, float)): continue
+                diff = abs(yr - cur_year)
+                if best_diff is None or diff < best_diff:
+                    best_idx, best_diff = i, diff
+            if best_idx is not None:
+                pe_fwd = float(pe_vals[best_idx])
+    if pe_fwd is None and isinstance(val_fwd, dict):
         for k in ("pe_fy1", "pe_2026", "pe_2027", "pe"):
             v = val_fwd.get(k)
             if isinstance(v, (int, float)):
                 pe_fwd = v
                 break
-    elif isinstance(val_fwd, (int, float)):
+    elif pe_fwd is None and isinstance(val_fwd, (int, float)):
         pe_fwd = val_fwd
-    if pe_fwd is None and isinstance(val_hist, dict):
-        for v in reversed(val_hist.get("pe", []) or []):
-            if isinstance(v, (int, float)):
-                pe_fwd = v
-                break
 
     # Performance deltas — try Yahoo's hist_prices "perf_*" keys first;
     # fall back to MS price_performance block (perf_1d_pct etc.) when the

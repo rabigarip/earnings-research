@@ -120,14 +120,26 @@ def build_context(ticker: str) -> dict:
             pe_recent = nums[-1]
             pe_avg = sum(nums) / len(nums)
 
-    # Surprise history (from Investing) — most useful for the "track record" angle
-    surprise = ((investing_obs.get("income_statement_quarterly") or {})
-                .get("surprise_history", []))
-    beats = sum(1 for r in surprise[:4]
-                  if isinstance(r.get("eps_surprise_pct"), (int, float))
-                  and r["eps_surprise_pct"] > 0)
-    n_recent = min(4, len(surprise))
-    last_surprise = surprise[0] if surprise else None
+    # Surprise history (from Investing) — most useful for the "track record"
+    # angle. CRITICAL: count beats ONLY across rows with a real surprise_pct
+    # value. Without this guard, names where Investing never published an
+    # epsForecast (BKMB-class thinly-covered banks) produce "0 of last 4
+    # quarters above consensus EPS" — a false claim, not a missing-data note.
+    raw_surprise = ((investing_obs.get("income_statement_quarterly") or {})
+                     .get("surprise_history", []))
+    surprise = [r for r in raw_surprise if isinstance(r, dict)]
+    valid_surprises = [r for r in surprise
+                         if isinstance(r.get("eps_surprise_pct"), (int, float))]
+    if len(valid_surprises) >= 3:
+        beats = sum(1 for r in valid_surprises[:4] if r["eps_surprise_pct"] > 0)
+        n_recent = min(4, len(valid_surprises))
+        last_surprise = valid_surprises[0]
+    else:
+        # Insufficient surprise data — pass empty values so the prompt's
+        # template doesn't generate "0 of last 4 above consensus".
+        beats = None
+        n_recent = 0
+        last_surprise = None
 
     # Broker actions (from MS canonical)
     ba_val = _val("broker_actions") or {}
