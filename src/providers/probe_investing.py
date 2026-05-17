@@ -446,9 +446,34 @@ class InvestingProvider(Provider):
     def _fetch_dividend_yield(self, ticker: str):
         state = self._state(ticker, "equity")
         fundamental = _equity_fundamental(state)
-        # Investing's fundamental block exposes the yield (in percent, already
-        # scaled) under the key `yield`. The legacy names are kept as fallbacks
-        # so a future Investing schema change doesn't break this provider.
+        price_block = _equity_price(state)
+
+        # Sanity-check Investing's reported yield against its own
+        # dividend/price math. For some tickers (verified on BKMB.OM,
+        # 2026-05) Investing reports yield = 6.90% while their dividend
+        # 0.02 / price 0.414 = 4.83% — the raw `yield` field is wrong.
+        # Use the dividend/price computation as the primary value when
+        # both `dividend` and `last` price are available; fall back to the
+        # raw yield field otherwise.
+        last = price_block.get("last")
+        dividend = fundamental.get("dividend")
+        if (isinstance(last, (int, float)) and last > 0
+            and isinstance(dividend, (int, float)) and dividend > 0):
+            computed_yield = dividend / last * 100
+            raw_yield = fundamental.get("yield")
+            # Within 25% — trust the raw field (Investing's `yield` often
+            # uses TTM-inclusive-of-special-dividends, while `dividend` is
+            # the regular annual run-rate; small divergences are convention
+            # rather than data bugs).
+            if (isinstance(raw_yield, (int, float)) and raw_yield > 0
+                and abs(raw_yield - computed_yield) / max(raw_yield, computed_yield) < 0.25):
+                return float(raw_yield), "%", "", persist_raw(self.name, ticker, "dividend_yield", fundamental)
+            # Gap > 25% — Investing's yield field is internally inconsistent
+            # with its own dividend/price. Fall back to the computed value.
+            return computed_yield, "%", "", persist_raw(self.name, ticker, "dividend_yield",
+                                                          {**fundamental, "yield_computed": computed_yield})
+
+        # No dividend/price pair — fall back to the raw yield field.
         for key in ("yield", "dividend_yield", "dividendYield", "div_yield"):
             v = fundamental.get(key)
             if isinstance(v, (int, float)) and v > 0:
@@ -523,15 +548,45 @@ class InvestingProvider(Provider):
         if not rows:
             raise ValueError("Investing.com forecasts had no parseable rows")
         nxt = rows[0]
-        # FY aggregates: sum the first 4 quarters that fall in the same year
-        # as the next-Q's row (or the next 4 calendar quarters if year split).
+        # Pull historical actuals from the same earnings page so FY1
+        # aggregates include quarters that already reported. Without this,
+        # a forecast list that only covers Q2-Q4 of the current FY produces
+        # a 3-quarter EPS sum that inflates derived P/E by ~33% (SABIC's
+        # P/E (FY EST) showed 17.0x when the correct FY P/E was ~12.7x).
+        history = _earnings_history(state)
+        actuals_by_qp: dict[tuple[int, int], dict] = {}
+        for r in history or []:
+            if not isinstance(r, dict): continue
+            yr = r.get("reportYear"); mo = r.get("reportMonth") or 0
+            if not (isinstance(yr, int) and isinstance(mo, int) and mo): continue
+            qn_ = (mo - 1) // 3 + 1
+            # Only keep rows with an actual EPS reported.
+            if isinstance(r.get("epsActual"), (int, float)):
+                actuals_by_qp[(yr, qn_)] = r
+
         def _fy_agg(year: int) -> tuple[Optional[float], Optional[float]]:
-            year_rows = [r for r in rows if r.get("reportYear") == year]
-            if not year_rows:
+            # Walk Q1-Q4 explicitly so we know which quarters we're missing.
+            seen_quarters: set[int] = set()
+            rev_total = eps_total = 0.0
+            for qn_ in (1, 2, 3, 4):
+                # Forecast first (most recent), then actual.
+                fc = next((r for r in rows if r.get("reportYear") == year
+                            and ((r.get("reportMonth") or 0) - 1) // 3 + 1 == qn_), None)
+                ac = actuals_by_qp.get((year, qn_))
+                rev_val = (fc.get("revenue") if fc else None) \
+                           or (ac.get("revenueActual") if ac else None)
+                eps_val = (fc.get("eps") if fc else None) \
+                           or (ac.get("epsActual") if ac else None)
+                if isinstance(rev_val, (int, float)): rev_total += rev_val
+                if isinstance(eps_val, (int, float)): eps_total += eps_val
+                if rev_val is not None or eps_val is not None:
+                    seen_quarters.add(qn_)
+            # Only return numbers when we have at least 3 quarters covered;
+            # otherwise the partial sum produces a misleading P/E.
+            if len(seen_quarters) < 3:
                 return None, None
-            rev = sum(r["revenue"] for r in year_rows if isinstance(r.get("revenue"), (int, float))) or None
-            eps = sum(r["eps"]     for r in year_rows if isinstance(r.get("eps"),     (int, float))) or None
-            return rev, eps
+            return (rev_total or None), (eps_total or None)
+
         fy1_year = nxt["reportYear"]
         fy2_year = fy1_year + 1
         rev_fy1, eps_fy1 = _fy_agg(fy1_year)
