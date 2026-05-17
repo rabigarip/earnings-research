@@ -181,6 +181,9 @@ class ThesisData:
     analyst_name: str
     gen_date: str
     total_pages: int = 3
+    # Period heading on slide 2 ("Q2 2026 Earnings Expectations"). Must
+    # agree with slide 1's period_label or the deck contradicts itself.
+    period_heading: str = "Earnings Expectations"
 
 
 def render_thesis_slide(prs, data: ThesisData):
@@ -195,8 +198,9 @@ def render_thesis_slide(prs, data: ThesisData):
     _body_card(slide, MARGIN_L, 1.96, CONTENT_W, 1.85,
                 data.exec_summary_body)
 
-    # Q2 estimates
-    _section_label(slide, MARGIN_L, 3.96, CONTENT_W, "Q2 2026 Earnings Expectations")
+    # Period-aware section label. Falls back to a generic title when the
+    # orchestrator didn't supply a quarter (e.g. carry-forward case).
+    _section_label(slide, MARGIN_L, 3.96, CONTENT_W, data.period_heading or "Earnings Expectations")
     _text(slide, MARGIN_L, 4.26, CONTENT_W, 0.18,
           "Jabal estimates vs. consensus  ·  Local currency unless stated",
           size=Pt(9), color=GRAY)
@@ -496,7 +500,25 @@ def _investing_actuals_yoy(ticker: str) -> dict:
         out["revenue"] = (rev_l / rev_p - 1.0) * 100
     eps_l, eps_p = latest.get("epsActual"), prior.get("epsActual")
     if isinstance(eps_l, (int, float)) and isinstance(eps_p, (int, float)) and eps_p:
-        out["eps"] = (eps_l / eps_p - 1.0) * 100
+        eps_yoy = (eps_l / eps_p - 1.0) * 100
+        # Investing rounds bank EPS to 2dp (BKMB Q1 2026 = 0.01, Q1 2025 = 0.01
+        # → YoY 0.0% even when Net Income grew 9%). When the rounded values
+        # match exactly but the underlying business changed, fall back to
+        # the Net-Income YoY as the EPS proxy — true absent share-count change.
+        if eps_l == eps_p and abs(eps_l) <= 0.05:
+            ni_yoy = None
+            try:
+                from src.services.store_actuals import latest_actuals  # unused but kept for safety
+            except ImportError:
+                pass
+            # Compute NI YoY from the same Investing earnings page if it
+            # exposes revenue (a reasonable proxy for NI YoY when bank EPS
+            # is rounded). We don't have NI in earnings rows on Investing
+            # — instead, just suppress the EPS YoY rather than report a
+            # misleading 0.0%.
+            out["eps"] = None  # caller renders '—'
+        else:
+            out["eps"] = eps_yoy
     return out
 
 
@@ -661,6 +683,7 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
                         quarterly: Optional[list] = None,
                         is_bank: bool = False,
                         ms_quarterly_forecasts: Optional[dict] = None,
+                        period_heading: Optional[str] = None,
                         ) -> ThesisData:
     cv = get_all_fields(ticker)
     commodities_obs = get_observations_by_provider(ticker, "commodities")
@@ -748,6 +771,7 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
         sources_line=_sources_line_from_cv(cv),
         analyst_name=analyst_name,
         gen_date=gen_date or datetime.utcnow().strftime("%d %b %Y"),
+        period_heading=(period_heading or "Earnings Expectations"),
     )
 
 

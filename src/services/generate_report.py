@@ -113,25 +113,97 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
     # Preview · TBA" for a ticker we already have calendar data on.
     mc = getattr(payload, "memo_computed", {}) or {}
     period_label = (memo_data or {}).get("period_label")
+
+    # Investing.com's earnings page has the upcoming-earnings row regardless
+    # of whether MS's calendar published it. When MS gives us nothing (the
+    # common BKMB-class case), Investing's "next" row is the source of truth.
+    # Returns (next_qtr, next_yr) or (None, None).
+    def _next_qtr_from_investing(t: str) -> tuple[Optional[int], Optional[int]]:
+        try:
+            from src.providers.probe_investing import _fetch_earnings_page, _slug
+            from datetime import datetime as _dt, timezone as _tz
+            slug = _slug(t)
+            if not slug:
+                return None, None
+            state = _fetch_earnings_page(slug)
+            if not state:
+                return None, None
+            es = state.get("earningsStore") or {}
+            rows = es.get("earnings") if isinstance(es, dict) else None
+            if not isinstance(rows, list):
+                return None, None
+            today = _dt.now(_tz.utc).date()
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                d = (r.get("date") or "")[:10]
+                try:
+                    rd = _dt.fromisoformat(d).date()
+                except Exception:
+                    continue
+                # The "next" earnings row is the most recent one whose date is
+                # in the future. Investing lists them newest-first; the first
+                # future row is the next event.
+                if rd >= today and r.get("epsActual") is None:
+                    rm = r.get("reportMonth") or 0
+                    ry = r.get("reportYear")
+                    if isinstance(rm, int) and isinstance(ry, int) and rm:
+                        return ((rm - 1) // 3 + 1), ry
+            return None, None
+        except Exception:
+            return None, None
+
     if not period_label:
-        # Prefer the explicit "Q<n> <YYYY>" form to the short "<n>Q<YY>"
-        nql = mc.get("next_quarter_label") or ""  # e.g. "2026 Q2"
-        import re as _rqp
-        m = _rqp.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})", nql, _rqp.I)
-        if m:
-            yr = m.group(1) or m.group(4)
-            qn = m.group(2) or m.group(3)
-            period_label = f"Q{qn} {yr} Earnings Preview"
+        # 1. Investing's next-earnings row (most reliable)
+        inv_q, inv_y = _next_qtr_from_investing(ticker)
+        if inv_q and inv_y:
+            period_label = f"Q{inv_q} {inv_y} Earnings Preview"
         else:
-            period_label = mc.get("preview_quarter_label") or "Earnings Preview"
+            # 2. memo_computed.next_quarter_label (MS-derived)
+            nql = mc.get("next_quarter_label") or ""
+            import re as _rqp
+            m = _rqp.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})", nql, _rqp.I)
+            if m:
+                yr = m.group(1) or m.group(4)
+                qn = m.group(2) or m.group(3)
+                period_label = f"Q{qn} {yr} Earnings Preview"
+            else:
+                period_label = mc.get("preview_quarter_label") or "Earnings Preview"
 
     report_date = (memo_data or {}).get("report_date")
     if not report_date:
-        # MS /calendar/ block exposes next_expected_earnings_date (ISO date).
         ms_cal = getattr(payload, "ms_calendar_events", None) or {}
+        # Investing's earnings page is the most reliable source for the
+        # next-earnings date — MS calendar often returns nothing for
+        # thinly-covered names (BKMB, OQEP, etc.).
+        inv_next_date = None
+        try:
+            from src.providers.probe_investing import _fetch_earnings_page, _slug
+            from datetime import datetime as _dt, timezone as _tz
+            slug = _slug(ticker)
+            if slug:
+                state = _fetch_earnings_page(slug)
+                if state:
+                    es = state.get("earningsStore") or {}
+                    rows = es.get("earnings") if isinstance(es, dict) else []
+                    today = _dt.now(_tz.utc).date()
+                    for r in rows or []:
+                        if not isinstance(r, dict):
+                            continue
+                        d = (r.get("date") or "")[:10]
+                        try:
+                            rd = _dt.fromisoformat(d).date()
+                        except Exception:
+                            continue
+                        if rd >= today and r.get("epsActual") is None:
+                            inv_next_date = d
+                            break
+        except Exception:
+            inv_next_date = None
         for path in (
             ms_cal.get("next_expected_earnings_date") if isinstance(ms_cal, dict) else None,
             ms_cal.get("next_expected_earnings_label") if isinstance(ms_cal, dict) else None,
+            inv_next_date,
             getattr(payload, "yahoo_earnings_date", None),
             mc.get("next_earnings_date"),
             mc.get("yahoo_earnings_date"),
@@ -170,11 +242,20 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
                                        report_date=report_date,
                                        ms_price_performance=getattr(payload, "ms_price_performance", None),
                                        historical_override=historical_override)
+    # Slide-2 heading must agree with slide-1 period_label. Strip the
+    # trailing "Earnings Preview" / "Earnings Update" suffix and replace
+    # with "Earnings Expectations" so the cover and the estimates section
+    # frame the same quarter.
+    period_heading = "Earnings Expectations"
+    if period_label and " Earnings " in period_label:
+        _q_prefix = period_label.split(" Earnings ", 1)[0]   # "Q2 2026"
+        period_heading = f"{_q_prefix} Earnings Expectations"
     is_bank = bool(getattr(payload.company, "is_bank", False))
     thesis    = build_thesis_data(ticker,
                                      quarterly=getattr(payload, "quarterly_actuals", None) or [],
                                      is_bank=is_bank,
-                                     ms_quarterly_forecasts=getattr(payload, "ms_quarterly_forecasts", None))
+                                     ms_quarterly_forecasts=getattr(payload, "ms_quarterly_forecasts", None),
+                                     period_heading=period_heading)
     valuation = build_valuation_data(ticker, peers_override=peer_rows or None,
                                        historical_override=historical_override)
 
