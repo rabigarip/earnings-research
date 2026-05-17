@@ -30,6 +30,7 @@ _SLUGS: dict[str, str] = {
     # Saudi / Tadawul
     "2222.SR":        "saudi-aramco",
     "2020.SR":        "sa-fertilizers",
+    "1180.SR":        "national-com-bnk",        # Saudi National Bank (peer)
     # UAE / ADX + DFM (subject + peer tickers used in slide-3 peer table)
     "ADCB.AE":        "ad-commercial",
     "ADNOCDRILL.AE":  "adnoc-drilling",
