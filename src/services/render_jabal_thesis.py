@@ -240,7 +240,10 @@ def _template_exec_summary(cv: dict, commodities: dict,
     rating = ""
     n_an = 0
     if rating_val and isinstance(rating_val.value, dict):
-        rating = (rating_val.value.get("consensus") or "").lower()
+        # Prettify the provider enum so the fallback paragraph reads
+        # "Strong Buy" rather than "strong_buy" / "STRONG_BUY".
+        from src.services.render_jabal_snapshot import _pretty_rating
+        rating = _pretty_rating(rating_val.value.get("consensus")) or ""
         n_an   = int(rating_val.value.get("total") or 0)
 
     target = cv.get("target_price")
