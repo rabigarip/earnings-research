@@ -644,10 +644,13 @@ class InvestingProvider(Provider):
                 "period": period,
                 "eps_actual":    row.get("eps") or row.get("epsActual"),
                 "eps_estimate":  row.get("epsForecast") or row.get("epsEstimate"),
-                "eps_surprise_pct":      row.get("epsSurprisePct"),
+                # Investing returns the full word `Percent`, not abbreviated.
+                # Previous key (`epsSurprisePct`) always returned None, so the
+                # downstream "N of last 4 above consensus" line defaulted to 0.
+                "eps_surprise_pct":      row.get("epsSurprisePercent") or row.get("epsSurprisePct"),
                 "revenue_actual":        row.get("revenue") or row.get("revenueActual"),
                 "revenue_estimate":      row.get("revenueForecast") or row.get("revenueEstimate"),
-                "revenue_surprise_pct":  row.get("revenueSurprisePct"),
+                "revenue_surprise_pct":  row.get("revenueSurprisePercent") or row.get("revenueSurprisePct"),
             })
         if not out:
             raise ValueError("Investing.com history could not be normalised")
