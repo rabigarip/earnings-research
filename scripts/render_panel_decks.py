@@ -90,7 +90,30 @@ def _render_one(ticker: str, *, period: str | None = None) -> dict:
         period_label=period or "Earnings Preview",
         report_date="TBA",
     )
-    thesis = build_thesis_data(ticker)
+    # Mirror generate_report so the panel decks exercise bank schema +
+    # dynamic period label.
+    period_heading = "Earnings Expectations"
+    if period and " Earnings " in period:
+        period_heading = f"{period.split(' Earnings ', 1)[0]} Earnings Expectations"
+    else:
+        # No explicit period passed → derive current next quarter so the
+        # slide-2 table header reads e.g. "Q2 2026E" rather than the
+        # generic "ESTIMATE".
+        from datetime import datetime as _dt
+        _now = _dt.now()
+        _q = (_now.month - 1) // 3 + 1
+        period_heading = f"Q{_q} {_now.year} Earnings Expectations"
+    is_bank = False
+    try:
+        from src.storage.db import load_company as _load_company
+        _cm = _load_company(ticker) or {}
+        is_bank = bool(_cm.get("is_bank"))
+        if not is_bank:
+            ind = (_cm.get("industry") or _cm.get("sector") or "").lower()
+            is_bank = ("bank" in ind)
+    except Exception:
+        pass
+    thesis = build_thesis_data(ticker, is_bank=is_bank, period_heading=period_heading)
     valuation = build_valuation_data(ticker)
 
     prs = Presentation()
