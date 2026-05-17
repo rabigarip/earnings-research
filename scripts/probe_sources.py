@@ -52,40 +52,18 @@ def _load_providers(only: set[str] | None):
             providers["macro"] = MacroProvider()
         except Exception as exc:
             print(f"  [skip] macro: {exc}", file=sys.stderr)
-    if not only or "adx" in only:
-        try:
-            from src.providers.probe_adx import ADXProvider
-            providers["adx"] = ADXProvider()
-        except Exception as exc:
-            print(f"  [skip] adx: {exc}", file=sys.stderr)
-    if not only or "nse" in only:
-        try:
-            from src.providers.probe_nse import NSEProvider
-            providers["nse"] = NSEProvider()
-        except Exception as exc:
-            print(f"  [skip] nse: {exc}", file=sys.stderr)
-    if not only or "hkex" in only:
-        try:
-            from src.providers.probe_hkex import HKEXProvider
-            providers["hkex"] = HKEXProvider()
-        except Exception as exc:
-            print(f"  [skip] hkex: {exc}", file=sys.stderr)
-    # iShares disabled — regional-proxy returns were marginal vs. complexity
-    # cost. To re-enable add to `--only` explicitly; provider file remains.
+    # iShares: regional ETF proxy returns for emerging-market overlays.
+    # Opt-in (--only ishares) by default.
     if "ishares" in (only or set()):
         try:
             from src.providers.probe_ishares import iSharesProvider
             providers["ishares"] = iSharesProvider()
         except Exception as exc:
             print(f"  [skip] ishares: {exc}", file=sys.stderr)
-    # Bloomberg consensus (user-uploaded). Quiet skip if no file present —
-    # this is normal until the analyst uploads.
-    if not only or "bloomberg" in only:
-        try:
-            from src.providers.probe_bloomberg import BloombergProvider
-            providers["bloomberg"] = BloombergProvider()
-        except Exception as exc:
-            print(f"  [skip] bloomberg: {exc}", file=sys.stderr)
+    # Bloomberg consensus is now sourced from the per-ticker upload flow
+    # (src/services/bloomberg_parser.py reads <TICKER>_cons_q.xlsx +
+    # <TICKER>_FA.xlsx from data/bloomberg/). The legacy probe_bloomberg
+    # CSV reader was removed.
     if not only or "commodities" in only:
         try:
             from src.providers.probe_commodities import CommoditiesProvider
