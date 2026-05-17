@@ -178,6 +178,50 @@ def _pe_range_chart(slide, left: float, top: float, width: float, height: float,
 
 # ── Peer table ────────────────────────────────────────────────
 
+def _peer_label(ticker: str, sector: str = "", industry: str = "") -> str:
+    """Derive a peer-table sub-label from the ticker's exchange suffix and
+    its sector/industry. Returns a phrase like 'GCC bank peers',
+    'India banking peers', 'China internet peers'. Falls back to
+    'Selected global peers'."""
+    suf = ticker.rsplit(".", 1)[-1].upper() if "." in ticker else ""
+    s = (sector or "").lower()
+    i = (industry or "").lower()
+    text = f"{s} {i}"
+    is_bank = any(k in text for k in ("bank", "financial services", "diversified financial"))
+    is_oil  = any(k in text for k in ("oil", "gas", "energy", "petroleum", "refining"))
+    is_chem = "chem" in text or "fertili" in text or "materials" in text or "basic materials" in text
+    is_telecom = "telecom" in text or "communication services" in text
+    is_internet = any(k in text for k in ("internet", "interactive media", "software—internet"))
+    is_auto = "auto" in text or "vehicle" in text
+    is_metal = "steel" in text or "metal" in text or "mining" in text
+    gcc = {"SR","AE","QA","OM","KW","BH"}
+    india = {"NS","BO"}
+    china = {"HK","SS","SZ"}
+    if suf in gcc:
+        region = "GCC"
+    elif suf in india:
+        region = "India"
+    elif suf in china:
+        region = "China/HK" if suf == "HK" else "China"
+    else:
+        region = "Global"
+    if is_bank:
+        return f"{region} bank peers"
+    if is_oil:
+        return "Global oil & gas peers" if region == "Global" else f"{region} oil & gas peers"
+    if is_chem:
+        return "Global chemicals peers" if region == "Global" else f"{region} chemicals peers"
+    if is_internet:
+        return "China/HK internet peers" if region in ("China/HK", "China") else f"{region} internet peers"
+    if is_auto:
+        return f"{region} auto peers"
+    if is_metal:
+        return f"{region} metals & mining peers"
+    if is_telecom:
+        return f"{region} telecom peers"
+    return f"Selected {region.lower()} peers" if region != "Global" else "Selected global peers"
+
+
 def _peer_table(slide, top: float, peers: list[dict]):
     """Rows: name, ticker, mcap, P/E, dividend yield, 1Y return.
     Compact, borderless, alternating row tint."""
@@ -325,6 +369,7 @@ class ValuationData:
     pe_values: list[Optional[float]]
     pe_current: Optional[float]
     peers: list[dict]
+    peer_table_label: str
     rating_split: dict
     n_analysts: int
     target_mean: Optional[float]
@@ -365,7 +410,7 @@ def render_valuation_slide(prs, data: ValuationData):
 
     # Peer table
     _section_label(slide, MARGIN_L, 4.97, CONTENT_W,
-                    "Peer Comparables  ·  Selected Global Peers")
+                    f"Peer Comparables  ·  {data.peer_table_label}")
     _peer_table(slide, 5.29, data.peers)
 
     # Sentiment
@@ -519,11 +564,18 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     ba_obs = cv.get("broker_actions")
     broker_actions: list[dict] = []
     if ba_obs and isinstance(ba_obs.value, dict):
+        from src.services.render_jabal_snapshot import _normalize_date as _nd
         for item in (ba_obs.value.get("items") or [])[:3]:
             broker_actions.append({
-                "date": item.get("date", ""),
+                "date": _nd(item.get("date", "")),
                 "text": item.get("headline", ""),
             })
+
+    # Dynamic peer-table label by sector + region. Falls back to
+    # "Selected Global Peers" when sector/region can't be inferred.
+    industry = (profile.value.get("industry") if profile and isinstance(profile.value, dict) else "") or ""
+    sector   = (profile.value.get("sector")   if profile and isinstance(profile.value, dict) else "") or ""
+    peer_table_label = _peer_label(ticker, sector, industry)
 
     return ValuationData(
         company_name=pname,
@@ -533,6 +585,7 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
         pe_values=pe_vals,
         pe_current=current_pe,
         peers=peers,
+        peer_table_label=peer_table_label,
         rating_split=rs_normalised,
         n_analysts=n_an,
         target_mean=target_mean,
