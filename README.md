@@ -1,186 +1,273 @@
-# Earnings Research — Backend API & Pipeline
+# Earnings Research
 
-Backend for earnings preview: governed pipeline (Yahoo, MarketScreener, Zawya, Gemini) plus a **FastAPI web API** and **Render** deployment (one-site: API + static frontend).
+Institutional earnings-preview note generator. Enter a ticker, get a
+3-page institutional PPTX with Snapshot · Thesis & Expectations ·
+Valuation & Positioning slides — built off a free-source data stack
+(Yahoo Finance, MarketScreener, Investing.com) with a Bloomberg-export
+upload path for high-confidence runs.
+
+**Live:** https://earnings-research-ur07.onrender.com/ (one site = API + UI)
 
 ---
 
-## Quick Start (local)
+## What it does
 
-```bash
-# 1. Clone and set up
-git clone https://github.com/YOUR_USERNAME/earnings-research.git
-cd earnings-research
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+For every supported ticker the system produces a 3-slide deck:
 
-# 2. Optional: Gemini for news summarization
-cp .env.example .env
-# Add GEMINI_API_KEY to .env if you want LLM summarization
+1. **Snapshot** — company / sector / exchange header, analyst consensus
+   (rating + target + upside), key data (last close, market cap, P/E,
+   div yield), 6-bucket performance row (1D / 1W / 1M / 3M / 6M / YTD),
+   52-week range bar, and 5 data-driven highlight pills.
+2. **Thesis & Expectations** — Gemini-drafted thesis paragraph with
+   forced numeric grounding, Q+1 estimates table (Jabal Est · Consensus
+   · Δ · YoY), catalysts / risks / what-to-watch lists with quantitative
+   anchors.
+3. **Valuation & Positioning** — 52-week price chart, 5-year forward
+   P/E history chart, peer comparables table (5 curated peers per
+   ticker), analyst consensus distribution, average target price,
+   last 3 broker actions.
 
-# 3. Initialize DB (seeds from data/company_master.json)
-python -m src.main --init-db
+Bank tickers swap the EBITDA row for NII and drop the EBITDA Margin
+row (cost-to-income / NIM need balance-sheet data we don't fetch).
 
-# 4. CLI: run a preview (skip-llm = no Gemini, faster)
-python -m src.main --ticker 2010.SR --mode preview --skip-llm
+---
 
-# 5. Web API (for frontend / Render)
-uvicorn src.api:app --reload --port 8000
-# → http://localhost:8000/docs  and  http://localhost:8000/api/reports
+## Architecture
+
+```
+                ┌────────────── On-demand deck flow ─────────────────┐
+                │                                                    │
+   user POST    │   pipeline.run_preview(ticker)                     │
+   /api/reports ├──▶ 1. validate_ticker (Yahoo)                      │
+                │   2. resolve_mapping (company_master)              │
+                │   3. fetch_quote                                   │
+                │   4. fetch_financials  ──┐                         │
+                │   5. fetch_consensus     │                         │
+                │   5b. fetch_marketscreener_pages (MS scrape)       │
+                │   5c. fetch_earnings_date (Yahoo fallback)         │
+                │   6. fetch_news                                    │
+                │   7. reconcile + derived metrics                   │
+                │   8. summarize_news (skipped; deferred to step 11) │
+                │   9. build_report_payload (canonical assembly)     │
+                │   10. qa_validate                                  │
+                │   10b. report_readiness gate                       │
+                │   11. draft_pptx_sections (Gemini, last)           │
+                │   11b. data_validation warnings                    │
+                │   12. generate_report (PPTX) ──────────────────────┴──▶ .pptx
+                │
+                └───────────────────────────────────────────────────────┘
+
+Data sources (free stack, trust ladder for canonical reconciliation):
+
+   Investing.com   ──┐
+   MarketScreener  ──┼─▶ canonical_store ─▶ slide renderer
+   Yahoo Finance   ──┤                          │
+   World Bank/IMF  ──┘                          │
+                                                ▼
+   Bloomberg export upload ─▶ payload override ─┘
+   (per-ticker xlsx via /api/bloomberg/upload)
 ```
 
-**Tests:** `pytest tests/ -v`
-
-**Local quality testing:** See **`docs/LOCAL-TESTING.md`** for cleaning cache/outputs, running sector tickers, and checking Investment View fallback quality. Quick clean: `./scripts/clean_local.sh` then `python -m src.main --init-db`.
-
----
-
-## Deploy to Render (one site = API + UI at one URL)
-
-1. **Build the frontend** into `static/` (so one Web Service can serve both):
-   ```bash
-   ./scripts/build_static.sh
-   ```
-2. **Commit and push** (including the `static/` folder):
-   ```bash
-   git add static/
-   git commit -m "Add static frontend for one-site deploy"
-   git push origin main
-   ```
-3. In [Render](https://render.com): **New → Web Service**, connect **earnings-research**.
-4. **Build:** `pip install -r requirements.txt` · **Start:** `uvicorn src.api:app --host 0.0.0.0 --port $PORT`
-5. Open your Render URL — you get the **full app** (login, reports, New Report) at that one address. API docs: `/docs`.
-
-Details: **`docs/ONE-SITE-RENDER.md`**. For API-only or separate frontend deploy: **`docs/DEPLOY-RENDER.md`**.
+Investing.com sits in front of MarketScreener in the trust ladder
+because its analyst data (target price, ratings, surprise history) is
+more consistently structured. MS is the primary source for forward
+quarterly forecasts; Yahoo backstops everything Yahoo covers; Bloomberg
+upload overrides all of them when the analyst provides one.
 
 ---
 
-## Test Universe
+## Quick start (local)
 
-| Ticker | Company | Type | Tests |
-|--------|---------|------|-------|
-| `2010.SR` | SABIC | Industrial | EBITDA ✓, standard metrics |
-| `1120.SR` | Al Rajhi Bank | Bank | EBITDA skipped, bank path |
+```bash
+git clone https://github.com/YOUR_USERNAME/earnings-research.git
+cd earnings-research
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env             # add GEMINI_API_KEY for the thesis paragraph
+python -m src.main --init-db     # seed SQLite from data/company_master.json
 
----
+# Generate a deck via the CLI
+python -m src.main --ticker 2222.SR --mode preview --skip-llm
 
-## Pipeline Steps
+# Or run the web API
+uvicorn src.api:app --reload --port 8000
+# → http://localhost:8000/        (UI)
+# → http://localhost:8000/docs    (API docs)
+```
 
-Every step prints a status box to the terminal and returns a `StepResult`.
-
-| # | Step | Critical? | Source |
-|---|------|-----------|--------|
-| 1 | `validate_ticker` | YES — stops pipeline | Yahoo |
-| 2 | `resolve_mapping` | YES — stops pipeline | Local seed |
-| 3 | `fetch_quote` | No | Yahoo |
-| 4 | `fetch_financials` | No | Yahoo |
-| 5 | `fetch_consensus` | No | MarketScreener → Yahoo fallback |
-| 6 | `fetch_news` | No | Yahoo + Reuters + Zawya |
-| 7 | `reconcile` | No | Computed |
-| 8 | `summarize_news` | No | Gemini (LLM) |
-| 9 | `build_report_payload` | No | Assembled |
-| 10 | `generate_report` | No | python-docx |
+Tests: `pytest tests/ -v`
 
 ---
 
-## Data sources and URLs
+## Deploy (Render — one site = API + UI)
 
-**MarketScreener** (primary) and **Yahoo Finance** (fallback) with field-by-field mapping and scrape order are documented in:
+The repo is configured for a single Render Web Service that serves the
+React UI at `/` and the FastAPI backend at `/api/*`. Push to `main`
+triggers an auto-deploy:
 
-**`docs/DATA_SOURCE_AND_URL_REFERENCE.md`**
+```bash
+./scripts/build_static.sh           # build frontend into static/
+git add static/ && git commit -m "..."
+git push origin main
+```
 
-Use it for: which page provides which memo field, slug discovery, quarterly vs annual URLs, and fallback behavior.
+`render.yaml` declares the service. Important env vars:
+- `DATABASE_PATH=/tmp/earnings-data/earnings.db` (Render dir is read-only)
+- `REPORT_OUTPUT_DIR=/tmp/earnings-outputs`
+- `GEMINI_API_KEY` (set in Render dashboard)
+- `JABAL_RENDERER=1` (force the 3-slide deck — only user-visible product)
+
+A cron pre-renders the panel of curated tickers daily so first-visit
+loads are instant. See `render.yaml`.
 
 ---
 
-## Project Structure
+## Target ticker universe
+
+| Region | Ticker | Company | Coverage |
+|---|---|---|---|
+| GCC | `2222.SR` | Saudi Aramco | Yahoo + MS + Investing |
+| GCC | `2020.SR` | SABIC Agri-Nutrients | Yahoo + MS + Investing |
+| GCC | `ADCB.AE` | Abu Dhabi Commercial Bank | MS + Investing (yfinance 404s ADX) |
+| GCC | `ADNOCDRILL.AE` | ADNOC Drilling | MS + Investing |
+| GCC | `BKMB.OM` | Bank Muscat | MS + Investing |
+| GCC | `OQEP.OM` | OQ Exploration & Production | MS + Investing |
+| India | `JINDALSTEL.NS` | Jindal Steel | Yahoo + MS + Investing |
+| India | `ICICIBANK.NS` | ICICI Bank | Yahoo + MS + Investing |
+| China/HK | `0700.HK` | Tencent Holdings | Yahoo + MS + Investing |
+| China/HK | `2899.HK` | Zijin Mining | Yahoo + MS + Investing |
+| China/HK | `1398.HK` | ICBC | Yahoo + MS + Investing |
+
+`data/company_master.json` carries `marketscreener_id` and `peer_group`
+(5 curated peers) for each of these. `probe_investing._SLUGS` carries
+the Investing.com slug. Adding a new ticker requires updating both.
+
+---
+
+## The Investing.com cache (Cloudflare workaround)
+
+**The problem:** Cloudflare blocks Render's egress IPs from reaching
+Investing.com. `curl_cffi`'s TLS-fingerprint impersonation passes the
+JS challenge, but the IP-reputation layer rejects cloud-IP traffic.
+
+**The fix:** every Investing.com page used by the deck is pre-fetched
+locally (or from GitHub Actions runners, which aren't IP-flagged) and
+the JSON snapshot is committed to `data/investing/<slug>__<kind>.json`.
+`probe_investing.py` has a three-layer fetcher:
+
+1. `cache/probe/investing/` — 24h disk cache (writable on local; no-op
+   on Render's read-only project dir)
+2. Live network via `curl_cffi` — works from local, blocked on Render
+3. `data/investing/` — repo-tracked snapshot, always available
+
+Refresh manually with:
+
+```bash
+python -m scripts.refresh_investing_cache
+git add data/investing/ && git commit -m "chore(cache): refresh"
+git push
+```
+
+Or set up the GHA daily refresh — see `docs/github-action-setup.md`.
+
+---
+
+## Bloomberg upload (Stage 2)
+
+For high-confidence runs the analyst exports BEST / EE consensus to
+Excel and uploads it via the UI or:
+
+```bash
+curl -F file=@2222.SR_cons_q.xlsx \
+     https://earnings-research-ur07.onrender.com/api/bloomberg/upload
+```
+
+The two file shapes are:
+- `<TICKER>_cons_q.xlsx` — quarterly consensus (BEST / EE)
+- `<TICKER>_FA.xlsx` — financial-analysis sheet (annual history)
+
+When present, Bloomberg values take precedence over MS / Investing /
+Yahoo in the deck. See `src/services/bloomberg_parser.py`.
+
+---
+
+## Adding a new ticker
+
+1. Add a row to `data/company_master.json` with `ticker`, `company_name`,
+   `exchange`, `country`, `currency`, `is_bank`, and `peer_group`
+   (5 yfinance-resolvable peer tickers).
+2. Look up the MS slug at `marketscreener.com` and add it to
+   `marketscreener_id`.
+3. Look up the Investing.com slug at `investing.com` and add it to
+   `_SLUGS` in `src/providers/probe_investing.py`.
+4. Run `python -m scripts.refresh_investing_cache --tickers NEW.XX`
+   and commit the resulting `data/investing/<slug>__*.json` files.
+5. Run `python -m src.main --init-db` to merge `company_master.json`
+   into the local SQLite.
+6. Test: `python -m src.main --ticker NEW.XX --mode preview`.
+
+---
+
+## Project layout
 
 ```
 earnings-research/
-├── config/
-│   └── settings.toml              # Thresholds, timeouts, model version
+├── config/settings.toml          # thresholds, renderer flag, calendar tunables
 ├── data/
-│   ├── company_master.json        # Curated company seed (used by init-db)
-│   └── kpi_memory/                # Manual KPI JSON (optional)
+│   ├── company_master.json       # curated ticker universe + MS slugs + peers
+│   ├── investing/                # pre-warmed Investing.com snapshots
+│   └── bloomberg/                # uploaded Bloomberg xlsx (per ticker)
 ├── src/
-│   ├── main.py                    # CLI: --ticker, --mode preview, --init-db
-│   ├── api.py                     # FastAPI app: /api/reports, /api/preview, etc.
-│   ├── config.py                  # TOML loader + path resolver
-│   ├── pipeline.py                # Orchestrator (steps 1–11)
-│   ├── constants/
-│   │   └── iv_quality.py          # Investment View: banned phrases, word bounds, guardrail
-│   ├── models/
-│   │   ├── step_result.py         # StepResult + StepTimer
-│   │   ├── company.py             # CompanyMaster
-│   │   ├── financials.py          # QuoteSnapshot, FinancialPeriod, DerivedMetrics
-│   │   ├── news.py                # NewsItem, NewsSummary
-│   │   └── report_payload.py      # ReportPayload
+│   ├── api.py                    # FastAPI app
+│   ├── pipeline.py               # 12-step orchestrator
+│   ├── main.py                   # CLI
 │   ├── providers/
-│   │   ├── yahoo.py               # All Yahoo/yfinance calls
-│   │   ├── marketscreener.py      # Consensus scraping (stub)
-│   │   ├── gemini.py              # LLM wrapper (summarization only)
-│   │   └── news/
-│   │       ├── base.py            # Abstract NewsProvider
-│   │       ├── yahoo_news.py      # Yahoo news adapter
-│   │       ├── reuters_news.py    # Reuters adapter (stub)
-│   │       ├── registry.py        # Provider wiring
-│   │       └── local/
-│   │           └── zawya.py       # Zawya Saudi adapter (stub)
+│   │   ├── probe_yahoo.py        # yfinance probe → canonical_store
+│   │   ├── probe_marketscreener.py
+│   │   ├── probe_investing.py    # curl_cffi + cache + tracked snapshots
+│   │   ├── probe_macro.py        # World Bank / IMF
+│   │   ├── probe_commodities.py  # OPEC / EIA / World Bank
+│   │   ├── probe_ishares.py      # ETF proxy returns (opt-in)
+│   │   └── probe_ir_pdf.py       # Company IR PDFs (opt-in)
 │   ├── services/
-│   │   ├── validate_ticker.py     # Step 1
-│   │   ├── resolve_mapping.py     # Step 2
-│   │   ├── fetch_quote.py         # Step 3
-│   │   ├── fetch_financials.py    # Step 4
-│   │   ├── fetch_consensus.py     # Step 5
-│   │   ├── fetch_news.py          # Step 6
-│   │   ├── reconcile.py           # Step 7
-│   │   ├── summarize_news.py      # Step 8
-│   │   ├── build_report_payload.py # Step 9
-│   │   └── generate_report.py     # Step 10
-│   └── storage/
-│       ├── db.py                  # SQLite schema + queries
-│       └── kpi_memory.py          # Manual KPI CRUD
+│   │   ├── fetch_marketscreener_pages.py
+│   │   ├── bloomberg_parser.py
+│   │   ├── canonical_store.py    # reconciled-value read API
+│   │   ├── reconcile_sources.py  # trust-ladder logic
+│   │   ├── llm_summary.py        # Gemini thesis prompt (forced grounding)
+│   │   ├── render_jabal_snapshot.py    # slide 1
+│   │   ├── render_jabal_thesis.py      # slide 2
+│   │   ├── render_jabal_valuation.py   # slide 3
+│   │   └── generate_report.py    # writes the .pptx
+│   ├── models/                   # Pydantic schemas (FinancialPeriod, ReportPayload, …)
+│   └── storage/db.py             # SQLite schema + seed
+├── frontend/                     # Vite + React app
+├── static/                       # built frontend (committed for one-site Render deploy)
 ├── scripts/
-│   ├── seed_company_master.py      # Merge CSV into company_master.json
-│   ├── diagnostics.py            # newsapi | sabic diagnostics
-│   └── diagnostics_sabic.py      # SABIC vs working (used by diagnostics sabic)
-├── tests/                         # pytest tests/ -v
-├── docs/                          # DATA_SOURCE_AND_URL_REFERENCE, DEPLOY-RENDER, INVESTMENT_VIEW_FLOW
-├── outputs/                       # Generated .docx (gitignored)
-├── cache/                         # HTML cache (gitignored)
-├── requirements.txt
-├── render.yaml                    # Render Web Service blueprint
-├── .env.example
-└── .gitignore
+│   ├── refresh_investing_cache.py  # snapshot Investing.com → data/investing/
+│   ├── daily_refresh.py            # canonical_store cadence-based refresh
+│   ├── probe_sources.py            # provider registry
+│   └── render_build.sh             # Render build hook
+├── tests/                        # pytest
+├── render.yaml                   # Render service + cron blueprint
+└── requirements.txt
 ```
 
 ---
 
-## Adding a New Company
+## Governance notes
 
-1. Edit `data/company_master.json` — add an entry
-2. Run `python -m src.main --init-db`
-3. Run `python -m src.main --ticker NEW.XX --mode preview`
-
-## Adding a New Country's News Source
-
-1. Create `src/providers/news/local/mubasher.py` (or whatever)
-2. Subclass `NewsProvider`, set `country_code = "AE"` (or whatever)
-3. Register the instance in `src/providers/news/registry.py`
-4. Done — any company with `country: "AE"` will auto-use it
-
-## Adding Calendar Mode
-
-See the TODO in `src/main.py`. Implementation is ~30 lines using
-`yf.Ticker(t).calendar` for each seeded company.
-
----
-
-## Governance Notes
-
-- **Model pinned** in `config/settings.toml` (`gemini.model`)
-- **Every step** returns a `StepResult` with status, source, fallback flag, timing
-- **Full audit trail** stored in SQLite `pipeline_runs.step_results`
-- **No silent fallbacks** — if a source fails, the log says exactly which one
-- **LLM never touches numbers** — Gemini is for text summarization only
-- **Kill switch**: set `--skip-llm` or remove GEMINI_API_KEY to disable LLM
-- **Company mappings are curated**, not auto-discovered
+- **LLM never touches numbers.** Gemini drafts the thesis paragraph and
+  bullets only. Every numeric claim must reference a value from the data
+  block; the prompt has a forbidden-phrase filter and an explicit
+  grounding contract. See `src/services/llm_summary.py`.
+- **No silent fallbacks in the value path.** `canonical_store` records
+  per-cell provenance (`canonical_source`, `sources_with_value`); the
+  slide footer credits every contributing provider.
+- **Bloomberg override is the analyst's veto.** Anything the analyst
+  uploads via `/api/bloomberg/upload` takes precedence in the deck —
+  the free stack is the baseline, not the truth.
+- **Read-only filesystem on Render.** Writable paths are `/tmp/...`
+  only. The Investing cache writes are wrapped in try/except so a
+  read-only failure on Render is a no-op (the tracked snapshot fallback
+  handles it).
