@@ -502,6 +502,17 @@ class InvestingProvider(Provider):
         forecasts = _earnings_forecasts(state)
         if not forecasts:
             raise ValueError("Investing.com earnings page had no forecasts")
+        # Also grab the equity-page price so we can derive forward P/E
+        # ratios. The snapshot writer reads `pe_fy1` etc. from
+        # valuation_forward; since Investing wins canonical above MS now,
+        # this dict needs those keys too — otherwise the slide-1 chip
+        # blanks.
+        last_price = None
+        try:
+            equity = self._state(ticker, "equity")
+            last_price = _equity_price(equity).get("last")
+        except Exception:
+            last_price = None
         # Sort forecasts in calendar order so we know which is the next print
         # and which roll up into FY+1 / FY+2 totals.
         rows = sorted(
@@ -528,14 +539,27 @@ class InvestingProvider(Provider):
         rm = nxt.get("reportMonth") or 0
         qn = ((rm - 1) // 3 + 1) if rm else 0
         next_q_period = f"Q{qn} {nxt['reportYear']}" if qn else ""
+        # Forward P/E ratios — derived from last_price / EPS forecast. The
+        # snapshot writer reads these on slide 1 ("P/E (FY EST)" chip).
+        def _pe(eps_val):
+            try:
+                if isinstance(eps_val, (int, float)) and eps_val > 0 and last_price:
+                    return float(last_price) / float(eps_val)
+            except Exception:
+                pass
+            return None
+        pe_fy1 = _pe(eps_fy1)
+        pe_fy2 = _pe(eps_fy2)
         raw_id = persist_raw(self.name, ticker, "valuation_forward", {"forecasts": rows})
         return {
             "fy1_year":   fy1_year,
             "eps_fy1":    eps_fy1,
             "revenue_fy1": rev_fy1,
+            "pe_fy1":     pe_fy1,
             "fy2_year":   fy2_year,
             "eps_fy2":    eps_fy2,
             "revenue_fy2": rev_fy2,
+            "pe_fy2":     pe_fy2,
             "next_q_period":  next_q_period,
             "next_q_report_date": None,
             "eps_next_q":     nxt.get("eps"),

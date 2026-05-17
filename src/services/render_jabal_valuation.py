@@ -424,6 +424,25 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     if vh and isinstance(vh.value, dict):
         periods = vh.value.get("periods", []) or []
         pe_vals = vh.value.get("pe", []) or []
+    # Fallback when MS valuation page wasn't fetched (rate-limit / Render-IP
+    # block): derive a forward P/E series from Investing's per-quarter
+    # forecasts. Yields a 2-3 point series anchored on the current TTM
+    # and forward FY P/Es — not a 5-year history, but populates the chart.
+    if not (periods and pe_vals):
+        val_fwd = cv.get("valuation_forward")
+        fwd = val_fwd.value if val_fwd and isinstance(val_fwd.value, dict) else {}
+        # Investing's _fetch_valuation_forward output includes pe_fy1 and
+        # pe_fy2 (derived from last_price / EPS forecasts).
+        pe_fy1 = fwd.get("pe_fy1")
+        pe_fy2 = fwd.get("pe_fy2")
+        fy1_year = fwd.get("fy1_year")
+        fy2_year = fwd.get("fy2_year")
+        if isinstance(pe_fy1, (int, float)) and fy1_year:
+            periods = [f"FY{fy1_year}"]
+            pe_vals = [float(pe_fy1)]
+            if isinstance(pe_fy2, (int, float)) and fy2_year:
+                periods.append(f"FY{fy2_year}")
+                pe_vals.append(float(pe_fy2))
     if len(periods) > 5 and len(pe_vals) == len(periods):
         periods = periods[-5:]
         pe_vals = pe_vals[-5:]
