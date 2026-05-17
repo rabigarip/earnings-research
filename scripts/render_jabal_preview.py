@@ -69,7 +69,23 @@ def main():
         args.ticker, analyst_name=args.analyst,
         period_label=args.period, report_date=args.report_date,
     )
-    thesis = build_thesis_data(args.ticker, analyst_name=args.analyst)
+    # Mirror generate_report's wiring so the smoke test exercises the real
+    # is_bank + period_heading code paths.
+    period_heading = "Earnings Expectations"
+    if args.period and " Earnings " in args.period:
+        period_heading = f"{args.period.split(' Earnings ', 1)[0]} Earnings Expectations"
+    is_bank = False
+    try:
+        from src.storage.db import load_company as _load_company
+        _cm = _load_company(args.ticker) or {}
+        is_bank = bool(_cm.get("is_bank"))
+        if not is_bank:
+            ind = (_cm.get("industry") or _cm.get("sector") or "").lower()
+            is_bank = ("bank" in ind)
+    except Exception:
+        pass
+    thesis = build_thesis_data(args.ticker, analyst_name=args.analyst,
+                                  is_bank=is_bank, period_heading=period_heading)
     valuation = build_valuation_data(args.ticker, analyst_name=args.analyst)
 
     prs = Presentation()

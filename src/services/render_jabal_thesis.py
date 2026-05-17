@@ -67,13 +67,19 @@ def _body_card(slide, left: float, top: float, width: float, height: float,
           body, size=SZ_BODY, color=BLACK)
 
 
-def _estimates_table(slide, top: float, rows: list[dict]):
-    """Borderless 4-column table.
+def _estimates_table(slide, top: float, rows: list[dict],
+                      period_label: str = "ESTIMATE"):
+    """5-column estimates table: METRIC | Jabal | YoY | QoQ | CONSENSUS.
 
-    rows: list of dicts {metric, jabal, consensus, delta_bps_or_pct, yoy_pct}
-    Column widths sum to CONTENT_W."""
-    headers = ["METRIC", "JABAL EST.", "CONSENSUS", "Δ vs CONSENSUS", "YoY"]
-    col_w   = [2.40, 1.10, 1.10, 1.10, 0.90]
+    `period_label` is the dynamic header for the Jabal-estimate column
+    (e.g. 'Q2 2026E'). Column order matches the institutional reference
+    layout: analyst estimate first, deltas in the middle, consensus last.
+
+    Row dict shape: {metric, jabal, yoy, qoq, consensus, is_margin}.
+    `is_margin` renders YoY/QoQ in basis points; other rows render in %.
+    """
+    headers = ["METRIC", period_label.upper(), "YoY", "QoQ", "CONSENSUS"]
+    col_w   = [2.20, 1.10, 1.00, 1.00, 1.30]
     row_h   = 0.30
     header_top = top
     # Header
@@ -83,30 +89,30 @@ def _estimates_table(slide, top: float, rows: list[dict]):
         _text(slide, x, header_top, col_w[i] - 0.05, row_h, h,
               size=SZ_LABEL, color=MUTED, all_caps=True, align=align)
         x += col_w[i]
-    # Header rule
     _hrule(slide, MARGIN_L, header_top + row_h - 0.02, CONTENT_W,
             color=MUTED)
     # Body rows
     for ri, row in enumerate(rows):
         y = header_top + row_h + ri * row_h
-        # Zebra fill (alt row tint) — every other row
         if ri % 2 == 1:
             band = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
                 in_(MARGIN_L), in_(y - 0.02),
                 in_(CONTENT_W), in_(row_h))
             band.fill.solid(); band.fill.fore_color.rgb = CARD
             band.line.fill.background()
+        is_margin = bool(row.get("is_margin"))
         x = MARGIN_L
-        for i, key in enumerate(["metric", "jabal", "consensus", "delta", "yoy"]):
+        for i, key in enumerate(["metric", "jabal", "yoy", "qoq", "consensus"]):
             val = row.get(key, "—")
             align = PP_ALIGN.LEFT if i == 0 else PP_ALIGN.RIGHT
             color = BLACK
-            if key == "delta" and isinstance(val, (int, float)):
+            if key in ("yoy", "qoq") and isinstance(val, (int, float)):
                 color = signed_color(val)
-                val = f"{val:+.1f}%"
-            elif key == "yoy" and isinstance(val, (int, float)):
-                color = signed_color(val)
-                val = f"{val:+.1f}%"
+                # Margin row: render in basis points. Other rows: percent.
+                if is_margin:
+                    val = f"{val * 100:+.0f} bps"   # input value is in pp; ×100 → bps
+                else:
+                    val = f"{val:+.1f}%"
             elif val is None:
                 val = "—"
             _text(slide, x, y, col_w[i] - 0.05, row_h, str(val),
@@ -174,15 +180,15 @@ class ThesisData:
     exec_summary_body: str
     estimates_rows: list[dict]
     estimates_footnote: str
-    catalysts: list[str]
-    risks: list[str]
-    watch_list: list[str]
-    sources_line: str
-    analyst_name: str
-    gen_date: str
+    estimates_subtitle: str = ""  # Subtitle above the table, e.g. "Jabal estimates vs. consensus  ·  SAR millions unless stated"
+    estimates_period_label: str = "ESTIMATE"  # Column header for the Jabal-estimate column, e.g. "Q2 2026E"
+    catalysts: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    watch_list: list[str] = field(default_factory=list)
+    sources_line: str = ""
+    analyst_name: str = "Jabal Research"
+    gen_date: str = ""
     total_pages: int = 3
-    # Period heading on slide 2 ("Q2 2026 Earnings Expectations"). Must
-    # agree with slide 1's period_label or the deck contradicts itself.
     period_heading: str = "Earnings Expectations"
 
 
@@ -202,9 +208,10 @@ def render_thesis_slide(prs, data: ThesisData):
     # orchestrator didn't supply a quarter (e.g. carry-forward case).
     _section_label(slide, MARGIN_L, 3.96, CONTENT_W, data.period_heading or "Earnings Expectations")
     _text(slide, MARGIN_L, 4.26, CONTENT_W, 0.18,
-          "Jabal estimates vs. consensus  ·  Local currency unless stated",
+          data.estimates_subtitle or "Jabal estimates vs. consensus  ·  Local currency unless stated",
           size=Pt(9), color=GRAY)
-    _estimates_table(slide, 4.48, data.estimates_rows)
+    _estimates_table(slide, 4.48, data.estimates_rows,
+                       period_label=data.estimates_period_label or "ESTIMATE")
     _text(slide, MARGIN_L, 6.88, CONTENT_W, 0.18,
           data.estimates_footnote,
           size=Pt(9), color=GRAY)
@@ -455,17 +462,26 @@ def _ms_quarterly_split(ms_q: dict | None) -> tuple[dict, dict, dict]:
         if yq:
             prior = _find_in_actuals(yq[0] - 1, yq[1]) or {}
 
-    # Prior-year-same-Q for the NEXT estimate (used for forecast-YoY in the
-    # "Q<n> Earnings Expectations" table — the analytically correct YoY for
-    # a preview note). Returned as a third element so callers can pick the
-    # right pairing.
+    # Prior-year-same-Q for the NEXT estimate (used for forecast-YoY).
     prior_of_next = {}
     if next_est.get("period"):
         yq = _parse_q(next_est["period"])
         if yq:
             prior_of_next = _find_in_actuals(yq[0] - 1, yq[1]) or {}
 
-    return next_est, latest_actual, prior, prior_of_next
+    # Prior-quarter actual: the quarter immediately preceding the next
+    # forecast. Needed for QoQ (e.g. Q2 2026 forecast vs Q1 2026 actual).
+    prior_quarter = {}
+    if next_est.get("period"):
+        yq = _parse_q(next_est["period"])
+        if yq:
+            ny, nq = yq
+            if nq > 1:
+                prior_quarter = _find_in_actuals(ny, nq - 1) or {}
+            else:
+                prior_quarter = _find_in_actuals(ny - 1, 4) or {}
+
+    return next_est, latest_actual, prior, prior_of_next, prior_quarter
 
 
 def _investing_actuals_yoy(ticker: str) -> dict:
@@ -580,21 +596,23 @@ def _investing_actuals_yoy(ticker: str) -> dict:
 def _build_estimates_rows(cv: dict, quarterly: list | None = None,
                             is_bank: bool = False,
                             ms_quarterly_forecasts: dict | None = None,
-                            ticker: str = "") -> list[dict]:
-    """Estimates table rows.
+                            ticker: str = "",
+                            currency: str = "") -> tuple[list[dict], str]:
+    """Build rows for the slide-2 estimates table.
 
-    Non-bank: Revenue / EBITDA / Net Income / EPS / EBITDA Margin.
-    Bank:     Revenue / NII / Net Income / EPS  (EBITDA & Margin dropped —
-              banks have no EBITDA; cost-to-income / NIM need balance-sheet
-              data we don't fetch yet).
+    Returns (rows, unit_suffix). The caller bakes unit_suffix into the
+    table subtitle (e.g. "SAR millions unless stated").
 
-    Columns by source:
-      • JABAL EST — always '—' (analyst types it in the .pptx post-generation).
-      • CONSENSUS — from MS/Yahoo forwards for Revenue and EPS; EBITDA / NII /
-        NI / Margin stay '—' unless populated by a future Bloomberg overlay.
-      • Δ vs CONSENSUS — '—' until the analyst fills the Jabal column.
-      • YoY — computed from `quarterly` history (latest actual vs prior-year
-        same quarter). Falls back to '—' when we lack the prior-year row.
+    Row schema:
+      Non-bank: Revenue / EBITDA / Net Income / EPS / EBITDA Margin
+      Bank:     Operating Income / Net Income / EPS
+
+    Columns:
+      • JABAL EST   — '—' in the auto-deck; analyst fills in PPT.
+      • YoY         — next-Q consensus vs prior-year-same-Q actual (%).
+      • QoQ         — next-Q consensus vs immediately-prior-Q actual (%).
+                       Margin rows render YoY/QoQ in bps via `is_margin`.
+      • CONSENSUS   — next-Q consensus from Investing/MS.
     """
     val_fwd = cv.get("valuation_forward")
     fwd = val_fwd.value if val_fwd and isinstance(val_fwd.value, dict) else {}
@@ -614,9 +632,10 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
     # same quarter from the same MS table). Falls back to canonical_store +
     # payload.quarterly_actuals otherwise.
     yoy_rev = yoy_ebitda = yoy_nii = yoy_ni = yoy_eps = yoy_margin = None
+    qoq_rev = qoq_ebitda = qoq_nii = qoq_ni = qoq_eps = qoq_margin = None
     used_ms = False
     if ms_quarterly_forecasts:
-        next_est, latest, prior, prior_of_next = _ms_quarterly_split(ms_quarterly_forecasts)
+        next_est, latest, prior, prior_of_next, prior_quarter = _ms_quarterly_split(ms_quarterly_forecasts)
         # MS publishes unit_scale as a *string* ("million", "billion",
         # "thousand"). Map it to a numeric multiplier so the formatter
         # renders absolute values (e.g. 2614M -> "2.6B").
@@ -647,12 +666,9 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
             yoy_ebitda = _yoy_pct(next_est.get("ebitda"),     prior_of_next.get("ebitda"))
             yoy_nii    = _yoy_pct(next_est.get("nii"),        prior_of_next.get("nii"))
             yoy_ni     = _yoy_pct(next_est.get("net_income"), prior_of_next.get("net_income"))
-            # Revenue + EPS: skip MS pairing for now. They'll be filled by
-            # the Investing forecast-vs-prior path below using the same
-            # source as the displayed consensus (the deck displays
-            # Investing's revenue/eps for the consensus column when Investing
-            # wins the trust ladder, so YoY must use Investing for the
-            # numerator's source).
+            # Revenue + EPS YoY come from the Investing fallback below
+            # so the YoY denominator matches the source of the displayed
+            # CONSENSUS (Investing wins for those rows via trust ladder).
             curr_rev_ms = next_est.get("revenue") or 0
             prev_rev_ms = prior_of_next.get("revenue") or 0
             curr_eb_ms  = next_est.get("ebitda")
@@ -661,7 +677,20 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
             prev_margin = (prev_eb_ms / prev_rev_ms * 100) if prev_eb_ms and prev_rev_ms else None
             yoy_margin = _yoy_bps(curr_margin, prev_margin)
             used_ms = True
-        elif latest and prior:
+        # QoQ: next-Q forecast vs immediately-prior-quarter actual.
+        if next_est and prior_quarter:
+            qoq_rev    = _yoy_pct(next_est.get("revenue"),    prior_quarter.get("revenue"))
+            qoq_ebitda = _yoy_pct(next_est.get("ebitda"),     prior_quarter.get("ebitda"))
+            qoq_nii    = _yoy_pct(next_est.get("nii"),        prior_quarter.get("nii"))
+            qoq_ni     = _yoy_pct(next_est.get("net_income"), prior_quarter.get("net_income"))
+            curr_rev_q = next_est.get("revenue") or 0
+            prev_rev_q = prior_quarter.get("revenue") or 0
+            curr_eb_q  = next_est.get("ebitda")
+            prev_eb_q  = prior_quarter.get("ebitda")
+            curr_margin_q = (curr_eb_q / curr_rev_q * 100) if curr_eb_q and curr_rev_q else None
+            prev_margin_q = (prev_eb_q / prev_rev_q * 100) if prev_eb_q and prev_rev_q else None
+            qoq_margin = _yoy_bps(curr_margin_q, prev_margin_q)
+        if not (next_est and prior_of_next) and latest and prior:
             # No forecast available for the next quarter (e.g. BKMB has no
             # MS Q2 forecast). Leave YoY blank rather than show a misleading
             # last-reported YoY in a forecast-labeled table.
@@ -705,43 +734,87 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
         if yoy_eps is None and isinstance(inv.get("eps"), (int, float)):
             yoy_eps = inv["eps"]
 
-    def _row(metric: str, consensus_str: str | None, yoy_val) -> dict:
+    # Pick a single magnitude unit for the table — keeps values
+    # comparable across rows. Based on the largest absolute value
+    # across Revenue / EBITDA / Net Income consensus.
+    abs_vals = [v for v in (rev_q_consensus, ebitda_q_consensus, ni_q_consensus, nii_q_consensus)
+                  if isinstance(v, (int, float))]
+    max_abs = max((abs(v) for v in abs_vals), default=0)
+    if   max_abs >= 1e12: unit_div, unit_tag = 1e12, "T"
+    elif max_abs >= 1e9:  unit_div, unit_tag = 1e9,  "B"
+    elif max_abs >= 1e6:  unit_div, unit_tag = 1e6,  "M"
+    else:                 unit_div, unit_tag = 1.0,  ""
+
+    cur = (currency or "").upper()
+    unit_suffix = (f"{cur}{unit_tag}" if cur and unit_tag else (cur or unit_tag))
+    if unit_tag == "T":   subtitle_units = f"{cur} trillions unless stated"
+    elif unit_tag == "B": subtitle_units = f"{cur} billions unless stated"
+    elif unit_tag == "M": subtitle_units = f"{cur} millions unless stated"
+    else:                  subtitle_units = f"{cur} units unless stated".strip()
+
+    def _money_in_unit(v):
+        if not isinstance(v, (int, float)): return None
+        scaled = v / unit_div
+        # Display precision: 1,000-ish numbers as integer; smaller with 1 dp.
+        if abs(scaled) >= 100:
+            return f"{scaled:,.0f}"
+        if abs(scaled) >= 10:
+            return f"{scaled:,.1f}"
+        return f"{scaled:,.2f}"
+
+    def _eps_fmt(v):
+        if not isinstance(v, (int, float)): return None
+        return f"{v:,.2f}"
+
+    def _margin_fmt(v):
+        if not isinstance(v, (int, float)): return None
+        return f"{v:.1f}%"
+
+    def _row(metric: str, jabal_str: str | None, consensus_str: str | None,
+              yoy_val, qoq_val, is_margin: bool = False) -> dict:
         return {
-            "metric": metric,
-            "jabal": "—",                                  # analyst fills post-prod
+            "metric":    metric,
+            "jabal":     jabal_str if jabal_str else "—",
+            "yoy":       yoy_val if yoy_val is not None else "—",
+            "qoq":       qoq_val if qoq_val is not None else "—",
             "consensus": consensus_str if consensus_str else "—",
-            "delta": "—",                                  # auto only when Jabal is filled
-            "yoy": yoy_val if yoy_val is not None else "—",
+            "is_margin": is_margin,
         }
 
-    eps_consensus_str = (f"{eps_q_consensus:.2f}"
-                          if isinstance(eps_q_consensus, (int, float))
-                          else None)
+    eps_consensus_str = _eps_fmt(eps_q_consensus)
+
     if is_bank:
-        # Banks: NII replaces EBITDA; drop the EBITDA-Margin row since the
-        # bank equivalents (NIM, cost-to-income) need balance-sheet data
-        # the free providers don't reliably expose.
-        return [
-            _row("Revenue",     _fmt_money_b(rev_q_consensus), yoy_rev),
-            _row("NII",         _fmt_money_b(nii_q_consensus), yoy_nii),
-            _row("Net Income",  _fmt_money_b(ni_q_consensus),  yoy_ni),
-            _row("EPS",         eps_consensus_str,             yoy_eps),
+        # Bank schema: Operating Income (NII + non-int) / Net Income / EPS.
+        # NII / Non-Int / PPOP / Provisions need broker-level data that
+        # MS and Investing don't separately publish — Bloomberg upload is
+        # the right path for those rows when wanted.
+        rows = [
+            _row(f"Operating Income ({unit_suffix})",
+                  None, _money_in_unit(rev_q_consensus), yoy_rev, qoq_rev),
+            _row(f"Net Income ({unit_suffix})",
+                  None, _money_in_unit(ni_q_consensus),  yoy_ni,  qoq_ni),
+            _row(f"EPS ({cur})",
+                  None, eps_consensus_str,               yoy_eps, qoq_eps),
         ]
-    # Compute the EBITDA-margin consensus from the EBITDA / Revenue forecast
-    # pair when both populate. Falls through to '—' otherwise.
+        return rows, unit_suffix
+
+    # Non-bank: Revenue / EBITDA / Net Income / EPS / EBITDA Margin.
+    # EBITDA Margin = EBITDA / Revenue × 100, computed from forecast pair.
     margin_consensus_str = None
     if (isinstance(ebitda_q_consensus, (int, float))
         and isinstance(rev_q_consensus, (int, float))
         and rev_q_consensus > 0):
-        margin_consensus_str = f"{(ebitda_q_consensus / rev_q_consensus * 100):.1f}%"
+        margin_consensus_str = _margin_fmt(ebitda_q_consensus / rev_q_consensus * 100)
 
-    return [
-        _row("Revenue",        _fmt_money_b(rev_q_consensus),   yoy_rev),
-        _row("EBITDA",         _fmt_money_b(ebitda_q_consensus), yoy_ebitda),
-        _row("Net Income",     _fmt_money_b(ni_q_consensus),    yoy_ni),
-        _row("EPS",            eps_consensus_str,                yoy_eps),
-        _row("EBITDA Margin",  margin_consensus_str,             yoy_margin),
+    rows = [
+        _row(f"Revenue ({unit_suffix})",     None, _money_in_unit(rev_q_consensus),    yoy_rev,    qoq_rev),
+        _row(f"EBITDA ({unit_suffix})",      None, _money_in_unit(ebitda_q_consensus), yoy_ebitda, qoq_ebitda),
+        _row(f"Net Income ({unit_suffix})",  None, _money_in_unit(ni_q_consensus),     yoy_ni,     qoq_ni),
+        _row(f"EPS ({cur})",                  None, eps_consensus_str,                  yoy_eps,    qoq_eps),
+        _row("EBITDA Margin",                 None, margin_consensus_str,               yoy_margin, qoq_margin,
+              is_margin=True),
     ]
+    return rows, unit_suffix
 
 
 def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
@@ -769,9 +842,23 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
         llm = None
     summary = (llm or {}).get("thesis_paragraph") or _template_exec_summary(
         cv, commodities_obs, macro_obs)
-    rows = _build_estimates_rows(cv, quarterly=quarterly, is_bank=is_bank,
-                                    ms_quarterly_forecasts=ms_quarterly_forecasts,
-                                    ticker=ticker)
+    # Look up listing currency from company_master so the table can label
+    # values "Revenue (SARM)" / "(AEDM)" etc. Falls back to canonical
+    # profile currency when DB lookup misses.
+    deck_currency = ""
+    try:
+        from src.storage.db import load_company as _lc
+        cm = _lc(ticker) or {}
+        deck_currency = (cm.get("currency") or "").strip()
+    except Exception:
+        pass
+    if not deck_currency:
+        prof = cv.get("company_profile")
+        if prof and isinstance(prof.value, dict):
+            deck_currency = (prof.value.get("currency") or "").strip()
+    rows, unit_suffix = _build_estimates_rows(cv, quarterly=quarterly, is_bank=is_bank,
+                                                ms_quarterly_forecasts=ms_quarterly_forecasts,
+                                                ticker=ticker, currency=deck_currency)
 
     # Compose the table footnote: lead with the next-Q anchor (date,
     # consensus source, analyst count) since that's the strongest data
@@ -821,11 +908,39 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
     llm_risks     = (llm or {}).get("risks") or []
     llm_watch     = (llm or {}).get("watch_list") or []
 
+    # Derive the Jabal-estimate column header (e.g. "Q2 2026E") from the
+    # period_heading parameter ("Q2 2026 Earnings Expectations" → "Q2 2026E").
+    estimates_period_label = "ESTIMATE"
+    if period_heading:
+        import re as _re_ph
+        m = _re_ph.match(r"(Q\d\s+\d{4})\b", period_heading)
+        if m:
+            estimates_period_label = f"{m.group(1)}E"
+        else:
+            estimates_period_label = period_heading.upper()
+    # Subtitle line under the section heading.
+    subtitle_unit_phrase = (
+        f"{(deck_currency or '').upper()} {('trillions' if unit_suffix.endswith('T') else 'billions' if unit_suffix.endswith('B') else 'millions' if unit_suffix.endswith('M') else 'units')} unless stated".strip()
+    )
+    estimates_subtitle = f"Jabal estimates vs. consensus  ·  {subtitle_unit_phrase}"
+
+    # Footnote: source + analyst count + "Bps = basis points" disclosure when
+    # margin row is present.
+    consensus_source = fwd_source if fwd_source and fwd_source != "—" else "MarketScreener"
+    footnote_bits = [f"Estimates: Jabal Research", f"Consensus: {consensus_source}"]
+    if n_an:
+        footnote_bits[-1] = f"Consensus: {consensus_source} ({n_an} analysts)"
+    if not is_bank:
+        footnote_bits.append("Bps = basis points")
+    estimates_footnote = "  ·  ".join(footnote_bits)
+
     from datetime import datetime
     return ThesisData(
         exec_summary_body=summary,
         estimates_rows=rows,
         estimates_footnote=estimates_footnote,
+        estimates_subtitle=estimates_subtitle,
+        estimates_period_label=estimates_period_label,
         catalysts=catalysts or llm_catalysts or default_catalysts,
         risks=risks or llm_risks or [
             "Cautious management tone could validate target-price gap",

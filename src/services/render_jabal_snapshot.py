@@ -39,6 +39,28 @@ from src.services.jabal_design_tokens import (
 from src.services.canonical_store import get_all_fields, CanonicalValue
 
 
+def _normalize_date(s: str) -> str:
+    """Coerce ISO / US-short / month-name strings to '%d %b %Y' ('15 Jul 2026')
+    so REPORT DATE, broker-action dates and the footer match. Returns the
+    input unchanged when no format is recognised."""
+    if not s or not isinstance(s, str):
+        return s or ""
+    s = s.strip()
+    if s.upper() == "TBA":
+        return s
+    from datetime import datetime as _dt
+    for fmt in ("%Y-%m-%d", "%m/%d/%y", "%m/%d/%Y", "%d %b %Y", "%d %B %Y",
+                "%b. %d, %Y", "%b %d, %Y", "%B %d, %Y", "%b %d", "%b. %d"):
+        try:
+            d = _dt.strptime(s, fmt)
+            if d.year == 1900:  # month-day only → assume current year
+                d = d.replace(year=_dt.now().year)
+            return d.strftime("%d %b %Y")
+        except ValueError:
+            continue
+    return s
+
+
 # ── Low-level primitives ────────────────────────────────────
 
 def _text(slide, left, top, width, height, text, *,
@@ -167,8 +189,16 @@ def _consensus_row(slide, top: float, rating: str, n_analysts: int,
     # Card 3: Upside
     c3_left = MARGIN_L + 2 * (card_w + 0.11)
     _card(slide, c3_left, row_top, card_w, 0.82, fill=CARD)
+    # Label adapts to direction: a negative number under "UPSIDE TO
+    # TARGET" misreads — call it DOWNSIDE / IMPLIED MOVE depending on sign.
+    if upside_pct is None:
+        label = "IMPLIED MOVE"
+    elif upside_pct < 0:
+        label = "DOWNSIDE TO TARGET"
+    else:
+        label = "UPSIDE TO TARGET"
     _text(slide, c3_left + 0.18, row_top + 0.08, card_w - 0.20, 0.18,
-          "UPSIDE TO TARGET", size=SZ_LABEL, color=MUTED, all_caps=True)
+          label, size=SZ_LABEL, color=MUTED, all_caps=True)
     up_str = "—" if upside_pct is None else f"{upside_pct:+.1f}%"
     _text(slide, c3_left + 0.18, row_top + 0.28, card_w - 0.20, 0.48,
           up_str, size=SZ_VALUE_LG, color=signed_color(upside_pct),
@@ -317,6 +347,7 @@ class SnapshotData:
     sources_line: str
     analyst_name: str
     gen_date: str
+    pe_fy_est_label: str = "P/E (FY EST)"  # e.g. "P/E (FY26E)" when year known
     total_pages: int = 3
 
 
@@ -341,7 +372,7 @@ def render_snapshot_slide(prs, data: SnapshotData):
         ("LAST CLOSE", data.last_close_fmt),
         ("MARKET CAP", data.market_cap_fmt),
         ("REPORT DATE", data.report_date),
-        ("P/E (FY EST)", data.pe_fy_est_fmt),
+        (data.pe_fy_est_label or "P/E (FY EST)", data.pe_fy_est_fmt),
         ("DIV. YIELD", data.div_yield_fmt),
         ("CURRENCY", data.currency),
     ])
@@ -690,6 +721,7 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
     # FY, not the multi-year-out estimate. Falls through to valuation_forward
     # (Investing-derived pe_fy1) when historical isn't loaded.
     pe_fwd = None
+    pe_fwd_year = None
     if isinstance(val_hist, dict):
         periods = val_hist.get("periods", []) or []
         pe_vals = val_hist.get("pe", []) or []
@@ -698,7 +730,7 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
             cur_year = _dt.now().year
             # Pick the entry whose period label contains the current year
             # (FY2026), or the closest next year if none matches.
-            best_idx, best_diff = None, None
+            best_idx, best_diff, best_year = None, None, None
             for i, p in enumerate(periods):
                 import re as _r
                 m = _r.search(r"(\d{4})", str(p) or "")
@@ -707,14 +739,21 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
                 if not isinstance(pe_vals[i], (int, float)): continue
                 diff = abs(yr - cur_year)
                 if best_diff is None or diff < best_diff:
-                    best_idx, best_diff = i, diff
+                    best_idx, best_diff, best_year = i, diff, yr
             if best_idx is not None:
                 pe_fwd = float(pe_vals[best_idx])
+                pe_fwd_year = best_year
     if pe_fwd is None and isinstance(val_fwd, dict):
+        from datetime import datetime as _dt
+        _cy = _dt.now().year
         for k in ("pe_fy1", "pe_2026", "pe_2027", "pe"):
             v = val_fwd.get(k)
             if isinstance(v, (int, float)):
                 pe_fwd = v
+                # pe_fy1 = current fiscal year; pe_2026/2027 are explicit
+                import re as _r
+                m = _r.search(r"(\d{4})", k)
+                pe_fwd_year = int(m.group(1)) if m else _cy
                 break
     elif pe_fwd is None and isinstance(val_fwd, (int, float)):
         pe_fwd = val_fwd
@@ -801,8 +840,11 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
         upside_pct=upside_pct,
         last_close_fmt=_money(current),
         market_cap_fmt=_mc(mcap),
-        report_date=report_date,
+        report_date=_normalize_date(report_date),
         pe_fy_est_fmt=("—" if pe_fwd is None else f"{float(pe_fwd):.1f}x"),
+        pe_fy_est_label=(f"P/E (FY{pe_fwd_year % 100:02d}E)"
+                          if pe_fwd is not None and pe_fwd_year
+                          else "P/E (FY EST)"),
         div_yield_fmt=_pct(div_yield),
         currency=currency or "",
         perf_1d=_perf("perf_1d"),
