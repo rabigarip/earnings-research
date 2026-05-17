@@ -389,16 +389,26 @@ def _ms_quarterly_split(ms_q: dict | None) -> tuple[dict, dict, dict]:
     from datetime import datetime as _dt
     today = _dt.now().date()
 
+    def _parse_ms_date(date_str: str):
+        """MS publishes announcement dates as MM/DD/YY (e.g. '4/23/26').
+        Try each known shape in turn and return a `date` or None."""
+        s = str(date_str or "").strip()
+        if not s or s == "-":
+            return None
+        for fmt in ("%Y-%m-%d", "%m/%d/%y", "%m/%d/%Y", "%-m/%-d/%y"):
+            try:
+                return _dt.strptime(s, fmt).date()
+            except (ValueError, TypeError):
+                continue
+        return None
+
     def _is_estimate(date_str) -> bool:
-        if not date_str:
-            # No announcement date — assume estimate if any other estimate-like
-            # value still pending.
+        """True if the row is a forward forecast (no past announcement)."""
+        d = _parse_ms_date(date_str)
+        if d is None:
+            # Empty / '-' / unparseable → treat as forward estimate.
             return True
-        try:
-            d = _dt.fromisoformat(str(date_str)[:10]).date()
-            return d >= today
-        except Exception:
-            return True
+        return d >= today
 
     actuals = [r for r in rows if not _is_estimate(r[6])]
     estimates = [r for r in rows if _is_estimate(r[6])]
@@ -530,9 +540,19 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
     used_ms = False
     if ms_quarterly_forecasts:
         next_est, latest, prior = _ms_quarterly_split(ms_quarterly_forecasts)
-        unit_scale = 1.0
-        if isinstance(ms_quarterly_forecasts.get("unit_scale"), (int, float)):
-            unit_scale = float(ms_quarterly_forecasts["unit_scale"]) or 1.0
+        # MS publishes unit_scale as a *string* ("million", "billion",
+        # "thousand"). Map it to a numeric multiplier so the formatter
+        # renders absolute values (e.g. 2614M -> "2.6B").
+        _UNIT_MULT = {
+            "thousand": 1e3, "thousands": 1e3,
+            "million":  1e6, "millions":  1e6, "m": 1e6,
+            "billion":  1e9, "billions":  1e9, "b": 1e9,
+        }
+        raw_scale = ms_quarterly_forecasts.get("unit_scale")
+        if isinstance(raw_scale, (int, float)):
+            unit_scale = float(raw_scale) or 1.0
+        else:
+            unit_scale = _UNIT_MULT.get(str(raw_scale or "").strip().lower(), 1.0)
         def _scale(v):
             return v * unit_scale if isinstance(v, (int, float)) else v
         if next_est:
@@ -616,12 +636,20 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
             _row("Net Income",  _fmt_money_b(ni_q_consensus),  yoy_ni),
             _row("EPS",         eps_consensus_str,             yoy_eps),
         ]
+    # Compute the EBITDA-margin consensus from the EBITDA / Revenue forecast
+    # pair when both populate. Falls through to '—' otherwise.
+    margin_consensus_str = None
+    if (isinstance(ebitda_q_consensus, (int, float))
+        and isinstance(rev_q_consensus, (int, float))
+        and rev_q_consensus > 0):
+        margin_consensus_str = f"{(ebitda_q_consensus / rev_q_consensus * 100):.1f}%"
+
     return [
         _row("Revenue",        _fmt_money_b(rev_q_consensus),   yoy_rev),
         _row("EBITDA",         _fmt_money_b(ebitda_q_consensus), yoy_ebitda),
         _row("Net Income",     _fmt_money_b(ni_q_consensus),    yoy_ni),
         _row("EPS",            eps_consensus_str,                yoy_eps),
-        _row("EBITDA Margin",  None,                             yoy_margin),
+        _row("EBITDA Margin",  margin_consensus_str,             yoy_margin),
     ]
 
 
