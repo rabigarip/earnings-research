@@ -390,8 +390,19 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     profile = cv.get("company_profile")
     pname = (profile.value.get("name") if profile and isinstance(profile.value, dict)
               else ticker)
+    # Currency: prefer company_master (the curated listing currency) over
+    # the canonical_store profile, because some providers report a
+    # company's country-of-record currency (e.g. CNY for Tencent) while
+    # the stock actually trades in HKD on HKEX. The deck should reflect
+    # the trading currency.
     currency = ""
-    if profile and isinstance(profile.value, dict):
+    try:
+        from src.storage.db import load_company as _load_company
+        cm = _load_company(ticker) or {}
+        currency = (cm.get("currency") or "").strip()
+    except Exception:
+        pass
+    if not currency and profile and isinstance(profile.value, dict):
         currency = profile.value.get("currency") or ""
 
     # 52w close series. Prefer canonical_store; fall back to the Investing

@@ -562,7 +562,12 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
             profile.setdefault("name", cm.get("company_name") or "")
             profile.setdefault("sector", cm.get("sector") or "")
             profile.setdefault("industry", cm.get("industry") or "")
-            profile.setdefault("currency", cm.get("currency") or "")
+            # Currency: company_master overrides — some providers report a
+            # company's country-of-record currency (Tencent: CNY) but the
+            # stock trades in the listing currency (HKD). The deck should
+            # always show the trading currency.
+            if cm.get("currency"):
+                profile["currency"] = cm["currency"]
             # Exchange suffix: friendly-name + country, e.g. "Tadawul (Saudi Arabia)".
             # The DB stores 3-letter codes (SAU, ADX, NSE, HKG, ...) — map to
             # human-readable bourse names. Unknown codes fall through to the raw code.
