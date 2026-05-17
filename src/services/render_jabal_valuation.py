@@ -275,7 +275,17 @@ def _sentiment_row(slide, top: float, *, rating_split: dict,
     _text(slide, c2_left + 0.12, top + 0.32, card_w - 0.20, 0.40,
           target_str, size=Pt(16), color=BLACK, bold=True)
     if target_range:
-        rng_str = (f"Range  {currency} {target_range[0]:,.0f} — {target_range[1]:,.0f}"
+        # Pick decimal precision by absolute value so a low-priced OMR
+        # ticker doesn't round to "OMR 0 — 1". Sub-1 → 3dp; 1-10 → 2dp;
+        # 10-100 → 1dp; >=100 → 0dp.
+        def _rng_fmt(v):
+            if v is None: return ""
+            v_abs = abs(float(v))
+            if v_abs < 1:   return f"{v:,.3f}"
+            if v_abs < 10:  return f"{v:,.2f}"
+            if v_abs < 100: return f"{v:,.1f}"
+            return f"{v:,.0f}"
+        rng_str = (f"Range  {currency} {_rng_fmt(target_range[0])} — {_rng_fmt(target_range[1])}"
                     if target_range[0] is not None and target_range[1] is not None
                     else "")
         _text(slide, c2_left + 0.12, top + 0.74, card_w - 0.20, 0.18,
