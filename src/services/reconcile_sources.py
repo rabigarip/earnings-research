@@ -38,18 +38,26 @@ from typing import Any, Optional
 
 # Trust ladder for canonical-value selection (left = highest trust).
 # When multiple sources have a value, we pick the leftmost present.
+#
+# MarketScreener is intentionally demoted below both Investing.com and
+# Yahoo because:
+#   1. MS is web-scraped HTML, brittle to UI changes
+#   2. MS's absolute values have shown systematic mismatches vs live
+#      data (H-share-only market caps for HK names, M/D/YY-formatted
+#      announcement dates that broke the actual/forecast split, etc.)
+#   3. Investing.com fronts its data via Next.js __NEXT_DATA__ JSON —
+#      structurally cleaner and matches the live equity page exactly.
+# MS still wins for fields no other free source covers (multi-year
+# /finances/ P/E history, /calendar/ events, /sector/ peer comps).
 TRUST_LADDER = [
     "ir_pdf",        # filed-statement PDFs — ground truth (Stage 2 wired)
     "ir_page",       # legacy alias retained for backwards compat
     "bloomberg",     # user-uploaded BEST consensus (when present, wins
                      # over every free source for forward estimates,
                      # target price, and rating split).
-    "adx",           # exchange direct
-    "nse",
-    "hkex",
-    "investing",     # Investing.com — richest free panel of forward fields
-    "marketscreener",
-    "yahoo",
+    "investing",     # Investing.com — JSON-fronted, matches live exactly
+    "yahoo",         # Yahoo Finance — API-fed, authoritative on basics
+    "marketscreener",# Scraped HTML, demoted from primary
     "macro",
 ]
 

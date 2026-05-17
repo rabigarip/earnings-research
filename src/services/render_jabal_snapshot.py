@@ -402,23 +402,32 @@ def _sources_line(cv: dict) -> str:
         for s in (getattr(c, "sources_with_value", None) or []):
             if s:
                 seen.add(s)
-    # Prefer human-readable order: Yahoo, MarketScreener, Investing.com, others
+    # Primary → Secondary order: Bloomberg (when uploaded) > Investing.com >
+    # Yahoo Finance > MarketScreener > supporting layers. MS is always
+    # demoted because it's web-scraped (vs API-fed) and its absolute values
+    # have shown systematic mismatches (e.g. H-share-only market cap for
+    # HK names) vs the live Investing equity-page numbers.
     pretty = {
-        "yahoo": "Yahoo Finance",
+        "bloomberg":      "Bloomberg",
+        "ir_pdf":         "Company IR",
+        "investing":      "Investing.com",
+        "yahoo":          "Yahoo Finance",
         "marketscreener": "MarketScreener",
-        "investing": "Investing.com",
-        "macro": "World Bank / IMF",
-        "ishares": "iShares",
-        "commodities": "World Bank / OPEC / EIA",
-        "bloomberg": "Bloomberg",
-        "ir_pdf": "Company IR",
+        "macro":          "World Bank / IMF",
+        "ishares":        "iShares",
+        "commodities":    "World Bank / OPEC / EIA",
     }
-    ordered = sorted(seen, key=lambda s: (
-        0 if s == "yahoo" else
-        1 if s == "marketscreener" else
-        2 if s == "investing" else
-        3, s,
-    ))
+    _order = {
+        "bloomberg":      0,
+        "ir_pdf":         1,
+        "investing":      2,
+        "yahoo":          3,
+        "marketscreener": 4,
+        "macro":          5,
+        "ishares":        6,
+        "commodities":    7,
+    }
+    ordered = sorted(seen, key=lambda s: (_order.get(s, 99), s))
     labels = [pretty.get(s, s) for s in ordered]
     return ", ".join(labels) or "free-source stack"
 
