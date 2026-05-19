@@ -99,15 +99,30 @@ def _imf_fetch(iso3: str, indicator: str) -> Optional[dict]:
     if not pairs:
         return None
     pairs.sort()
-    latest_year, latest_val = pairs[-1]
+    # IMF WEO publishes both historical actuals and out-year forecasts in
+    # a single series (e.g. Oman 2022-2031). Picking pairs[-1] gave us
+    # the 2031 long-run reversion estimate — wrong frame for a Q2 2026
+    # earnings preview. Anchor on the *current calendar year* instead so
+    # the macro context reflects today's expected conditions; `next_value`
+    # then becomes the one-year-out forecast.
+    from datetime import datetime as _dt
+    cur_yr = _dt.now().year
+    by_year = {yr: val for yr, val in pairs}
+    # Pick the current year if IMF carries it; otherwise the closest
+    # available year (forecasts always cover the current year, but
+    # historical-only series — e.g. some HK indicators — may stop short).
+    if cur_yr in by_year:
+        anchor_year, anchor_val = cur_yr, by_year[cur_yr]
+    else:
+        anchor_year, anchor_val = min(
+            pairs, key=lambda p: (abs(p[0] - cur_yr), -p[0])
+        )
     next_year = next_val = None
-    for yr, val in pairs:
-        if yr > latest_year:
-            next_year, next_val = yr, val
-            break
+    if (anchor_year + 1) in by_year:
+        next_year, next_val = anchor_year + 1, by_year[anchor_year + 1]
     return {
-        "value":      round(latest_val, 2),
-        "year":       latest_year,
+        "value":      round(anchor_val, 2),
+        "year":       anchor_year,
         "next_value": round(next_val, 2) if next_val is not None else None,
         "next_year":  next_year,
         "indicator":  indicator,
@@ -222,13 +237,16 @@ class MacroProvider(Provider):
             "population":        snap.get("population"),
             "fx_lcu_per_usd":    snap.get("fx_lcu_per_usd"),
             "macro_year":        snap.get("gdp_growth_pct_year"),
-            # IMF WEO forecasts
-            "gdp_growth_fcst_pct":      snap.get("gdp_growth_pct_fcst"),
-            "gdp_growth_fcst_year":     snap.get("gdp_growth_pct_fcst_year"),
-            "gdp_growth_fcst_next_pct": snap.get("gdp_growth_pct_fcst_next"),
+            # IMF WEO forecasts (preferred over WB historical actuals in
+            # the LLM prompt — see llm_summary.build_context.macro block).
+            "gdp_growth_fcst_pct":       snap.get("gdp_growth_pct_fcst"),
+            "gdp_growth_fcst_year":      snap.get("gdp_growth_pct_fcst_year"),
+            "gdp_growth_fcst_next_pct":  snap.get("gdp_growth_pct_fcst_next"),
             "gdp_growth_fcst_next_year": snap.get("gdp_growth_pct_fcst_next_year"),
-            "inflation_fcst_pct":       snap.get("inflation_pct_fcst"),
-            "inflation_fcst_next_pct":  snap.get("inflation_pct_fcst_next"),
-            "current_account_pct":      snap.get("current_account_pct"),
+            "inflation_fcst_pct":        snap.get("inflation_pct_fcst"),
+            "inflation_fcst_year":       snap.get("inflation_pct_fcst_year"),
+            "inflation_fcst_next_pct":   snap.get("inflation_pct_fcst_next"),
+            "inflation_fcst_next_year":  snap.get("inflation_pct_fcst_next_year"),
+            "current_account_pct":       snap.get("current_account_pct"),
         }
         return profile, "macro", snap.get("gdp_growth_pct_year") or "", raw_id
