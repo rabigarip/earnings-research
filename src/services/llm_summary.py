@@ -211,9 +211,15 @@ def build_context(ticker: str) -> dict:
         "hold_count": rating.get("hold"),
         "sell_count": rating.get("sell"),
         "upside_pct": upside_pct,
-        # Valuation history
+        # Valuation history (MS multi-year P/E series, last + avg)
         "pe_recent": pe_recent,
         "pe_5y_avg": pe_avg,
+        # Forward P/E from Investing — the value that drives slide 1's
+        # FY P/E chip. Including it here so the LLM's thesis paragraph
+        # can cite the SAME number ("12.4x FY26") that the rest of the
+        # deck displays, not the MS historical reversion-mean.
+        "pe_fy1": val_fwd.get("pe_fy1"),
+        "pe_fy2": val_fwd.get("pe_fy2"),
         # Surprise track record
         "surprise_beats_last4": beats,
         "surprise_n_recent": n_recent,
@@ -297,16 +303,36 @@ def _prompt(ctx: dict) -> str:
         f"quarters above consensus EPS."
     ) if ctx.get("surprise_n_recent") else ""
 
-    pe_line = ""
+    pe_parts = []
+    if isinstance(ctx.get("pe_fy1"), (int, float)):
+        fy1 = ctx["pe_fy1"]
+        yr = ctx.get("fy1_year") or ""
+        pe_parts.append(f"Forward P/E {fy1:.1f}x (FY{yr})" if yr else f"Forward P/E {fy1:.1f}x")
     if isinstance(ctx.get("pe_recent"), (int, float)) and isinstance(ctx.get("pe_5y_avg"), (int, float)):
         avg = ctx["pe_5y_avg"]
         rec = ctx["pe_recent"]
         delta_pct = (rec / avg - 1.0) * 100 if avg else 0
-        pe_line = (
-            f"P/E around {rec:.1f}x vs 5-year average {avg:.1f}x "
-            f"({delta_pct:+.0f}% relative)."
+        pe_parts.append(
+            f"trailing P/E {rec:.1f}x vs 5-year average {avg:.1f}x "
+            f"({delta_pct:+.0f}% relative)"
         )
+    pe_line = "; ".join(pe_parts) + "." if pe_parts else ""
 
+    # Short commodity tags (e.g. "hh" for Henry Hub) get truncated by the
+    # LLM into garbage strings — pre-expand to human-readable labels so
+    # the prompt block reads cleanly and the model never invents a
+    # short-form.
+    _COMMODITY_LABELS = {
+        "hh":          "Henry Hub natural gas",
+        "wti":         "WTI crude",
+        "brent":       "Brent crude",
+        "urea":        "Urea",
+        "ammonia":     "Ammonia",
+        "copper":      "Copper",
+        "gold":        "Gold",
+        "coking_coal": "Coking coal",
+        "iron_ore":    "Iron ore",
+    }
     commodity_lines = []
     for tag, info in (ctx.get("commodities") or {}).items():
         if not isinstance(info, dict):
@@ -316,8 +342,9 @@ def _prompt(ctx: dict) -> str:
         unit = info.get("unit", "")
         if val is None:
             continue
+        label = _COMMODITY_LABELS.get(tag, tag.replace("_", " ").title())
         yoy_str = f" ({yoy:+.1f}% YoY)" if isinstance(yoy, (int, float)) else ""
-        commodity_lines.append(f"{tag}: {val} {unit}{yoy_str}")
+        commodity_lines.append(f"{label}: {val} {unit}{yoy_str}")
     commodity_block = ("Commodity context: " + "; ".join(commodity_lines) + ".") if commodity_lines else ""
 
     # Macro block. Every figure is year + source stamped so Gemini cannot
@@ -392,56 +419,239 @@ EARNINGS TRACK RECORD
 {broker_block}
 
 TASK
-Write an earnings-preview package as a JSON object with these keys:
+Write an earnings-preview package as a JSON object with these keys.
+Voice: institutional sell-side analyst writing the morning note. Direct,
+declarative, no hedging adverbs, no marketing language. Synthesize
+across the data block above — connect signals into a view rather than
+listing facts back. You have analytical leeway on framing; you do NOT
+have leeway on numbers.
 
-1. "thesis_paragraph": EXACTLY 4 sentences, institutional sell-side voice,
-   roughly 90-130 words. The four sentences must follow this structure:
-     • S1 — Stance: state the call (constructive / cautious / balanced)
-       relative to Street consensus ({rating}). Reference the actual rating
-       label and analyst count.
-     • S2 — Valuation/positioning evidence: cite the P/E vs 5-year avg line,
-       the dividend yield, or the target-vs-current spread. At least one
-       precise number with units (x, %, or {cur}).
-     • S3 — Operating driver into the print: anchor on commodity-price moves,
-       macro context, or the consensus next-Q EPS/Revenue figure. At least
-       one precise number.
-     • S4 — Swing factor: identify the single management commentary line
-       that would shift consensus, framed as what investors will watch.
-   GROUNDING CONTRACT: every number you write must appear verbatim (or as a
-   stated derivation, e.g. "FY26 EPS of {fy1_eps}") in the data block above.
-   If a sentence cannot cite a number, rewrite it as qualitative without the
-   missing figure.
+1. "thesis_paragraph": 3-5 sentences (~80-140 words). State the
+   investment setup heading into the print: what the Street is pricing
+   in, which numbers support or undercut that view, and the single
+   factor most likely to move consensus on the call. Take a side where
+   the data supports one — only fall back to "balanced" when the
+   signals genuinely cancel out.
 
-2. "catalysts": EXACTLY 3 bullets. Each bullet is one sentence and starts
-   with the lever, then the number. Pattern: "<Lever> — <quantitative anchor>".
-   Use only the data block above; do NOT use the literal numbers in the
-   pattern examples below — those are format guides, not facts:
-     • Pattern: "Beat-streak — N of last K quarters above consensus EPS"
-     • Pattern: "Re-rate room — current P/E Xx vs 5y avg Yx"
-     • Pattern: "Capital return — Z% dividend yield"
-   Forbidden generics: "constructive guidance", "strong execution",
-   "positive momentum", "supportive backdrop". Drop any bullet you cannot
-   anchor in the data block.
+2. "catalysts": 2-3 bullets (1 sentence each). What could surprise to
+   the upside, anchored in a real number from the data block. Frame as
+   readable analytical statements, not "Lever — number" labels.
+   Examples of acceptable voice (do NOT copy these literal numbers —
+   use the real values from the data block):
+     • "Beat history is constructive — EPS topped consensus in 3 of
+        the last 4 quarters, averaging +9% surprise."
+     • "Re-rate room exists at 11.0x FY26 P/E versus the 5-year
+        average of 13.5x."
+   Avoid empty phrases ("constructive guidance", "strong execution",
+   "positive momentum") with no specific number behind them.
 
-3. "risks": EXACTLY 3 bullets. Same pattern as catalysts. Examples (format
-   only — use real numbers from the data block):
-     • Pattern: "Margin pressure — feedstock cost Z% YoY"
-     • Pattern: "Target gap — Street PT implies X% downside vs last close"
-     • Pattern: "Miss tape — N of last K quarters below consensus"
+3. "risks": 2-3 bullets, same voice as catalysts. Company-specific
+   downside drivers anchored in real numbers. Skip macro signals that
+   do not directly affect the business model — a low domestic
+   inflation print, for example, is rarely a meaningful risk for a
+   commercial bank.
 
-4. "watch_list": EXACTLY 3 questions ending in "?". Each must reference a
-   specific data point from the block (price, margin, capex, surprise pct,
-   broker action, etc.) — not a generic open-ended question.
+4. "watch_list": 2-3 specific questions ending in "?". Each must
+   reference a real data point (a price level, a margin, a capex
+   number, a surprise pct, a broker action, a guidance figure).
+   Not generic open-enders.
 
-VALIDATION CHECKLIST (apply silently before responding):
-  □ Every numeric appearing in the JSON traces back to a value in the data block.
-  □ No forbidden phrase appears.
-  □ Sentence counts are exact (4 thesis, 3/3/3 bullets/questions).
-  □ Bullets are pattern-conformant ("<Lever> — <number with unit>").
-  □ No markdown fences, no preface, no trailing prose.
-
-Return ONLY the JSON object.
+HARD RULES
+  - Every number you write must trace to a value in the data block.
+    Do not round inconsistently. Do not invent precise figures
+    ("approximately 12%" is not acceptable cover for an invented
+    number — drop the sentence instead).
+  - If a sentence cannot cite a real number for the claim it is
+    making, rewrite it as qualitative or drop it.
+  - Currency, units, and time period must match how the data block
+    presents them.
+  - No markdown fences, no preface, no trailing prose. JSON only.
 """
+
+
+# ── Numeric-trace validator ───────────────────────────────────────
+#
+# Even with a tight grounding contract, the LLM occasionally invents
+# numbers (rounds inconsistently, hallucinates a "5-year average" the
+# context never carried, etc.). The validator extracts every numeric
+# token from each LLM-generated sentence and confirms it matches a value
+# we actually have in the context (or a stated derivation: surprise
+# averages, target spreads, P/E premium to history). Sentences whose
+# numbers don't trace are dropped — the renderer falls back to the
+# deterministic catalyst/risk defaults for any bullets that drop out.
+#
+# Tolerance: ±5% relative for matches (covers reasonable rounding); a
+# table of common derivations is computed once from the context.
+
+import re as _re
+
+
+def _allowed_numbers(ctx: dict) -> set[float]:
+    """Build the whitelist of numeric values the LLM may cite. Includes
+    raw fields, simple derivations (% changes, averages), and a few
+    rounded variants so a "12.4x" match doesn't fail against 12.39."""
+    vals: set[float] = set()
+
+    def _add(v):
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            try:
+                f = float(v)
+                vals.add(round(f, 2))
+                # Integer rounding ONLY for values that are conceptually
+                # integers (analyst counts, beat ratios). Continuous
+                # values like 4.83% yield shouldn't unlock 5.0 in the
+                # allow-set — that's how "5.2% average surprise" slips
+                # past the validator.
+                if isinstance(v, int) or (isinstance(v, float) and v.is_integer()):
+                    vals.add(round(f, 0))
+            except (ValueError, OverflowError):
+                pass
+
+    # Raw scalars from context (anything that's a number).
+    def _walk(d):
+        if isinstance(d, dict):
+            for v in d.values():
+                _walk(v)
+        elif isinstance(d, list):
+            for v in d:
+                _walk(v)
+        else:
+            _add(d)
+    _walk(ctx)
+
+    # Derived: P/E premium/discount to 5y average.
+    pe_recent = ctx.get("pe_recent")
+    pe_avg = ctx.get("pe_5y_avg")
+    if isinstance(pe_recent, (int, float)) and isinstance(pe_avg, (int, float)) and pe_avg:
+        delta = (pe_recent / pe_avg - 1.0) * 100
+        _add(delta)
+        _add(-delta)
+
+    # Derived: target upside/downside (already in ctx as upside_pct, but
+    # also surface the absolute pct for downside framing).
+    up = ctx.get("upside_pct")
+    if isinstance(up, (int, float)):
+        _add(abs(up))
+
+    # Derived: average surprise pct across valid surprises.
+    last = ctx.get("last_surprise") or {}
+    sp = last.get("eps_surprise_pct") if isinstance(last, dict) else None
+    if isinstance(sp, (int, float)):
+        _add(abs(sp))
+
+    # Beat ratio numerator/denominator (e.g. "3 of 4 quarters").
+    if isinstance(ctx.get("surprise_beats_last4"), int):
+        _add(ctx["surprise_beats_last4"])
+    if isinstance(ctx.get("surprise_n_recent"), int):
+        _add(ctx["surprise_n_recent"])
+
+    # Rating split + total
+    for k in ("buy_count", "hold_count", "sell_count", "n_analysts"):
+        _add(ctx.get(k))
+    if all(isinstance(ctx.get(k), int) for k in ("buy_count", "hold_count", "sell_count")):
+        _add(ctx["buy_count"] + ctx["hold_count"] + ctx["sell_count"])
+
+    # Commodity YoY values
+    for tag, info in (ctx.get("commodities") or {}).items():
+        if isinstance(info, dict):
+            _add(info.get("value"))
+            _add(info.get("yoy_pct"))
+            yoy = info.get("yoy_pct")
+            if isinstance(yoy, (int, float)):
+                _add(abs(yoy))
+
+    return vals
+
+
+_NUM_PATTERN = _re.compile(
+    # Match signed/unsigned decimals, optionally followed by %, x, B, M, T, bps
+    r"[+-]?\d+(?:[,\d]*\.?\d+|\.\d+)?(?:\s*(?:%|x|bps|B|M|T|K))?"
+)
+_INTEGER_NUM = _re.compile(r"\b\d{1,2}\b")
+
+
+def _extract_numbers(text: str) -> list[float]:
+    """Pull every numeric literal out of an LLM sentence. Strips
+    commas, percentage signs, and unit suffixes; returns floats."""
+    out = []
+    for m in _NUM_PATTERN.finditer(text or ""):
+        raw = m.group(0).strip()
+        # strip suffix unit
+        token = _re.sub(r"\s*(?:%|x|bps|B|M|T|K)$", "", raw, flags=_re.IGNORECASE)
+        token = token.replace(",", "").rstrip(".")
+        try:
+            out.append(float(token))
+        except ValueError:
+            continue
+    return out
+
+
+def _number_matches(n: float, allowed: set[float], *, tol_pct: float = 5.0) -> bool:
+    """Is n within tol_pct of any allowed value? Also accepts exact small
+    integers (analyst counts, beat ratios) — those have to match exactly
+    because rounding 2.0 to 3 changes the meaning."""
+    if not allowed:
+        return True  # nothing to validate against
+    n_abs = abs(n)
+    if n_abs == 0:
+        return 0.0 in allowed or any(abs(a) < 0.01 for a in allowed)
+    # Exact integer match (analyst counts, beat ratios)
+    if n.is_integer() and 0 <= n <= 50:
+        if n in allowed or -n in allowed:
+            return True
+    for a in allowed:
+        a_abs = abs(a)
+        denom = max(n_abs, a_abs)
+        if denom < 0.01:
+            continue
+        if abs(n - a) / denom * 100 <= tol_pct:
+            return True
+        # Try sign-flipped (writer says "+5%" against a stored -5% value).
+        if abs(n + a) / denom * 100 <= tol_pct:
+            return True
+    return False
+
+
+def _validate_sentence(text: str, allowed: set[float]) -> bool:
+    """Sentence passes if every numeric token in it traces to an allowed
+    value. A sentence with no numeric tokens passes trivially (we want
+    qualitative analytical voice to survive)."""
+    nums = _extract_numbers(text)
+    if not nums:
+        return True
+    return all(_number_matches(n, allowed) for n in nums)
+
+
+def _validate_llm_output(payload: dict, ctx: dict) -> dict:
+    """Drop sentences/bullets whose numbers don't trace to the context.
+    Returns a copy of payload with offending content removed."""
+    allowed = _allowed_numbers(ctx)
+    cleaned = dict(payload)
+
+    # Thesis paragraph: split on sentence boundaries; drop ungrounded sentences.
+    # Re-join with spacing intact so the paragraph still reads naturally.
+    thesis = payload.get("thesis_paragraph") or ""
+    if thesis:
+        # Split on sentence terminators while keeping them.
+        sentences = _re.findall(r"[^.!?]+[.!?]+", thesis)
+        if not sentences:
+            sentences = [thesis]
+        kept = [s.strip() for s in sentences if _validate_sentence(s, allowed)]
+        cleaned["thesis_paragraph"] = " ".join(kept).strip()
+        dropped = len(sentences) - len(kept)
+        if dropped:
+            log.warning("Dropped %d thesis sentence(s) with ungrounded numbers", dropped)
+
+    # Lists: drop bullets that fail. Renderer's defaults backfill when empty.
+    for key in ("catalysts", "risks", "watch_list"):
+        items = payload.get(key) or []
+        kept = [it for it in items if isinstance(it, str) and _validate_sentence(it, allowed)]
+        cleaned[key] = kept
+        if len(kept) < len(items):
+            log.warning("Dropped %d %s bullet(s) with ungrounded numbers",
+                         len(items) - len(kept), key)
+
+    return cleaned
 
 
 # ── Cache ────────────────────────────────────────────────────────
@@ -522,5 +732,10 @@ def generate_summary(ticker: str, *, force_refresh: bool = False) -> Optional[di
         "as_of":      datetime.now(timezone.utc).isoformat(),
         "context_hash": key,
     }
+    # Numeric-trace validator: drop any sentence / bullet that cites a
+    # number we can't trace back to the context. Loosens the prompt's
+    # prose patterns (the LLM gets analytical leeway) while keeping the
+    # numeric grounding strict.
+    payload = _validate_llm_output(payload, ctx)
     _write_cache(path, payload)
     return payload
