@@ -292,19 +292,29 @@ def _template_exec_summary(cv: dict, commodities: dict,
             commodity_text = " The macro and commodity backdrop is anchored by " \
                 + "; ".join(bits[:2]) + "."
 
+    # Macro template: prefer IMF current-year + next-year forecasts over
+    # World Bank historical actuals. WB falls back only when IMF lacks a
+    # series for the country. Every figure year-stamped so the resulting
+    # sentence reads "IMF 2026 forecast 3.5%" rather than the misleading
+    # "GDP recently at 1.6%" (which was a stale 2024 actual).
     macro_text = ""
     mp = macro_obs.get("company_profile") if macro_obs else None
     if mp:
-        gdp_act = mp.get("gdp_growth_pct")
-        gdp_fcst = mp.get("gdp_growth_fcst_next_pct")
-        infl_fcst = mp.get("inflation_fcst_next_pct")
+        gdp_now      = mp.get("gdp_growth_fcst_pct") or mp.get("gdp_growth_pct")
+        gdp_now_yr   = mp.get("gdp_growth_fcst_year") or mp.get("macro_year") or ""
+        gdp_now_src  = "IMF" if mp.get("gdp_growth_fcst_pct") is not None else "WB"
+        gdp_next     = mp.get("gdp_growth_fcst_next_pct")
+        gdp_next_yr  = mp.get("gdp_growth_fcst_next_year") or ""
+        infl_now     = mp.get("inflation_fcst_pct") or mp.get("inflation_pct")
+        infl_now_yr  = mp.get("inflation_fcst_year") or mp.get("macro_year") or ""
+        infl_now_src = "IMF" if mp.get("inflation_fcst_pct") is not None else "WB"
         parts = []
-        if gdp_act is not None:
-            parts.append(f"local-economy GDP growth recently at {gdp_act:.1f}%")
-        if gdp_fcst is not None:
-            parts.append(f"IMF projecting {gdp_fcst:.1f}% next year")
-        if infl_fcst is not None:
-            parts.append(f"inflation forecast at {infl_fcst:.1f}%")
+        if gdp_now is not None:
+            parts.append(f"GDP growth {gdp_now:.1f}% ({gdp_now_src} {gdp_now_yr})")
+        if gdp_next is not None and gdp_next_yr:
+            parts.append(f"IMF {gdp_next_yr} forecast {gdp_next:.1f}%")
+        if infl_now is not None:
+            parts.append(f"inflation {infl_now:.1f}% ({infl_now_src} {infl_now_yr})")
         if parts:
             macro_text = " Macro context: " + ", ".join(parts) + "."
 

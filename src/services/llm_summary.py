@@ -222,10 +222,33 @@ def build_context(ticker: str) -> dict:
         "recent_broker_actions": broker_items[:3],
         # Commodity / macro overlays (optional)
         "commodities": commodities,
+        # Macro context for the LLM prompt. We prefer IMF WEO forecasts
+        # over World Bank historical actuals because the deck is forward-
+        # looking — feeding Gemini the WB 2024 actual when the print is
+        # Q2 2026 anchors the thesis on stale conditions (e.g. Oman GDP
+        # growth was 1.6% in 2024 but IMF expects 3.5% in 2026, and
+        # inflation 0.6%→1.7%). World Bank stays as a fallback when IMF
+        # has no series for the country.
         "macro": {
-            "gdp_growth_pct": macro.get("gdp_growth_pct"),
-            "gdp_growth_fcst_next_pct": macro.get("gdp_growth_fcst_next_pct"),
-            "inflation_pct": macro.get("inflation_pct"),
+            # Preferred: IMF current-year forecast (matches/leads the
+            # company's reporting cycle).
+            "gdp_growth_pct":      macro.get("gdp_growth_fcst_pct")
+                                       or macro.get("gdp_growth_pct"),
+            "gdp_growth_year":     macro.get("gdp_growth_fcst_year")
+                                       or macro.get("macro_year"),
+            "gdp_growth_source":   ("IMF" if macro.get("gdp_growth_fcst_pct") is not None
+                                     else "WB"),
+            # Forward year (IMF next-year forecast) — useful for swing-factor sentences.
+            "gdp_growth_fcst_next_pct":  macro.get("gdp_growth_fcst_next_pct"),
+            "gdp_growth_fcst_next_year": macro.get("gdp_growth_fcst_next_year"),
+            "inflation_pct":       macro.get("inflation_fcst_pct")
+                                       or macro.get("inflation_pct"),
+            "inflation_year":      macro.get("inflation_fcst_year")
+                                       or macro.get("macro_year"),
+            "inflation_source":    ("IMF" if macro.get("inflation_fcst_pct") is not None
+                                     else "WB"),
+            "inflation_fcst_next_pct":  macro.get("inflation_fcst_next_pct"),
+            "inflation_fcst_next_year": macro.get("inflation_fcst_next_year"),
         },
     }
 
@@ -297,15 +320,32 @@ def _prompt(ctx: dict) -> str:
         commodity_lines.append(f"{tag}: {val} {unit}{yoy_str}")
     commodity_block = ("Commodity context: " + "; ".join(commodity_lines) + ".") if commodity_lines else ""
 
+    # Macro block. Every figure is year + source stamped so Gemini cannot
+    # confuse a 2024 World Bank actual with a 2026 IMF forecast. We lead
+    # with the IMF forecast for the company's reporting year because the
+    # deck is forward-looking — WB actuals fall back only when IMF lacks a
+    # series for the country.
     macro = ctx.get("macro") or {}
     macro_parts = []
     if isinstance(macro.get("gdp_growth_pct"), (int, float)):
-        macro_parts.append(f"GDP growth {macro['gdp_growth_pct']:.1f}%")
+        src = macro.get("gdp_growth_source") or "IMF"
+        yr  = macro.get("gdp_growth_year") or "?"
+        macro_parts.append(f"GDP growth {macro['gdp_growth_pct']:.1f}% ({src} {yr})")
     if isinstance(macro.get("gdp_growth_fcst_next_pct"), (int, float)):
-        macro_parts.append(f"IMF next-year forecast {macro['gdp_growth_fcst_next_pct']:.1f}%")
+        ny = macro.get("gdp_growth_fcst_next_year") or "next year"
+        macro_parts.append(
+            f"GDP growth forecast {macro['gdp_growth_fcst_next_pct']:.1f}% (IMF {ny})"
+        )
     if isinstance(macro.get("inflation_pct"), (int, float)):
-        macro_parts.append(f"inflation {macro['inflation_pct']:.1f}%")
-    macro_block = ("Country macro: " + ", ".join(macro_parts) + ".") if macro_parts else ""
+        src = macro.get("inflation_source") or "IMF"
+        yr  = macro.get("inflation_year") or "?"
+        macro_parts.append(f"inflation {macro['inflation_pct']:.1f}% ({src} {yr})")
+    if isinstance(macro.get("inflation_fcst_next_pct"), (int, float)):
+        ny = macro.get("inflation_fcst_next_year") or "next year"
+        macro_parts.append(
+            f"inflation forecast {macro['inflation_fcst_next_pct']:.1f}% (IMF {ny})"
+        )
+    macro_block = ("Country macro: " + "; ".join(macro_parts) + ".") if macro_parts else ""
 
     broker_block = ""
     if ctx.get("recent_broker_actions"):
