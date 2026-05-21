@@ -322,17 +322,49 @@ def _template_exec_summary(cv: dict, commodities: dict,
     if rating and n_an:
         rating_line = f" Street consensus is {rating} ({n_an} analysts covering){target_text}."
 
+    # Sector-aware closing — feedstock/H2 demand only makes sense for
+    # industrial / chemical names; banks, internet, etc. need their own
+    # framing. Keeps the LLM-absent fallback honest rather than
+    # generic-industrial regardless of sector.
+    sector_l = (sector or "").lower()
+    industry_l = (industry or "").lower()
+    if "bank" in sector_l or "bank" in industry_l or "financial" in sector_l:
+        closing = (
+            " The print hinges on net interest income, loan growth, "
+            "credit quality, and capital deployment; the read on forward "
+            "guidance is the swing factor."
+        )
+    elif "oil" in industry_l or "gas" in industry_l or "energy" in sector_l:
+        closing = (
+            " The print hinges on production volumes, realized prices, "
+            "and lifting costs; management's tone on capex and project "
+            "ramps is the swing factor."
+        )
+    elif "internet" in industry_l or "software" in industry_l or "technology" in sector_l:
+        closing = (
+            " The print hinges on revenue mix, margin trajectory, and "
+            "guidance; product / regulatory updates are the swing factor."
+        )
+    elif "mining" in industry_l or "metals" in industry_l:
+        closing = (
+            " The print hinges on production volumes, realized commodity "
+            "prices, and unit costs; guidance and project execution are "
+            "the swing factor."
+        )
+    else:
+        closing = (
+            " The print hinges on revenue growth, margin trajectory, and "
+            "guidance; management's tone on forward demand is the swing factor."
+        )
+
     body = (
-        f"Jabal maintains a constructive view into the upcoming print. "
-        f"{name} sits in the {sector} sector ({industry})."
+        f"{name} enters the upcoming print with the Street watching "
+        f"sector-specific operating levers."
         f"{rating_line}"
         f"{pe_text}"
         f"{commodity_text}"
         f"{macro_text}"
-        f" The thesis hinges on three factors: demand trajectory through H2, "
-        f"feedstock/input-cost discipline, and management's tone on guidance "
-        f"during the call. We expect the print itself to be within consensus "
-        f"bounds; the read on forward commentary is the swing factor."
+        + closing
     )
     return body
 
@@ -913,27 +945,95 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
     estimates_footnote = "  ·  ".join(footnote_bits)
 
     # Surface Investing's surprise history as a track-record catalyst line.
+    # Only when we actually have a non-trivial surprise — surfacing
+    # "EPS missed by 0.0%; 0 of last 4 above estimates" on tickers with
+    # missing data is worse than no line at all.
     surprise = (investing_obs.get("income_statement_quarterly") or {}).get(
         "surprise_history", [])
     track_record_catalyst = None
     if surprise:
-        beats = sum(1 for r in surprise[:4]
-                     if isinstance(r.get("eps_surprise_pct"), (int, float))
-                     and r["eps_surprise_pct"] > 0)
-        n = min(4, len(surprise))
-        last = surprise[0]
-        last_dir = "beat" if (last.get("eps_surprise_pct") or 0) > 0 else "missed"
-        last_pct = abs(last.get("eps_surprise_pct") or 0)
-        track_record_catalyst = (
-            f"EPS {last_dir} consensus by {last_pct:.1f}% last quarter; "
-            f"{beats} of last {n} quarters above estimates"
-        )
-    default_catalysts = [
-        track_record_catalyst or
-        "Positive quarterly surprise consistent with prior track record",
-        "Constructive guidance on H2 demand and pricing outlook",
-        "Capex/project milestones tracking on schedule",
-    ]
+        usable = [r for r in surprise[:4]
+                  if isinstance(r.get("eps_surprise_pct"), (int, float))
+                  and abs(r["eps_surprise_pct"]) >= 0.05]   # filter out 0/null rows
+        beats = sum(1 for r in usable if r["eps_surprise_pct"] > 0)
+        n = len(usable)
+        last = next((r for r in surprise[:4]
+                       if isinstance(r.get("eps_surprise_pct"), (int, float))
+                       and abs(r["eps_surprise_pct"]) >= 0.05), None)
+        if last and n > 0:
+            last_dir = "beat" if last["eps_surprise_pct"] > 0 else "missed"
+            last_pct = abs(last["eps_surprise_pct"])
+            track_record_catalyst = (
+                f"EPS {last_dir} consensus by {last_pct:.1f}% last quarter; "
+                f"{beats} of last {n} quarters above estimates"
+            )
+    # Default catalyst / risk / watch lists. Sector-aware — banks
+    # shouldn't fall back to "feedstock volatility" and chemicals
+    # shouldn't fall back to "NIM trajectory". These templates only
+    # ship when Gemini is unavailable; treat them as readable defaults
+    # the analyst can rewrite, not analytical claims.
+    _profile = cv.get("company_profile")
+    _sector_l = ""
+    _industry_l = ""
+    if _profile and isinstance(_profile.value, dict):
+        _sector_l = (_profile.value.get("sector") or "").lower()
+        _industry_l = (_profile.value.get("industry") or "").lower()
+    _is_bank_template = ("bank" in _sector_l or "bank" in _industry_l or "financial" in _sector_l)
+    _is_energy_template = ("oil" in _industry_l or "gas" in _industry_l or "energy" in _sector_l)
+
+    if _is_bank_template:
+        default_catalysts_base = [
+            "Net interest income trajectory vs prior quarter and management's NIM outlook",
+            "Loan growth and deposit cost commentary into H2",
+            "Capital deployment update — dividend cadence or buyback announcement",
+        ]
+        default_risks_template = [
+            "Asset-quality deterioration / rising cost of risk pressuring earnings",
+            "NIM compression as funding costs catch up with the rate cycle",
+            "Loan-growth slowdown if domestic demand softens",
+        ]
+        default_watch_template = [
+            "What is the trajectory of NIM and where does management see it stabilising?",
+            "How is asset quality trending across the loan book?",
+            "Any update on capital return policy through year-end?",
+        ]
+    elif _is_energy_template:
+        default_catalysts_base = [
+            "Production volume update and any guidance change",
+            "Realized price commentary versus benchmark spot",
+            "Capex / project-ramp timeline progress",
+        ]
+        default_risks_template = [
+            "Commodity-price softness pressuring realized prices",
+            "Project ramp slippage or cost overrun",
+            "Capex intensity pressuring near-term free cash flow",
+        ]
+        default_watch_template = [
+            "How is production tracking vs the full-year guidance?",
+            "What is management's tone on realized-price discipline?",
+            "Any commentary on the next capex / project milestone?",
+        ]
+    else:
+        default_catalysts_base = [
+            "Forward demand commentary and guidance update on the call",
+            "Margin / cost trajectory versus prior quarter",
+            "Capital return cadence (dividend / buyback) into year-end",
+        ]
+        default_risks_template = [
+            "Cautious management tone could validate target-price gap",
+            "Input / cost volatility pressures margin trajectory",
+            "Macro / sector softness weighs on top-line growth",
+        ]
+        default_watch_template = [
+            "Forward demand commentary — Q3 order book and pricing trajectory",
+            "Cost outlook and supply-chain commentary",
+            "Updated capex schedule and any project-pipeline updates",
+        ]
+
+    # Track-record line is included only when it carries real signal;
+    # otherwise we lead with the sector-aware default.
+    default_catalysts = [track_record_catalyst] + default_catalysts_base if track_record_catalyst else default_catalysts_base
+    default_catalysts = default_catalysts[:3]
 
     # LLM output, when present, replaces every default bullet list too —
     # otherwise the deck mixes a fresh LLM thesis with stale boilerplate.
@@ -975,16 +1075,8 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
         estimates_subtitle=estimates_subtitle,
         estimates_period_label=estimates_period_label,
         catalysts=catalysts or llm_catalysts or default_catalysts,
-        risks=risks or llm_risks or [
-            "Cautious management tone could validate target-price gap",
-            "Feedstock / input cost volatility pressures margin trajectory",
-            "Macro / commodity-price softness weighs on top-line growth",
-        ],
-        watch_list=watch_list or llm_watch or [
-            "Forward demand commentary — Q3 order book and pricing trajectory",
-            "Feedstock cost outlook and supply-chain commentary",
-            "Updated capex schedule and any project-pipeline updates",
-        ],
+        risks=risks or llm_risks or default_risks_template,
+        watch_list=watch_list or llm_watch or default_watch_template,
         sources_line=_sources_line_from_cv(cv),
         analyst_name=analyst_name,
         gen_date=gen_date or datetime.utcnow().strftime("%d %b %Y"),

@@ -223,19 +223,24 @@ def _peer_label(ticker: str, sector: str = "", industry: str = "") -> str:
 
 
 def _peer_table(slide, top: float, peers: list[dict], *, is_bank: bool = False):
-    """Rows: name, ticker, mcap, P/E, P/B, EV/EBITDA (or P/TBV for banks),
-    dividend yield, 1Y return.
+    """Rows: name, ticker, mcap, P/E, then a sector-appropriate book/
+    enterprise multiple set, dividend yield, 1Y return.
 
-    For banks the EV/EBITDA column is replaced by P/TBV (yfinance doesn't
-    expose tangible book separately, so we render Yahoo's priceToBook
-    here with a footnote-grade caveat — close enough for relative bank
-    comps where intangibles are usually a small fraction of book).
+    Bank schema (7 cols): COMPANY · TICKER · MCAP · P/E · P/TBV · DIV YIELD · 1Y RETURN
+      P/TBV is Yahoo's priceToBook (close enough for relative bank
+      comps; yfinance doesn't expose tangible book separately). Showing
+      a redundant P/B alongside would just consume slide width.
+
+    Non-bank schema (8 cols): COMPANY · TICKER · MCAP · P/E · P/B · EV/EBITDA · DIV YIELD · 1Y RETURN
 
     Compact, borderless, alternating row tint.
     """
-    third_metric_label = "P/TBV" if is_bank else "EV/EBITDA"
-    headers = ["COMPANY", "TICKER", "MCAP", "P/E", "P/B", third_metric_label, "DIV YIELD", "1Y RETURN"]
-    col_w   = [1.65, 0.95, 0.95, 0.55, 0.55, 0.75, 0.70, 0.70]
+    if is_bank:
+        headers = ["COMPANY", "TICKER", "MCAP", "P/E", "P/TBV", "DIV YIELD", "1Y RETURN"]
+        col_w   = [1.85, 1.00, 1.05, 0.65, 0.70, 0.85, 0.85]
+    else:
+        headers = ["COMPANY", "TICKER", "MCAP", "P/E", "P/B", "EV/EBITDA", "DIV YIELD", "1Y RETURN"]
+        col_w   = [1.65, 0.95, 0.95, 0.55, 0.55, 0.75, 0.70, 0.70]
     row_h   = 0.28
     # Header
     x = MARGIN_L
@@ -246,6 +251,10 @@ def _peer_table(slide, top: float, peers: list[dict], *, is_bank: bool = False):
         x += col_w[i]
     _hrule(slide, MARGIN_L, top + row_h - 0.02, CONTENT_W, color=MUTED)
 
+    # 1Y RETURN is always the last column — track its index for the
+    # sign-aware colour and the alignment loop below.
+    ret_col_idx = len(headers) - 1
+
     for ri, p in enumerate(peers[:5]):
         y = top + row_h + ri * row_h
         if ri % 2 == 1:
@@ -255,23 +264,32 @@ def _peer_table(slide, top: float, peers: list[dict], *, is_bank: bool = False):
             band.fill.solid(); band.fill.fore_color.rgb = CARD
             band.line.fill.background()
         x = MARGIN_L
-        # For banks the third multiples column reuses pb_fmt (P/TBV proxy).
-        third_val_fmt = p.get("pb_fmt", "—") if is_bank else p.get("ev_ebitda_fmt", "—")
-        cells = [
-            p.get("name", "—"),
-            p.get("ticker", "—"),
-            p.get("market_cap_fmt", "—"),
-            p.get("pe_fmt", "—"),
-            p.get("pb_fmt", "—"),
-            third_val_fmt,
-            p.get("div_yield_fmt", "—"),
-            p.get("ret_1y_fmt", "—"),
-        ]
+        if is_bank:
+            cells = [
+                p.get("name", "—"),
+                p.get("ticker", "—"),
+                p.get("market_cap_fmt", "—"),
+                p.get("pe_fmt", "—"),
+                p.get("pb_fmt", "—"),   # rendered under the P/TBV header
+                p.get("div_yield_fmt", "—"),
+                p.get("ret_1y_fmt", "—"),
+            ]
+        else:
+            cells = [
+                p.get("name", "—"),
+                p.get("ticker", "—"),
+                p.get("market_cap_fmt", "—"),
+                p.get("pe_fmt", "—"),
+                p.get("pb_fmt", "—"),
+                p.get("ev_ebitda_fmt", "—"),
+                p.get("div_yield_fmt", "—"),
+                p.get("ret_1y_fmt", "—"),
+            ]
         ret_val = p.get("ret_1y")
         for i, cell in enumerate(cells):
             align = PP_ALIGN.LEFT if i < 2 else PP_ALIGN.RIGHT
             color = BLACK
-            if i == 7 and isinstance(ret_val, (int, float)):
+            if i == ret_col_idx and isinstance(ret_val, (int, float)):
                 color = signed_color(ret_val)
             _text(slide, x, y, col_w[i] - 0.05, row_h, str(cell),
                   size=SZ_BODY, color=color, align=align)

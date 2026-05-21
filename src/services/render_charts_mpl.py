@@ -177,6 +177,23 @@ def render_pe_historical_chart(history: list[dict] | None,
     values = [v if isinstance(v, (int, float)) else None for v in (forecast_values or [])]
     pairs = [(p, v) for p, v in zip(periods, values) if v is not None]
     if not pairs:
+        # Path C: nothing but a current P/E — render a single horizontal
+        # tick + label so the slide doesn't show a bare "no data" stub.
+        # Better an honest single-point view than an empty box.
+        if isinstance(current_pe, (int, float)) and current_pe > 0:
+            ax.axvline(current_pe, color=_BLACK, linewidth=1.4)
+            pad = max(2, current_pe * 0.25)
+            ax.set_xlim(max(0, current_pe - pad), current_pe + pad)
+            ax.set_ylim(-1, 1)
+            ax.set_yticks([])
+            ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:.0f}x"))
+            ax.text(current_pe, 0.4, f"Current  {current_pe:.1f}x",
+                      fontsize=10, color=_BLACK, weight="bold", ha="center")
+            ax.text(current_pe, -0.6,
+                      "Forward / historical P/E unavailable for this ticker",
+                      fontsize=7, color=_MUTED, ha="center", style="italic")
+            fig.tight_layout(pad=0.4)
+            return _fig_to_png(fig)
         plt.close(fig)
         return None
     plabels = [p for p, _ in pairs]

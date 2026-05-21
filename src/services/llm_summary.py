@@ -419,103 +419,84 @@ EARNINGS TRACK RECORD
 {broker_block}
 
 TASK
-Write an earnings-preview package as a JSON object with these keys.
-Voice: institutional sell-side analyst writing the morning note. Direct,
-declarative, no hedging adverbs, no marketing language. Synthesize
-across the data block above — connect signals into a view rather than
-listing facts back. You have analytical leeway on framing; you do NOT
-have leeway on numbers.
+Write an institutional earnings-preview note for {ctx['company_name']}
+that reads like a senior buy-side analyst's pre-print memo. You have
+analytical leeway. The audience already sees the raw numbers on the
+slide — your job is to INTERPRET them, not restate them.
 
-1. "thesis_paragraph": EXACTLY 4 sentences, no more, no less. Follow
-   this rhythm precisely — readers expect this shape:
+Deliver a JSON object with these keys. No markdown, no preface, no
+trailing prose. JSON only.
 
-   Sentence 1 — "{COMPANY} enters earnings with focus on [4 sector-
-     specific drivers]."   The drivers should be concrete operating
-     levers (e.g. for a bank: net interest income, loan growth, credit
-     quality, capital returns; for oil & gas: production volumes,
-     realized prices, lifting costs, project ramps). NOT generic words
-     like "earnings", "performance", or "results".
+"thesis_paragraph" — 3-5 sentences. Tell the reader the setup heading
+   into the print: what the Street is pricing in, the bull / bear pivot,
+   what would change the view. The Apple / JPMorgan / Tesla examples
+   below show the voice and rhythm we want. DO NOT copy them — they are
+   reference shape, not a template you fill in:
 
-   Sentence 2 — "Recent performance has been [supported by X / driven
-     by Y], while [headwind or concern Z]."   X / Y / Z must cite the
-     data block (a surprise %, a sector trend, a macro forecast, a
-     price move).
+     Apple — "Apple enters earnings with focus on iPhone demand,
+       Services growth, gross margin, and next-quarter guidance.
+       Recent performance has been supported by AI upgrade
+       expectations, while China demand and hardware replacement
+       cycles remain key concerns. Investors should watch iPhone
+       revenue, Services growth, gross margin, Greater China
+       performance, and commentary on AI integration and capital
+       returns. The setup appears balanced, as valuation remains
+       elevated and expectations are already fairly high."
 
-   Sentence 3 — "Investors should watch [5–7 specific items + closing
-     commentary theme]."   Items must be specific (e.g. "NIM trajectory,
-     provision expense, deposit costs, fee income, loan growth, and
-     management commentary on capital deployment"). NOT vague
-     ("growth", "margins", "outlook").
+     JPMorgan — "JPMorgan enters earnings with focus on net interest
+       income, loan growth, credit quality, and capital returns.
+       Recent performance has been supported by resilient U.S.
+       economic data and stronger banking sentiment, while investors
+       remain focused on whether net interest income has peaked. Key
+       metrics to watch include NII, provision expense, loan growth,
+       deposit trends, investment banking fees, and management
+       commentary on credit and capital deployment. The setup appears
+       cautiously attractive, supported by strong profitability and
+       balance sheet strength."
 
-   Sentence 4 — "The setup appears [balanced / cautiously attractive /
-     constructive / high-risk-high-reward], [one-clause justification]."
-     The justification must reference a concrete anchor: valuation
-     vs history, beat/miss track record, or consensus dispersion.
+     Tesla — "Tesla enters earnings with focus on vehicle deliveries,
+       automotive gross margin, pricing strategy, and demand outlook.
+       Recent performance has been driven by expectations around
+       autonomous driving, robotaxi developments, and future product
+       launches, while margin pressure and softer EV demand remain
+       concerns. Investors should watch automotive revenue, gross
+       margin excluding credits, free cash flow, delivery outlook,
+       energy storage growth, and commentary on pricing and autonomy.
+       The setup appears high-risk, high-reward given the stock's
+       reliance on future growth narratives."
 
-   This 4-sentence shape is non-negotiable. Do NOT add a fifth sentence.
-   Do NOT collapse to three. Do NOT skip the bracketed slot fills.
+   Match the rhythm — what's the focus, what's been supporting /
+   pressuring the story, what the read on the call is, and how the
+   setup looks. Substance over slot-filling.
 
-2. "catalysts": EXACTLY 3 bullets, one sentence each. Forward-looking
-   drivers only — what could MOVE consensus on the print or in the
-   following weeks. Pick from these categories where the data block
-   supports them: earnings release dynamics (beat vs miss, guidance
-   delta), margin trajectory, loan / volume growth, dividend or buyback
-   announcement, valuation re-rating triggers, sector-specific
-   developments (commodity price moves, regulatory change), management
-   commentary slots. Each bullet MUST cite a number from the data block.
-   FORBIDDEN: bullets that just restate a single fact ("Dividend yield
-   4.8%"), generic boilerplate ("strong execution"), or upside-to-target
-   restated as a catalyst. The number anchors the analytical claim, not
-   the other way around.
+"catalysts" — 3 items. Forward-looking drivers: what could MOVE the
+   print or the multiple. Specific to this company. Analytical, not
+   number-restatement. Number anchors are welcome but NOT required
+   on every bullet — the test is "does this teach the reader
+   something they couldn't get from the data table?"
 
-3. "risks": EXACTLY 3 bullets, same voice as catalysts. Company-specific
-   downside drivers anchored in real numbers, tied to the investment
-   case. FORBIDDEN: generic macro statements that don't directly affect
-   this company's business model (a low domestic inflation print is
-   NOT a risk for a commercial bank), single-fact restatements ("Low
-   end of target range OMR 0.39"), or repetition of any catalyst with
-   the sign flipped. Each risk must be a real downside path with a
-   numeric anchor.
+"risks" — 3 items. Company-specific downside paths, not generic
+   macro statements unattached to the business model. Same voice as
+   catalysts.
 
-4. "watch_list": EXACTLY 3 specific questions ending in "?". Each must
-   reference a real data point (a price level, a margin, a capex
-   number, a surprise pct, a broker action, a guidance figure).
-   Not generic open-enders. Frame as the precise question an analyst
-   would put to management on the call.
+"watch_list" — 3 items, each ending in "?". The precise things to
+   listen for on the call.
 
-5. "highlights": EXACTLY 5 short analytical takes for the front-page
-   slide. JSON list of {"category": str, "body": str}. Use these five
-   categories, in this order:
-     - "EARNINGS"   — what the print is most likely to hinge on (an
-                      operating lever or the beat/miss track record),
-                      framed as a forward-looking analytical statement.
-     - "VALUATION"  — how the current multiple sits relative to peers
-                      or its own history; the re-rate vs de-rate path.
-     - "POSITIONING"— consensus / target context AS AN INTERPRETATION,
-                      not a restatement. Frame what the positioning
-                      tells you (consensus dispersion, crowded long,
-                      target asymmetry).
-     - "WATCH"      — the single concrete number to listen for on the
-                      call (NIM, loan growth, capex guidance, etc.).
-     - "RISK"       — the most material company-specific downside,
-                      tied to the investment case.
-   Each body is ONE short sentence (≤14 words). Anchor every body in
-   a number from the data block. NO pure restatements — the line must
-   add interpretation. FORBIDDEN: starting a body with "Dividend yield
-   X%" / "Forward P/E X.Xx" / "Target X" with no analytical context.
+"highlights" — 5 items as `{{"category": str, "body": str}}`. The
+   five categories in order: EARNINGS, VALUATION, POSITIONING, WATCH,
+   RISK. Each body is ONE short interpretive sentence (≤18 words).
+   These pills sit next to a panel that already shows the numbers —
+   tell the reader what those numbers MEAN. Pure restatements
+   ("Dividend yield 4.83%") add nothing — interpret instead.
 
-HARD RULES
-  - Every number you write must trace to a value in the data block.
-    Do not round inconsistently. Do not invent precise figures
-    ("approximately 12%" is not acceptable cover for an invented
-    number — drop the sentence instead).
-  - If a sentence cannot cite a real number for the claim it is
-    making, rewrite it as qualitative or drop it.
-  - Currency, units, and time period must match how the data block
-    presents them. When citing a macro figure, retain the "(IMF YYYY)"
-    or "(WB YYYY)" tag from the data block so the source/year is
-    visible in the deck.
-  - No markdown fences, no preface, no trailing prose. JSON only.
+NUMERIC DISCIPLINE
+  Numbers you cite must come from the data block above — no
+  invented figures, no inconsistent rounding. But you do NOT have to
+  cite a number in every sentence. Quality of interpretation
+  matters more than coverage of numbers.
+
+  When citing a macro figure, keep the "(IMF YYYY)" / "(WB YYYY)"
+  tag from the data block so the source year stays visible.
 """
 
 
@@ -672,69 +653,31 @@ def _validate_sentence(text: str, allowed: set[float]) -> bool:
     return all(_number_matches(n, allowed) for n in nums)
 
 
-_GENERIC_TOKENS = (
-    "strong execution", "constructive guidance", "positive momentum",
-    "robust performance", "challenging environment", "favorable backdrop",
-    "favourable backdrop", "well positioned", "well-positioned",
-    "moving forward", "going forward", "in due course",
-)
-
-
-def _is_generic_filler(text: str) -> bool:
-    """True when a sentence consists mostly of empty analyst boilerplate
-    with no numeric anchor. Used to drop catalyst/risk bullets that pass
-    the numeric-trace test trivially (no numbers) but contribute nothing."""
-    if not text:
-        return True
-    t = text.lower()
-    if any(tok in t for tok in _GENERIC_TOKENS):
-        return True
-    return False
-
-
-def _enforce_thesis_shape(thesis: str) -> tuple[str, bool]:
-    """Lightly enforce the Apple/JPM/Tesla 4-sentence template.
-
-    Returns (text, ok). When the output has 4 sentences AND the rhythm
-    anchors are present ("enters earnings with focus on", "Investors
-    should watch", "setup appears"), we trust it. Otherwise we surface
-    `ok=False` so `generate_summary` can retry with a stricter reminder.
-    """
-    if not thesis:
-        return "", False
-    sentences = _re.findall(r"[^.!?]+[.!?]+", thesis)
-    if len(sentences) != 4:
-        return thesis.strip(), False
-    joined = thesis.lower()
-    anchors = ("enters earnings with focus on", "investors should watch", "setup appears")
-    ok = all(a in joined for a in anchors)
-    return thesis.strip(), ok
-
-
 def _validate_llm_output(payload: dict, ctx: dict) -> dict:
-    """Drop sentences/bullets whose numbers don't trace to the context.
-    Returns a copy of payload with offending content removed."""
+    """Drop sentences / bullets whose numbers don't trace to the context.
+
+    Loose by design: we only police hallucinated numbers (the one thing
+    Gemini can do that would mislead the analyst). Voice, phrasing,
+    bullet count, and analytical framing are the model's leeway. A
+    bullet with NO numbers passes trivially — interpretation without
+    a number is fine and often better than a number with no insight.
+    """
     allowed = _allowed_numbers(ctx)
     cleaned = dict(payload)
 
-    # Thesis paragraph: validate the 4-sentence template AND that numeric
-    # claims trace. When the template is broken we still surface the text
-    # (the renderer falls back gracefully) but flag it so the caller can
-    # retry once with a stricter reminder.
+    # Thesis: drop sentences whose numbers don't trace. Re-join the rest.
     thesis = payload.get("thesis_paragraph") or ""
     if thesis:
-        thesis_text, shape_ok = _enforce_thesis_shape(thesis)
-        sentences = _re.findall(r"[^.!?]+[.!?]+", thesis_text)
+        sentences = _re.findall(r"[^.!?]+[.!?]+", thesis)
         if not sentences:
-            sentences = [thesis_text]
+            sentences = [thesis]
         kept = [s.strip() for s in sentences if _validate_sentence(s, allowed)]
         cleaned["thesis_paragraph"] = " ".join(kept).strip()
-        cleaned["_thesis_shape_ok"] = shape_ok
         dropped = len(sentences) - len(kept)
         if dropped:
             log.warning("Dropped %d thesis sentence(s) with ungrounded numbers", dropped)
 
-    # Highlights: same trace check as catalysts/risks, plus body length cap.
+    # Highlights: number-trace + ≤20-word cap so the pill doesn't overflow.
     hl = payload.get("highlights") or []
     hl_kept: list[dict] = []
     for it in hl:
@@ -745,18 +688,14 @@ def _validate_llm_output(payload: dict, ctx: dict) -> dict:
             continue
         if not _validate_sentence(body, allowed):
             continue
-        if _is_generic_filler(body):
-            continue
-        # Highlights cap at ~14 words to fit the slide pill. Trim aggressively.
         if len(body.split()) > 20:
             continue
         hl_kept.append(it)
     cleaned["highlights"] = hl_kept
 
-    # Catalysts / risks: each bullet must (a) have at least one numeric anchor
-    # that traces AND (b) not be generic-filler-only. watch_list bullets
-    # can be qualitative (they're questions), so only the numeric check
-    # applies there.
+    # Catalysts / risks / watch_list: only the number-trace filter applies.
+    # A bullet that says nothing numeric is fine — the prompt explicitly
+    # allows interpretation without a number.
     for key in ("catalysts", "risks", "watch_list"):
         items = payload.get(key) or []
         kept: list[str] = []
@@ -765,17 +704,10 @@ def _validate_llm_output(payload: dict, ctx: dict) -> dict:
                 continue
             if not _validate_sentence(it, allowed):
                 continue
-            if key in ("catalysts", "risks") and _is_generic_filler(it):
-                continue
-            # catalysts / risks must actually cite at least one number
-            # (the prompt forbids unanchored claims; enforce it here).
-            if key in ("catalysts", "risks") and not _extract_numbers(it):
-                log.warning("Dropped %s bullet with no numeric anchor: %s", key, it[:80])
-                continue
             kept.append(it)
         cleaned[key] = kept
         if len(kept) < len(items):
-            log.warning("Dropped %d %s bullet(s) (validation)",
+            log.warning("Dropped %d %s bullet(s) (ungrounded numbers)",
                          len(items) - len(kept), key)
 
     return cleaned
@@ -875,41 +807,8 @@ def generate_summary(ticker: str, *, force_refresh: bool = False) -> Optional[di
 
     payload = _build_payload(out)
     # Numeric-trace validator: drop any sentence / bullet that cites a
-    # number we can't trace back to the context. Loosens the prompt's
-    # prose patterns (the LLM gets analytical leeway) while keeping the
-    # numeric grounding strict.
+    # number we can't trace back to the context. Voice and bullet count
+    # are the model's leeway — only hallucinated numbers are policed.
     payload = _validate_llm_output(payload, ctx)
-
-    # One retry when the thesis_paragraph shape didn't match the
-    # Apple/JPM/Tesla template (4 sentences with the rhythm anchors).
-    # The retry prompt is identical apart from a stricter reminder
-    # prepended — the model usually self-corrects on the second pass.
-    if payload.get("_thesis_shape_ok") is False:
-        log.info("Thesis shape mismatch for %s — retrying with stricter reminder", ticker)
-        retry_prefix = (
-            "PREVIOUS ATTEMPT DID NOT FOLLOW THE 4-SENTENCE TEMPLATE. "
-            "Output EXACTLY four sentences for thesis_paragraph, in this order:\n"
-            "  1. '<Company> enters earnings with focus on <four drivers>.'\n"
-            "  2. 'Recent performance has been <X / driven by Y>, while <headwind>.'\n"
-            "  3. 'Investors should watch <5-7 specific items + commentary theme>.'\n"
-            "  4. 'The setup appears <posture>, <one-clause justification>.'\n"
-            "Do NOT collapse to three sentences. Do NOT add a fifth.\n\n"
-        )
-        try:
-            out2 = _call_gemini(retry_prefix + prompt, for_investment_view=True)
-            if out2 and isinstance(out2, dict):
-                payload2 = _validate_llm_output(_build_payload(out2), ctx)
-                if payload2.get("_thesis_shape_ok"):
-                    payload = payload2
-                elif (payload2.get("thesis_paragraph") or "").strip():
-                    # Even if shape is still imperfect, the retry's prose is
-                    # often closer — keep its thesis but layer the lists from
-                    # whichever pass produced more anchored bullets.
-                    if len(payload2.get("catalysts") or []) >= len(payload.get("catalysts") or []):
-                        payload = payload2
-        except Exception as exc:
-            log.warning("Thesis shape retry failed for %s: %s", ticker, exc)
-
-    payload.pop("_thesis_shape_ok", None)
     _write_cache(path, payload)
     return payload
