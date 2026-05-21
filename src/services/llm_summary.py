@@ -426,35 +426,83 @@ across the data block above — connect signals into a view rather than
 listing facts back. You have analytical leeway on framing; you do NOT
 have leeway on numbers.
 
-1. "thesis_paragraph": 3-5 sentences (~80-140 words). State the
-   investment setup heading into the print: what the Street is pricing
-   in, which numbers support or undercut that view, and the single
-   factor most likely to move consensus on the call. Take a side where
-   the data supports one — only fall back to "balanced" when the
-   signals genuinely cancel out.
+1. "thesis_paragraph": EXACTLY 4 sentences, no more, no less. Follow
+   this rhythm precisely — readers expect this shape:
 
-2. "catalysts": 2-3 bullets (1 sentence each). What could surprise to
-   the upside, anchored in a real number from the data block. Frame as
-   readable analytical statements, not "Lever — number" labels.
-   Examples of acceptable voice (do NOT copy these literal numbers —
-   use the real values from the data block):
-     • "Beat history is constructive — EPS topped consensus in 3 of
-        the last 4 quarters, averaging +9% surprise."
-     • "Re-rate room exists at 11.0x FY26 P/E versus the 5-year
-        average of 13.5x."
-   Avoid empty phrases ("constructive guidance", "strong execution",
-   "positive momentum") with no specific number behind them.
+   Sentence 1 — "{COMPANY} enters earnings with focus on [4 sector-
+     specific drivers]."   The drivers should be concrete operating
+     levers (e.g. for a bank: net interest income, loan growth, credit
+     quality, capital returns; for oil & gas: production volumes,
+     realized prices, lifting costs, project ramps). NOT generic words
+     like "earnings", "performance", or "results".
 
-3. "risks": 2-3 bullets, same voice as catalysts. Company-specific
-   downside drivers anchored in real numbers. Skip macro signals that
-   do not directly affect the business model — a low domestic
-   inflation print, for example, is rarely a meaningful risk for a
-   commercial bank.
+   Sentence 2 — "Recent performance has been [supported by X / driven
+     by Y], while [headwind or concern Z]."   X / Y / Z must cite the
+     data block (a surprise %, a sector trend, a macro forecast, a
+     price move).
 
-4. "watch_list": 2-3 specific questions ending in "?". Each must
+   Sentence 3 — "Investors should watch [5–7 specific items + closing
+     commentary theme]."   Items must be specific (e.g. "NIM trajectory,
+     provision expense, deposit costs, fee income, loan growth, and
+     management commentary on capital deployment"). NOT vague
+     ("growth", "margins", "outlook").
+
+   Sentence 4 — "The setup appears [balanced / cautiously attractive /
+     constructive / high-risk-high-reward], [one-clause justification]."
+     The justification must reference a concrete anchor: valuation
+     vs history, beat/miss track record, or consensus dispersion.
+
+   This 4-sentence shape is non-negotiable. Do NOT add a fifth sentence.
+   Do NOT collapse to three. Do NOT skip the bracketed slot fills.
+
+2. "catalysts": EXACTLY 3 bullets, one sentence each. Forward-looking
+   drivers only — what could MOVE consensus on the print or in the
+   following weeks. Pick from these categories where the data block
+   supports them: earnings release dynamics (beat vs miss, guidance
+   delta), margin trajectory, loan / volume growth, dividend or buyback
+   announcement, valuation re-rating triggers, sector-specific
+   developments (commodity price moves, regulatory change), management
+   commentary slots. Each bullet MUST cite a number from the data block.
+   FORBIDDEN: bullets that just restate a single fact ("Dividend yield
+   4.8%"), generic boilerplate ("strong execution"), or upside-to-target
+   restated as a catalyst. The number anchors the analytical claim, not
+   the other way around.
+
+3. "risks": EXACTLY 3 bullets, same voice as catalysts. Company-specific
+   downside drivers anchored in real numbers, tied to the investment
+   case. FORBIDDEN: generic macro statements that don't directly affect
+   this company's business model (a low domestic inflation print is
+   NOT a risk for a commercial bank), single-fact restatements ("Low
+   end of target range OMR 0.39"), or repetition of any catalyst with
+   the sign flipped. Each risk must be a real downside path with a
+   numeric anchor.
+
+4. "watch_list": EXACTLY 3 specific questions ending in "?". Each must
    reference a real data point (a price level, a margin, a capex
    number, a surprise pct, a broker action, a guidance figure).
-   Not generic open-enders.
+   Not generic open-enders. Frame as the precise question an analyst
+   would put to management on the call.
+
+5. "highlights": EXACTLY 5 short analytical takes for the front-page
+   slide. JSON list of {"category": str, "body": str}. Use these five
+   categories, in this order:
+     - "EARNINGS"   — what the print is most likely to hinge on (an
+                      operating lever or the beat/miss track record),
+                      framed as a forward-looking analytical statement.
+     - "VALUATION"  — how the current multiple sits relative to peers
+                      or its own history; the re-rate vs de-rate path.
+     - "POSITIONING"— consensus / target context AS AN INTERPRETATION,
+                      not a restatement. Frame what the positioning
+                      tells you (consensus dispersion, crowded long,
+                      target asymmetry).
+     - "WATCH"      — the single concrete number to listen for on the
+                      call (NIM, loan growth, capex guidance, etc.).
+     - "RISK"       — the most material company-specific downside,
+                      tied to the investment case.
+   Each body is ONE short sentence (≤14 words). Anchor every body in
+   a number from the data block. NO pure restatements — the line must
+   add interpretation. FORBIDDEN: starting a body with "Dividend yield
+   X%" / "Forward P/E X.Xx" / "Target X" with no analytical context.
 
 HARD RULES
   - Every number you write must trace to a value in the data block.
@@ -464,7 +512,9 @@ HARD RULES
   - If a sentence cannot cite a real number for the claim it is
     making, rewrite it as qualitative or drop it.
   - Currency, units, and time period must match how the data block
-    presents them.
+    presents them. When citing a macro figure, retain the "(IMF YYYY)"
+    or "(WB YYYY)" tag from the data block so the source/year is
+    visible in the deck.
   - No markdown fences, no preface, no trailing prose. JSON only.
 """
 
@@ -622,33 +672,110 @@ def _validate_sentence(text: str, allowed: set[float]) -> bool:
     return all(_number_matches(n, allowed) for n in nums)
 
 
+_GENERIC_TOKENS = (
+    "strong execution", "constructive guidance", "positive momentum",
+    "robust performance", "challenging environment", "favorable backdrop",
+    "favourable backdrop", "well positioned", "well-positioned",
+    "moving forward", "going forward", "in due course",
+)
+
+
+def _is_generic_filler(text: str) -> bool:
+    """True when a sentence consists mostly of empty analyst boilerplate
+    with no numeric anchor. Used to drop catalyst/risk bullets that pass
+    the numeric-trace test trivially (no numbers) but contribute nothing."""
+    if not text:
+        return True
+    t = text.lower()
+    if any(tok in t for tok in _GENERIC_TOKENS):
+        return True
+    return False
+
+
+def _enforce_thesis_shape(thesis: str) -> tuple[str, bool]:
+    """Lightly enforce the Apple/JPM/Tesla 4-sentence template.
+
+    Returns (text, ok). When the output has 4 sentences AND the rhythm
+    anchors are present ("enters earnings with focus on", "Investors
+    should watch", "setup appears"), we trust it. Otherwise we surface
+    `ok=False` so `generate_summary` can retry with a stricter reminder.
+    """
+    if not thesis:
+        return "", False
+    sentences = _re.findall(r"[^.!?]+[.!?]+", thesis)
+    if len(sentences) != 4:
+        return thesis.strip(), False
+    joined = thesis.lower()
+    anchors = ("enters earnings with focus on", "investors should watch", "setup appears")
+    ok = all(a in joined for a in anchors)
+    return thesis.strip(), ok
+
+
 def _validate_llm_output(payload: dict, ctx: dict) -> dict:
     """Drop sentences/bullets whose numbers don't trace to the context.
     Returns a copy of payload with offending content removed."""
     allowed = _allowed_numbers(ctx)
     cleaned = dict(payload)
 
-    # Thesis paragraph: split on sentence boundaries; drop ungrounded sentences.
-    # Re-join with spacing intact so the paragraph still reads naturally.
+    # Thesis paragraph: validate the 4-sentence template AND that numeric
+    # claims trace. When the template is broken we still surface the text
+    # (the renderer falls back gracefully) but flag it so the caller can
+    # retry once with a stricter reminder.
     thesis = payload.get("thesis_paragraph") or ""
     if thesis:
-        # Split on sentence terminators while keeping them.
-        sentences = _re.findall(r"[^.!?]+[.!?]+", thesis)
+        thesis_text, shape_ok = _enforce_thesis_shape(thesis)
+        sentences = _re.findall(r"[^.!?]+[.!?]+", thesis_text)
         if not sentences:
-            sentences = [thesis]
+            sentences = [thesis_text]
         kept = [s.strip() for s in sentences if _validate_sentence(s, allowed)]
         cleaned["thesis_paragraph"] = " ".join(kept).strip()
+        cleaned["_thesis_shape_ok"] = shape_ok
         dropped = len(sentences) - len(kept)
         if dropped:
             log.warning("Dropped %d thesis sentence(s) with ungrounded numbers", dropped)
 
-    # Lists: drop bullets that fail. Renderer's defaults backfill when empty.
+    # Highlights: same trace check as catalysts/risks, plus body length cap.
+    hl = payload.get("highlights") or []
+    hl_kept: list[dict] = []
+    for it in hl:
+        if not isinstance(it, dict):
+            continue
+        body = (it.get("body") or "").strip()
+        if not body:
+            continue
+        if not _validate_sentence(body, allowed):
+            continue
+        if _is_generic_filler(body):
+            continue
+        # Highlights cap at ~14 words to fit the slide pill. Trim aggressively.
+        if len(body.split()) > 20:
+            continue
+        hl_kept.append(it)
+    cleaned["highlights"] = hl_kept
+
+    # Catalysts / risks: each bullet must (a) have at least one numeric anchor
+    # that traces AND (b) not be generic-filler-only. watch_list bullets
+    # can be qualitative (they're questions), so only the numeric check
+    # applies there.
     for key in ("catalysts", "risks", "watch_list"):
         items = payload.get(key) or []
-        kept = [it for it in items if isinstance(it, str) and _validate_sentence(it, allowed)]
+        kept: list[str] = []
+        for it in items:
+            if not isinstance(it, str) or not it.strip():
+                continue
+            if not _validate_sentence(it, allowed):
+                continue
+            if key in ("catalysts", "risks") and _is_generic_filler(it):
+                continue
+            # catalysts / risks must actually cite at least one number
+            # (the prompt forbids unanchored claims; enforce it here).
+            if key in ("catalysts", "risks") and not _extract_numbers(it):
+                log.warning("Dropped %s bullet with no numeric anchor: %s", key, it[:80])
+                continue
+            kept.append(it)
         cleaned[key] = kept
         if len(kept) < len(items):
-            log.warning("Dropped %d %s bullet(s) with ungrounded numbers",
+            log.warning("Dropped %d %s bullet(s) (validation)",
                          len(items) - len(kept), key)
 
     return cleaned
@@ -721,21 +848,68 @@ def generate_summary(ticker: str, *, force_refresh: bool = False) -> Optional[di
         log.warning("Gemini summary missing keys for %s: %s", ticker, missing)
         return None
 
-    payload = {
-        "thesis_paragraph": (out.get("thesis_paragraph") or "").strip(),
-        "catalysts":  list(out.get("catalysts")  or [])[:3],
-        "risks":      list(out.get("risks")      or [])[:3],
-        "watch_list": list(out.get("watch_list") or [])[:3],
-        "provider":   "gemini",
-        "model":      "auto",
-        "ticker":     ticker,
-        "as_of":      datetime.now(timezone.utc).isoformat(),
-        "context_hash": key,
-    }
+    def _build_payload(raw: dict) -> dict:
+        # Normalise highlights into 5-tuple-shaped dicts, preserving the
+        # category order the prompt asked for. Bad inputs are dropped — the
+        # templated `_derive_highlights` covers the missing slot.
+        hl_in = raw.get("highlights") or []
+        hl_out = []
+        for it in hl_in[:5]:
+            if isinstance(it, dict):
+                cat = str(it.get("category") or "").strip().upper()
+                body = str(it.get("body") or "").strip()
+                if cat and body:
+                    hl_out.append({"category": cat, "body": body})
+        return {
+            "thesis_paragraph": (raw.get("thesis_paragraph") or "").strip(),
+            "catalysts":  list(raw.get("catalysts")  or [])[:3],
+            "risks":      list(raw.get("risks")      or [])[:3],
+            "watch_list": list(raw.get("watch_list") or [])[:3],
+            "highlights": hl_out,
+            "provider":   "gemini",
+            "model":      "auto",
+            "ticker":     ticker,
+            "as_of":      datetime.now(timezone.utc).isoformat(),
+            "context_hash": key,
+        }
+
+    payload = _build_payload(out)
     # Numeric-trace validator: drop any sentence / bullet that cites a
     # number we can't trace back to the context. Loosens the prompt's
     # prose patterns (the LLM gets analytical leeway) while keeping the
     # numeric grounding strict.
     payload = _validate_llm_output(payload, ctx)
+
+    # One retry when the thesis_paragraph shape didn't match the
+    # Apple/JPM/Tesla template (4 sentences with the rhythm anchors).
+    # The retry prompt is identical apart from a stricter reminder
+    # prepended — the model usually self-corrects on the second pass.
+    if payload.get("_thesis_shape_ok") is False:
+        log.info("Thesis shape mismatch for %s — retrying with stricter reminder", ticker)
+        retry_prefix = (
+            "PREVIOUS ATTEMPT DID NOT FOLLOW THE 4-SENTENCE TEMPLATE. "
+            "Output EXACTLY four sentences for thesis_paragraph, in this order:\n"
+            "  1. '<Company> enters earnings with focus on <four drivers>.'\n"
+            "  2. 'Recent performance has been <X / driven by Y>, while <headwind>.'\n"
+            "  3. 'Investors should watch <5-7 specific items + commentary theme>.'\n"
+            "  4. 'The setup appears <posture>, <one-clause justification>.'\n"
+            "Do NOT collapse to three sentences. Do NOT add a fifth.\n\n"
+        )
+        try:
+            out2 = _call_gemini(retry_prefix + prompt, for_investment_view=True)
+            if out2 and isinstance(out2, dict):
+                payload2 = _validate_llm_output(_build_payload(out2), ctx)
+                if payload2.get("_thesis_shape_ok"):
+                    payload = payload2
+                elif (payload2.get("thesis_paragraph") or "").strip():
+                    # Even if shape is still imperfect, the retry's prose is
+                    # often closer — keep its thesis but layer the lists from
+                    # whichever pass produced more anchored bullets.
+                    if len(payload2.get("catalysts") or []) >= len(payload.get("catalysts") or []):
+                        payload = payload2
+        except Exception as exc:
+            log.warning("Thesis shape retry failed for %s: %s", ticker, exc)
+
+    payload.pop("_thesis_shape_ok", None)
     _write_cache(path, payload)
     return payload

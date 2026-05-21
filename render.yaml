@@ -24,9 +24,6 @@ services:
       # Allow previews when Yahoo has a quote but financials/MS are thin (maximize ticker coverage)
       - key: REPORT_READINESS_MODE
         value: permissive
-      # Force Jabal 3-slide deck (the only user-visible product)
-      - key: JABAL_RENDERER
-        value: "1"
       # Optional: restrict CORS to your frontend (comma-separated origins)
       # - key: CORS_ORIGINS
       #   value: https://your-app.onrender.com,https://your-custom-domain.com

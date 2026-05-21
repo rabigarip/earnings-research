@@ -222,11 +222,20 @@ def _peer_label(ticker: str, sector: str = "", industry: str = "") -> str:
     return f"Selected {region.lower()} peers" if region != "Global" else "Selected global peers"
 
 
-def _peer_table(slide, top: float, peers: list[dict]):
-    """Rows: name, ticker, mcap, P/E, dividend yield, 1Y return.
-    Compact, borderless, alternating row tint."""
-    headers = ["COMPANY", "TICKER", "MCAP", "P/E", "DIV YIELD", "1Y RETURN"]
-    col_w   = [2.10, 1.10, 1.10, 0.70, 0.80, 0.80]
+def _peer_table(slide, top: float, peers: list[dict], *, is_bank: bool = False):
+    """Rows: name, ticker, mcap, P/E, P/B, EV/EBITDA (or P/TBV for banks),
+    dividend yield, 1Y return.
+
+    For banks the EV/EBITDA column is replaced by P/TBV (yfinance doesn't
+    expose tangible book separately, so we render Yahoo's priceToBook
+    here with a footnote-grade caveat — close enough for relative bank
+    comps where intangibles are usually a small fraction of book).
+
+    Compact, borderless, alternating row tint.
+    """
+    third_metric_label = "P/TBV" if is_bank else "EV/EBITDA"
+    headers = ["COMPANY", "TICKER", "MCAP", "P/E", "P/B", third_metric_label, "DIV YIELD", "1Y RETURN"]
+    col_w   = [1.65, 0.95, 0.95, 0.55, 0.55, 0.75, 0.70, 0.70]
     row_h   = 0.28
     # Header
     x = MARGIN_L
@@ -246,11 +255,15 @@ def _peer_table(slide, top: float, peers: list[dict]):
             band.fill.solid(); band.fill.fore_color.rgb = CARD
             band.line.fill.background()
         x = MARGIN_L
+        # For banks the third multiples column reuses pb_fmt (P/TBV proxy).
+        third_val_fmt = p.get("pb_fmt", "—") if is_bank else p.get("ev_ebitda_fmt", "—")
         cells = [
             p.get("name", "—"),
             p.get("ticker", "—"),
             p.get("market_cap_fmt", "—"),
             p.get("pe_fmt", "—"),
+            p.get("pb_fmt", "—"),
+            third_val_fmt,
             p.get("div_yield_fmt", "—"),
             p.get("ret_1y_fmt", "—"),
         ]
@@ -258,7 +271,7 @@ def _peer_table(slide, top: float, peers: list[dict]):
         for i, cell in enumerate(cells):
             align = PP_ALIGN.LEFT if i < 2 else PP_ALIGN.RIGHT
             color = BLACK
-            if i == 5 and isinstance(ret_val, (int, float)):
+            if i == 7 and isinstance(ret_val, (int, float)):
                 color = signed_color(ret_val)
             _text(slide, x, y, col_w[i] - 0.05, row_h, str(cell),
                   size=SZ_BODY, color=color, align=align)
@@ -380,6 +393,14 @@ class ValuationData:
     analyst_name: str
     gen_date: str
     total_pages: int = 3
+    is_bank: bool = False
+    # Earnings-history chart inputs (replaces the legacy "Market Sentiment"
+    # row at the bottom of slide 3 — duplicates info already on slide 1).
+    surprise_history: list[dict] | None = None
+    ticker: str = ""
+    # Optional 5y forward-P/E history (for the new historical-range view).
+    # When empty, the P/E chart falls back to the forecast-bar view.
+    pe_history: list[dict] | None = None
 
 
 def render_valuation_slide(prs, data: ValuationData):
@@ -391,7 +412,15 @@ def render_valuation_slide(prs, data: ValuationData):
     _section_hero(slide, 1.08, "Market Positioning",
                     "Valuation & Market View")
 
-    # Two-up chart row
+    # Two-up chart row — matplotlib PNGs embedded as pictures so we get
+    # cleaner date axes, range shading, and current-multiple markers than
+    # the native python-pptx chart objects allow.
+    from io import BytesIO
+    from src.services.render_charts_mpl import (
+        render_52w_price_chart, render_pe_historical_chart,
+        render_earnings_history_chart,
+    )
+
     chart_top = 1.96
     chart_h = 2.40
     col_w = (CONTENT_W - 0.20) / 2
@@ -400,32 +429,58 @@ def render_valuation_slide(prs, data: ValuationData):
     _text(slide, MARGIN_L, chart_top, col_w, 0.22,
           f"52-WEEK PRICE  ·  {data.currency}",
           size=SZ_LABEL, color=MUTED, all_caps=True, bold=True)
-    _line_chart_52w(slide, MARGIN_L, chart_top + 0.26, col_w, chart_h - 0.30,
-                     data.close_series, currency=data.currency)
+    price_png = render_52w_price_chart(data.close_series, currency=data.currency)
+    if price_png:
+        slide.shapes.add_picture(BytesIO(price_png),
+                                   in_(MARGIN_L), in_(chart_top + 0.26),
+                                   width=in_(col_w), height=in_(chart_h - 0.30))
+    else:
+        # Matplotlib unavailable or empty series — keep the native fallback
+        # so the slide still renders.
+        _line_chart_52w(slide, MARGIN_L, chart_top + 0.26, col_w, chart_h - 0.30,
+                         data.close_series, currency=data.currency)
 
-    # Right: P/E range
+    # Right: P/E historical range (falls back to forecast-bars inside the chart)
     right_left = MARGIN_L + col_w + 0.20
-    _pe_range_chart(slide, right_left, chart_top, col_w, chart_h,
-                     data.pe_periods, data.pe_values, data.pe_current)
+    _text(slide, right_left, chart_top, col_w, 0.22,
+          "P/E MULTIPLE  ·  5-YEAR RANGE",
+          size=SZ_LABEL, color=MUTED, all_caps=True, bold=True)
+    pe_png = render_pe_historical_chart(
+        data.pe_history, data.pe_periods, data.pe_values, data.pe_current,
+    )
+    if pe_png:
+        slide.shapes.add_picture(BytesIO(pe_png),
+                                   in_(right_left), in_(chart_top + 0.26),
+                                   width=in_(col_w), height=in_(chart_h - 0.30))
+    else:
+        _pe_range_chart(slide, right_left, chart_top, col_w, chart_h,
+                         data.pe_periods, data.pe_values, data.pe_current)
 
     # Peer table
     _section_label(slide, MARGIN_L, 4.97, CONTENT_W,
                     f"Peer Comparables  ·  {data.peer_table_label}")
-    _peer_table(slide, 5.29, data.peers)
+    _peer_table(slide, 5.29, data.peers, is_bank=data.is_bank)
 
-    # Sentiment
+    # Earnings history (replaces the legacy "Market Sentiment" row — the
+    # consensus distribution + average target are already on slide 1, and
+    # the broker-actions card was almost always empty for our universe).
     _section_label(slide, MARGIN_L, 8.35, CONTENT_W,
-                    "Market Sentiment  ·  Analyst Consensus")
-    _sentiment_row(
-        slide, 8.65,
-        rating_split=data.rating_split,
-        n_analysts=data.n_analysts,
-        target_mean=data.target_mean,
-        target_range=data.target_range,
-        target_implied_pct=data.target_implied_pct,
-        broker_actions=data.broker_actions,
+                    "Earnings History  ·  Actual vs Estimate")
+    eh_png = render_earnings_history_chart(
+        data.surprise_history or [],
+        price_series=data.close_series,
+        ticker=data.ticker,
         currency=data.currency,
+        max_quarters=8,
     )
+    if eh_png:
+        slide.shapes.add_picture(BytesIO(eh_png),
+                                   in_(MARGIN_L), in_(8.65),
+                                   width=in_(CONTENT_W), height=in_(2.50))
+    else:
+        _text(slide, MARGIN_L, 8.85, CONTENT_W, 0.30,
+              "No earnings surprise history available",
+              size=SZ_BODY, color=MUTED, align=PP_ALIGN.CENTER)
 
     _footer(slide, 3, data.total_pages, data.sources_line,
              data.analyst_name, data.gen_date)
@@ -577,6 +632,31 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     sector   = (profile.value.get("sector")   if profile and isinstance(profile.value, dict) else "") or ""
     peer_table_label = _peer_label(ticker, sector, industry)
 
+    # is_bank from curated company_master; controls whether the peer table
+    # third multiples column renders EV/EBITDA or P/TBV.
+    is_bank_flag = False
+    try:
+        from src.storage.db import load_company as _load_company_for_bank
+        _cm = _load_company_for_bank(ticker) or {}
+        is_bank_flag = bool(_cm.get("is_bank"))
+    except Exception:
+        is_bank_flag = False
+
+    # Earnings surprise history from Investing (already wired into
+    # canonical_store as `income_statement_quarterly.surprise_history`).
+    # Feeds the new dual-panel earnings-history chart at the bottom of
+    # slide 3.
+    investing_obs = get_observations_by_provider(ticker, "investing")
+    isq = investing_obs.get("income_statement_quarterly") if investing_obs else None
+    surprise_history = (isq or {}).get("surprise_history") if isinstance(isq, dict) else None
+
+    # Optional 5y forward-P/E history if upstream surfaced it; today
+    # `valuation_historical` carries the FY-grouped period/pe pair only.
+    # The chart falls back to forecast-bars when this is empty.
+    pe_history = None
+    if vh and isinstance(vh.value, dict):
+        pe_history = vh.value.get("forward_pe_history") or None
+
     return ValuationData(
         company_name=pname,
         close_series=close_series,
@@ -595,4 +675,8 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
         sources_line=_sources_line(cv),
         analyst_name=analyst_name,
         gen_date=gen_date or datetime.utcnow().strftime("%d %b %Y"),
+        is_bank=is_bank_flag,
+        surprise_history=surprise_history,
+        ticker=ticker,
+        pe_history=pe_history,
     )

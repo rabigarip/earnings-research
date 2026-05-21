@@ -607,7 +607,8 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
                             is_bank: bool = False,
                             ms_quarterly_forecasts: dict | None = None,
                             ticker: str = "",
-                            currency: str = "") -> tuple[list[dict], str]:
+                            currency: str = "",
+                            memo_data: dict | None = None) -> tuple[list[dict], str]:
     """Build rows for the slide-2 estimates table.
 
     Returns (rows, unit_suffix). The caller bakes unit_suffix into the
@@ -705,6 +706,20 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
             # MS Q2 forecast). Leave YoY blank rather than show a misleading
             # last-reported YoY in a forecast-labeled table.
             used_ms = True
+
+    # Memo-cascade fallback for Q+1 consensus: when MarketScreener's forecast
+    # table is empty (BKMB.OM, OQEP.OM, etc.), `_compute_memo` in
+    # build_report_payload already tried Investing.com forecasts and Yahoo
+    # `earnings_estimate`. Pull from there so the CONSENSUS column has
+    # numbers instead of em-dashes. YoY/QoQ still need actuals/priors from
+    # MS or Yahoo quarterly_actuals — handled below.
+    if memo_data and rev_q_consensus is None and eps_q_consensus is None:
+        mc_rev = memo_data.get("next_quarter_consensus_revenue")
+        mc_eps = memo_data.get("next_quarter_consensus_eps")
+        if isinstance(mc_rev, (int, float)):
+            rev_q_consensus = mc_rev
+        if isinstance(mc_eps, (int, float)):
+            eps_q_consensus = mc_eps
 
     # Yahoo quarterly_actuals fallback (used when MS forecast block was empty
     # or didn't yield a YoY pair).
@@ -836,6 +851,7 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
                         is_bank: bool = False,
                         ms_quarterly_forecasts: Optional[dict] = None,
                         period_heading: Optional[str] = None,
+                        memo_data: Optional[dict] = None,
                         ) -> ThesisData:
     cv = get_all_fields(ticker)
     commodities_obs = get_observations_by_provider(ticker, "commodities")
@@ -868,7 +884,8 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
             deck_currency = (prof.value.get("currency") or "").strip()
     rows, unit_suffix = _build_estimates_rows(cv, quarterly=quarterly, is_bank=is_bank,
                                                 ms_quarterly_forecasts=ms_quarterly_forecasts,
-                                                ticker=ticker, currency=deck_currency)
+                                                ticker=ticker, currency=deck_currency,
+                                                memo_data=memo_data)
 
     # Compose the table footnote: lead with the next-Q anchor (date,
     # consensus source, analyst count) since that's the strongest data
@@ -881,6 +898,11 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
     nq_period = fwd_dict.get("next_q_period") or ""
     nq_date   = fwd_dict.get("next_q_report_date") or ""
     fwd_source = (val_fwd.canonical_source if val_fwd else "—").title()
+    # If the cascade fallback (`_compute_memo`) supplied Q+1 numbers because
+    # MS / canonical_store was empty, credit that source instead of "—".
+    memo_fwd_src = (memo_data or {}).get("next_quarter_consensus_source")
+    if (not val_fwd or fwd_source in ("—", "")) and memo_fwd_src:
+        fwd_source = memo_fwd_src
     footnote_bits = []
     if nq_period and nq_date:
         footnote_bits.append(f"Next print: {nq_date} (period {nq_period})")

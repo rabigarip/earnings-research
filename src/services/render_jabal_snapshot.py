@@ -465,6 +465,46 @@ def _sources_line(cv: dict) -> str:
 
 # ── Highlight derivation ──────────────────────────────────────
 
+def _llm_highlights_or_template(*, ticker: str, cv: dict, currency: str,
+                                   current_price, mcap, target_mean, upside_pct,
+                                   pe_fwd, div_yield, range_low, range_high,
+                                   n_analysts: int, rs: dict) -> list[tuple[str, str]]:
+    """Prefer Gemini-generated highlights when available; fall back to the
+    deterministic template. The LLM bodies have already been numeric-trace
+    validated upstream — any rejected category falls back to its template
+    line so the slide always shows 5 pills.
+
+    Categories must appear in this order: EARNINGS, VALUATION, POSITIONING,
+    WATCH, RISK. The template line is always computed so we can backfill
+    any slot the LLM dropped.
+    """
+    template = _derive_highlights(
+        cv=cv, currency=currency, current_price=current_price,
+        mcap=mcap, target_mean=target_mean, upside_pct=upside_pct,
+        pe_fwd=pe_fwd, div_yield=div_yield,
+        range_low=range_low, range_high=range_high,
+        n_analysts=n_analysts, rs=rs,
+    )
+    try:
+        from src.services.llm_summary import generate_summary
+        llm = generate_summary(ticker)
+    except Exception:
+        llm = None
+    if not llm or not llm.get("highlights"):
+        return template
+    by_cat = {(item.get("category") or "").strip().upper(): (item.get("body") or "").strip()
+              for item in (llm.get("highlights") or []) if isinstance(item, dict)}
+    out: list[tuple[str, str]] = []
+    cats = ("EARNINGS", "VALUATION", "POSITIONING", "WATCH", "RISK")
+    # Index the template by its category label for quick fallback lookup.
+    tmpl_by_cat = {cat.upper(): body for cat, body in template}
+    for cat in cats:
+        body = by_cat.get(cat) or tmpl_by_cat.get(cat, "")
+        if body:
+            out.append((cat, body))
+    return out or template
+
+
 def _derive_highlights(*, cv: dict, currency: str, current_price,
                          mcap, target_mean, upside_pct, pe_fwd,
                          div_yield, range_low, range_high,
@@ -854,7 +894,8 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
         perf_6m=_perf("perf_6m"),
         perf_ytd=_perf("perf_ytd"),
         range_low=float(low), range_high=float(high), range_current=float(current),
-        highlights=highlights or _derive_highlights(
+        highlights=highlights or _llm_highlights_or_template(
+            ticker=ticker,
             cv=cv, currency=currency, current_price=current,
             mcap=mcap, target_mean=target_mean, upside_pct=upside_pct,
             pe_fwd=pe_fwd, div_yield=div_yield,

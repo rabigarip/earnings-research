@@ -100,10 +100,16 @@ def _peer_row_from_investing(ticker: str) -> dict | None:
     div_fmt = f"{float(div):.2f}%" if isinstance(div, (int, float)) and div > 0 else "—"
     ret_1y = fund.get("oneYearReturn") if isinstance(fund.get("oneYearReturn"), (int, float)) else None
     ret_1y_fmt = f"{ret_1y:+.1f}%" if isinstance(ret_1y, (int, float)) else "—"
+    pb = fund.get("priceToBook") if isinstance(fund.get("priceToBook"), (int, float)) else None
+    pb_fmt = f"{pb:.1f}x" if pb else "—"
+    ev_ebitda = fund.get("enterpriseToEbitda") if isinstance(fund.get("enterpriseToEbitda"), (int, float)) else None
+    ev_ebitda_fmt = f"{ev_ebitda:.1f}x" if ev_ebitda else "—"
     return {
         "name": name, "ticker": ticker,
         "market_cap_fmt": mcap_fmt,
         "pe": pe, "pe_fmt": pe_fmt,
+        "pb": pb, "pb_fmt": pb_fmt,
+        "ev_ebitda": ev_ebitda, "ev_ebitda_fmt": ev_ebitda_fmt,
         "div_yield_fmt": div_fmt,
         "ret_1y": ret_1y, "ret_1y_fmt": ret_1y_fmt,
     }
@@ -141,6 +147,8 @@ def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
                 rows.append({
                     "name": tt, "ticker": tt,
                     "market_cap_fmt": "—", "pe": None, "pe_fmt": "—",
+                    "pb": None, "pb_fmt": "—",
+                    "ev_ebitda": None, "ev_ebitda_fmt": "—",
                     "div_yield_fmt": "—", "ret_1y": None, "ret_1y_fmt": "—",
                 })
             continue
@@ -174,12 +182,26 @@ def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
         except Exception:
             ret_1y = None
         ret_1y_fmt = f"{ret_1y:+.1f}%" if isinstance(ret_1y, (int, float)) else "—"
+        # P/B (Yahoo: priceToBook). For banks this doubles as our P/TBV
+        # proxy — yfinance doesn't expose tangibleBookValue separately, so
+        # bank decks render P/B in the P/TBV column with that caveat.
+        pb_raw = info.get("priceToBook")
+        pb_val = float(pb_raw) if isinstance(pb_raw, (int, float)) and pb_raw > 0 else None
+        pb_fmt = f"{pb_val:.1f}x" if pb_val else "—"
+        # EV/EBITDA (Yahoo: enterpriseToEbitda). Meaningless for banks.
+        ev_raw = info.get("enterpriseToEbitda")
+        ev_ebitda_val = float(ev_raw) if isinstance(ev_raw, (int, float)) and ev_raw > 0 else None
+        ev_ebitda_fmt = f"{ev_ebitda_val:.1f}x" if ev_ebitda_val else "—"
         rows.append({
             "name": name,
             "ticker": tt,
             "market_cap_fmt": mcap_fmt,
             "pe": pe_val,
             "pe_fmt": pe_fmt,
+            "pb": pb_val,
+            "pb_fmt": pb_fmt,
+            "ev_ebitda": ev_ebitda_val,
+            "ev_ebitda_fmt": ev_ebitda_fmt,
             "div_yield_fmt": div_fmt,
             "ret_1y": ret_1y,
             "ret_1y_fmt": ret_1y_fmt,

@@ -89,6 +89,94 @@ def _rebuild_ms_section(data: dict | None) -> dict | None:
     return deepcopy(data)
 
 
+def _next_q_from_investing(ticker: str, next_quarter_label: str) -> tuple[float | None, float | None, str | None]:
+    """Pull next-quarter consensus revenue / EPS from Investing.com forecasts.
+
+    Investing.com publishes per-quarter analyst forecasts on the earnings
+    page. We use the same three-layer fallback as probe_investing (24h
+    disk cache → live network → repo-tracked snapshot under data/investing/),
+    so Render reaches the snapshot even when Cloudflare blocks egress.
+
+    Returns (revenue, eps, source_label) — any element may be None.
+    Used as a fallback when MarketScreener forwards are empty.
+    """
+    import re as _re_inv
+    if not next_quarter_label:
+        return (None, None, None)
+    m = _re_inv.search(r"(\d{4})\s*Q(\d)|Q(\d)\s*(\d{4})", str(next_quarter_label), _re_inv.I)
+    if not m:
+        return (None, None, None)
+    target_yr = int(m.group(1) or m.group(4))
+    target_q = int(m.group(2) or m.group(3))
+    try:
+        from src.providers.probe_investing import (
+            _slug, _fetch_earnings_page, _earnings_forecasts,
+        )
+    except ImportError:
+        return (None, None, None)
+    slug = _slug(ticker)
+    if not slug:
+        return (None, None, None)
+    try:
+        state = _fetch_earnings_page(slug)
+    except Exception:
+        return (None, None, None)
+    if not state:
+        return (None, None, None)
+    forecasts = _earnings_forecasts(state)
+    for f in forecasts or []:
+        yr = f.get("reportYear")
+        mo = f.get("reportMonth") or 0
+        if not (isinstance(yr, int) and isinstance(mo, int) and mo):
+            continue
+        qn = (mo - 1) // 3 + 1
+        if yr == target_yr and qn == target_q:
+            rev = f.get("revenue") if isinstance(f.get("revenue"), (int, float)) else None
+            eps = f.get("eps") if isinstance(f.get("eps"), (int, float)) else None
+            if rev is not None or eps is not None:
+                return (rev, eps, "Investing.com")
+    return (None, None, None)
+
+
+def _next_q_from_yahoo(ticker: str) -> tuple[float | None, float | None, str | None]:
+    """Pull current-quarter analyst estimate from yfinance.
+
+    yfinance exposes `Ticker.earnings_estimate` and `Ticker.revenue_estimate`
+    DataFrames; we read the `0q` row (current quarter mean estimate).
+    Coverage is good for US/India/China-HK names, thinner for GCC.
+
+    Returns (revenue, eps, source_label) — any element may be None.
+    """
+    try:
+        import yfinance as _yf
+    except ImportError:
+        return (None, None, None)
+    try:
+        tk = _yf.Ticker(ticker)
+    except Exception:
+        return (None, None, None)
+    rev = eps = None
+    try:
+        df = getattr(tk, "earnings_estimate", None)
+        if df is not None and not df.empty and "0q" in df.index and "avg" in df.columns:
+            val = df.loc["0q", "avg"]
+            if isinstance(val, (int, float)) and val == val:  # NaN check
+                eps = float(val)
+    except Exception:
+        pass
+    try:
+        df = getattr(tk, "revenue_estimate", None)
+        if df is not None and not df.empty and "0q" in df.index and "avg" in df.columns:
+            val = df.loc["0q", "avg"]
+            if isinstance(val, (int, float)) and val == val:
+                rev = float(val)
+    except Exception:
+        pass
+    if rev is None and eps is None:
+        return (None, None, None)
+    return (rev, eps, "Yahoo Finance")
+
+
 def _compute_memo(
     *,
     company,
@@ -329,8 +417,31 @@ def _compute_memo(
             if est.period_label and (next_quarter_label in est.period_label or est.period_label in (next_quarter_label or "")):
                 next_quarter_consensus_eps = est.eps
                 break
+    # Track which source supplied the forwards so the renderer + provenance
+    # sidecar can attribute the cell honestly. MarketScreener wins by default
+    # because its forwards live alongside calendar context; if MS is empty,
+    # cascade through Investing.com → Yahoo Finance so the Q+1 column doesn't
+    # render as em-dashes when free fallbacks exist.
+    next_quarter_consensus_source = None
+    if next_quarter_consensus_revenue is not None or next_quarter_consensus_eps is not None:
+        next_quarter_consensus_source = "MarketScreener"
+    if next_quarter_consensus_revenue is None and next_quarter_consensus_eps is None and next_quarter_label:
+        ticker_for_fallback = getattr(company, "ticker", "") or out.get("ticker", "")
+        inv_rev, inv_eps, inv_src = _next_q_from_investing(ticker_for_fallback, next_quarter_label)
+        if inv_rev is not None or inv_eps is not None:
+            next_quarter_consensus_revenue = inv_rev
+            next_quarter_consensus_eps = inv_eps
+            next_quarter_consensus_source = inv_src
+        else:
+            ya_rev, ya_eps, ya_src = _next_q_from_yahoo(ticker_for_fallback)
+            if ya_rev is not None or ya_eps is not None:
+                next_quarter_consensus_revenue = ya_rev
+                next_quarter_consensus_eps = ya_eps
+                next_quarter_consensus_source = ya_src
+
     out["next_quarter_consensus_revenue"] = next_quarter_consensus_revenue
     out["next_quarter_consensus_eps"] = next_quarter_consensus_eps
+    out["next_quarter_consensus_source"] = next_quarter_consensus_source
 
     # Calendar Quarterly results table: which metrics have data for next/prior/same-q-last-year
     qr = (ms_calendar_events or {}).get("quarterly_results", {}) or {}
@@ -390,8 +501,10 @@ def _compute_memo(
         # Override consensus from calendar when available (calendar is from same page as earnings date)
         if calendar_next.get("net_sales") is not None:
             out["next_quarter_consensus_revenue"] = calendar_next["net_sales"]
+            out["next_quarter_consensus_source"] = "MarketScreener"
         if calendar_next.get("eps") is not None:
             out["next_quarter_consensus_eps"] = calendar_next["eps"]
+            out["next_quarter_consensus_source"] = "MarketScreener"
 
     # Next-quarter YoY revenue / NI growth: prior-year same quarter from quarterly_actuals
     # e.g. next = 2026 Q1 → prior year = 2025 Q1; growth = (Q1'26 - Q1'25)/Q1'25 (we may not have Q1'26 actuals, so we use consensus for context or leave blank)

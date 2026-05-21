@@ -115,7 +115,6 @@ git push origin main
 - `DATABASE_PATH=/tmp/earnings-data/earnings.db` (Render dir is read-only)
 - `REPORT_OUTPUT_DIR=/tmp/earnings-outputs`
 - `GEMINI_API_KEY` (set in Render dashboard)
-- `JABAL_RENDERER=1` (force the 3-slide deck — only user-visible product)
 
 A cron pre-renders the panel of curated tickers daily so first-visit
 loads are instant. See `render.yaml`.

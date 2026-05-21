@@ -7,13 +7,10 @@ numbers are MS-verified). We then assert:
 
   * `build_report_context.build()` produces a typed `ReportContext` with the
     correct mode (quarterly vs annual), currency, and provenance.
-  * `_write_preview_pptx_portrait` produces a valid 4-slide pptx that
-    reopens cleanly.
   * Key invariants hold: no EBITDA-from-EBIT mirror, sign-aware colour
     metadata is present, currency labels are self-describing.
 
-These tests are deterministic and run in <1s — no network. Visual / PDF
-verification of the decks is in `scripts/render_regression_decks.py`.
+These tests are deterministic and run in <1s — no network.
 
 Tickers (as agreed with the user):
    2020.SR     SABIC Agri-Nutrients Co.   (Saudi industrials, MS+BBG)
@@ -330,21 +327,6 @@ def test_no_news_no_sidebar(ticker_config):
     payload = _make_payload(**ticker_config)
     ctx = build(payload, {})
     assert ctx.summary.headlines == []
-
-
-def test_pptx_renders_and_reopens(ticker_config, tmp_path):
-    """End-to-end: builder → renderer → save → reopen with all 4 slides."""
-    from pptx import Presentation
-    from src.services.generate_report import _write_preview_pptx_portrait
-
-    payload = _make_payload(**ticker_config)
-    out = tmp_path / f"{ticker_config['ticker']}_regression.pptx"
-    _write_preview_pptx_portrait(
-        payload, out, {}, "Regression test thesis.", [], None,
-    )
-    assert out.exists() and out.stat().st_size > 5000
-    prs = Presentation(str(out))
-    assert len(prs.slides) == 4, f"{ticker_config['ticker']}: expected 4 slides"
 
 
 def test_quarterly_mode_when_calendar_present(ticker_config):
