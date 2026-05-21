@@ -378,15 +378,16 @@ def _yoy_bps(curr_pct, prev_pct) -> float | None:
         return None
 
 
-def _ms_quarterly_split(ms_q: dict | None) -> tuple[dict, dict, dict]:
-    """From `ms_quarterly_forecasts.quarterly`, return (next_est, latest_actual,
-    prior_year_actual). Each is a dict {metric_key: value}.
+def _ms_quarterly_split(ms_q: dict | None) -> tuple[dict, dict, dict, dict, dict]:
+    """From `ms_quarterly_forecasts.quarterly`, return (next_est,
+    latest_actual, prior_year_actual, prior_of_next, prior_quarter).
+    Each is a dict {metric_key: value}.
 
     MS interleaves actuals and forecasts in one period list. We split by
     whether the announcement_date is in the past (actual) or future
     (estimate). Falls back to empty dicts on any shape problem.
     """
-    empty = ({}, {}, {})
+    empty = ({}, {}, {}, {}, {})
     if not isinstance(ms_q, dict):
         return empty
     q = ms_q.get("quarterly") or {}
