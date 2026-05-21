@@ -17,9 +17,12 @@ embedded matplotlib images — keeps the file lean and editable.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 from pptx.enum.shapes import MSO_SHAPE
 
@@ -101,15 +104,21 @@ def _line_chart_52w(slide, left: float, top: float, width: float, height: float,
 
 def _pe_range_chart(slide, left: float, top: float, width: float, height: float,
                      periods: list[str], pe_vals: list[Optional[float]],
-                     current_pe: Optional[float]):
+                     current_pe: Optional[float],
+                     *, draw_header: bool = True):
     """Horizontal bars representing P/E across FY periods, plus a
     'current' diamond marker on the most-recent bar.
 
     Renders manually with shapes — no chart object — so we can pixel-tune
-    the look to match the spec deck."""
-    # Header label
-    _text(slide, left, top, width, 0.22, "P/E MULTIPLE  ·  5-YEAR RANGE",
-          size=SZ_LABEL, color=MUTED, all_caps=True, bold=True)
+    the look to match the spec deck.
+
+    `draw_header` is True for legacy stand-alone callers; the new
+    `render_valuation_slide` already paints its own header above the
+    chart and passes False to avoid the duplicate label.
+    """
+    if draw_header:
+        _text(slide, left, top, width, 0.22, "P/E MULTIPLE  ·  5-YEAR RANGE",
+              size=SZ_LABEL, color=MUTED, all_caps=True, bold=True)
     rows = [(p, v) for p, v in zip(periods, pe_vals) if isinstance(v, (int, float))]
     if not rows:
         _text(slide, left, top + height * 0.45, width, 0.30,
@@ -126,7 +135,10 @@ def _pe_range_chart(slide, left: float, top: float, width: float, height: float,
     bar_area_left = left + 0.55
     bar_area_w    = width - 0.65
     row_h = 0.30
-    row_top = top + 0.30
+    # When the caller drew its own header above us, top already points
+    # at the start of the chart area — don't push the rows down by an
+    # additional 0.30 (which would assume our own header sits at `top`).
+    row_top = top + (0.30 if draw_header else 0.0)
     for i, (period, pe) in enumerate(rows):
         y = row_top + i * row_h
         _text(slide, left, y, 0.55, 0.20, period,
@@ -458,10 +470,15 @@ def render_valuation_slide(prs, data: ValuationData):
         _line_chart_52w(slide, MARGIN_L, chart_top + 0.26, col_w, chart_h - 0.30,
                          data.close_series, currency=data.currency)
 
-    # Right: P/E historical range (falls back to forecast-bars inside the chart)
+    # Right: forward P/E across FY periods (Bloomberg "Current Multiples"
+    # convention — today's price ÷ each FY's EPS estimate, projected
+    # forward). Falls back to native bar-chart when matplotlib returns
+    # None, but we DON'T also re-render the header in that branch
+    # (`_pe_range_chart` historically painted its own header, which gave
+    # us a double-label on tickers with empty P/E data).
     right_left = MARGIN_L + col_w + 0.20
     _text(slide, right_left, chart_top, col_w, 0.22,
-          "P/E MULTIPLE  ·  5-YEAR RANGE",
+          "FORWARD P/E  ·  CURRENT MULTIPLES",
           size=SZ_LABEL, color=MUTED, all_caps=True, bold=True)
     pe_png = render_pe_historical_chart(
         data.pe_history, data.pe_periods, data.pe_values, data.pe_current,
@@ -471,8 +488,11 @@ def render_valuation_slide(prs, data: ValuationData):
                                    in_(right_left), in_(chart_top + 0.26),
                                    width=in_(col_w), height=in_(chart_h - 0.30))
     else:
-        _pe_range_chart(slide, right_left, chart_top, col_w, chart_h,
-                         data.pe_periods, data.pe_values, data.pe_current)
+        # Native fallback — but suppress its internal header to avoid
+        # the duplicate-label bug observed on BKMB.
+        _pe_range_chart(slide, right_left, chart_top + 0.26, col_w, chart_h - 0.30,
+                         data.pe_periods, data.pe_values, data.pe_current,
+                         draw_header=False)
 
     # Peer table
     _section_label(slide, MARGIN_L, 4.97, CONTENT_W,
@@ -552,6 +572,9 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     if vh and isinstance(vh.value, dict):
         periods = vh.value.get("periods", []) or []
         pe_vals = vh.value.get("pe", []) or []
+    if not (periods and pe_vals):
+        log.info("[pe-chart] %s: MS /valuation/ empty (periods=%s, pe=%s) — trying Fallback A (Investing)",
+                 ticker, len(periods or []), len(pe_vals or []))
     # Fallback A: Investing's pre-computed pe_fy1 / pe_fy2 (derived from
     # last_price / EPS forecasts on the Investing earnings page).
     if not (periods and pe_vals):
@@ -568,6 +591,8 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
                 periods.append(f"FY{fy2_year}")
                 pe_vals.append(float(pe_fy2))
 
+    if not (periods and pe_vals):
+        log.info("[pe-chart] %s: Investing valuation_forward empty too — trying Fallback B (synth from MS annual NI)", ticker)
     # Fallback B: synthesize P/E series from MS annual net_income +
     # market_cap. MS publishes 8-year net-income forecasts on /finances/
     # for tickers where the structured /valuation/ table is empty (BKMB,
@@ -606,6 +631,10 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
         if (isinstance(quote_price, (int, float)) and quote_price > 0
             and isinstance(market_cap, (int, float)) and market_cap > 0):
             shares_out = float(market_cap) / float(quote_price)
+        log.info("[pe-chart] %s: synth inputs — price=%s market_cap=%s shares_out=%s "
+                 "ni_series_len=%d periods=%s ms_ann_payload_present=%s",
+                 ticker, quote_price, market_cap, shares_out,
+                 len(ni_series or []), ann_periods_raw, bool(ms_ann_payload))
         if shares_out and ni_series and ann_periods_raw:
             synth_periods: list[str] = []
             synth_pe: list[float] = []
@@ -620,6 +649,10 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
             if synth_periods:
                 periods = synth_periods
                 pe_vals = synth_pe
+                log.info("[pe-chart] %s: synth produced %d bars: %s",
+                         ticker, len(periods), list(zip(periods, [round(v,1) for v in pe_vals])))
+            else:
+                log.warning("[pe-chart] %s: synth produced 0 bars (no valid NI rows or sanity-guard rejected all)", ticker)
     if len(periods) > 5 and len(pe_vals) == len(periods):
         periods = periods[-5:]
         pe_vals = pe_vals[-5:]

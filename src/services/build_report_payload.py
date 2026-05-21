@@ -494,17 +494,26 @@ def _compute_memo(
     next_quarter_consensus_source = None
     next_quarter_consensus_ebitda = None
     next_quarter_consensus_ni = None
+    _ticker_log = getattr(company, "ticker", "") or out.get("ticker", "?")
     if next_quarter_consensus_revenue is not None or next_quarter_consensus_eps is not None:
         next_quarter_consensus_source = "MarketScreener"
+        log.info("[forwards] %s: MS quarterly hit (rev=%s, eps=%s)",
+                 _ticker_log, next_quarter_consensus_revenue, next_quarter_consensus_eps)
     if next_quarter_consensus_revenue is None and next_quarter_consensus_eps is None and next_quarter_label:
         ticker_for_fallback = getattr(company, "ticker", "") or out.get("ticker", "")
+        log.info("[forwards] %s: MS quarterly empty for label=%r — trying cascade",
+                 _ticker_log, next_quarter_label)
         inv_rev, inv_eps, inv_src = _next_q_from_investing(ticker_for_fallback, next_quarter_label)
+        log.info("[forwards] %s: Investing returned rev=%s, eps=%s, src=%s",
+                 _ticker_log, inv_rev, inv_eps, inv_src)
         if inv_rev is not None or inv_eps is not None:
             next_quarter_consensus_revenue = inv_rev
             next_quarter_consensus_eps = inv_eps
             next_quarter_consensus_source = inv_src
         else:
             ya_rev, ya_eps, ya_src = _next_q_from_yahoo(ticker_for_fallback)
+            log.info("[forwards] %s: Yahoo returned rev=%s, eps=%s",
+                     _ticker_log, ya_rev, ya_eps)
             if ya_rev is not None or ya_eps is not None:
                 next_quarter_consensus_revenue = ya_rev
                 next_quarter_consensus_eps = ya_eps
@@ -518,12 +527,20 @@ def _compute_memo(
                 a_rev, a_eps, a_src, a_eb, a_ni = _next_q_from_ms_annual(
                     ms_annual_forecasts, next_quarter_label, ms_eps_dividend_forecasts,
                 )
+                log.info("[forwards] %s: MS-annual÷4 returned rev=%s eps=%s eb=%s ni=%s",
+                         _ticker_log, a_rev, a_eps, a_eb, a_ni)
                 if any(v is not None for v in (a_rev, a_eps, a_eb, a_ni)):
                     next_quarter_consensus_revenue = a_rev
                     next_quarter_consensus_eps = a_eps
                     next_quarter_consensus_ebitda = a_eb
                     next_quarter_consensus_ni = a_ni
                     next_quarter_consensus_source = a_src
+                else:
+                    log.warning("[forwards] %s: ALL cascade layers empty — "
+                                "ms_annual periods=%s, next_q_label=%r",
+                                _ticker_log,
+                                ((ms_annual_forecasts or {}).get("annual") or {}).get("periods"),
+                                next_quarter_label)
 
     out["next_quarter_consensus_revenue"] = next_quarter_consensus_revenue
     out["next_quarter_consensus_eps"] = next_quarter_consensus_eps
