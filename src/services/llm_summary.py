@@ -666,9 +666,16 @@ def _validate_llm_output(payload: dict, ctx: dict) -> dict:
     cleaned = dict(payload)
 
     # Thesis: drop sentences whose numbers don't trace. Re-join the rest.
+    # IMPORTANT: split on a terminator followed by whitespace + capital
+    # letter so decimal numbers stay intact. The earlier `findall` regex
+    # had two failure modes: (1) split "3.5%" into "3" / "5%", (2)
+    # silently SKIP regions it couldn't match (the bytes between matches
+    # were dropped entirely), amputating prose mid-clause. `re.split` on
+    # an actual sentence boundary preserves every byte and only splits
+    # at true sentence ends.
     thesis = payload.get("thesis_paragraph") or ""
     if thesis:
-        sentences = _re.findall(r"[^.!?]+[.!?]+", thesis)
+        sentences = _re.split(r"(?<=[.!?])\s+(?=[A-Z])", thesis.strip())
         if not sentences:
             sentences = [thesis]
         kept = [s.strip() for s in sentences if _validate_sentence(s, allowed)]

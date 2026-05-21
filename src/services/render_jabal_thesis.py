@@ -740,19 +740,27 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
             # last-reported YoY in a forecast-labeled table.
             used_ms = True
 
-    # Memo-cascade fallback for Q+1 consensus: when MarketScreener's forecast
-    # table is empty (BKMB.OM, OQEP.OM, etc.), `_compute_memo` in
-    # build_report_payload already tried Investing.com forecasts and Yahoo
-    # `earnings_estimate`. Pull from there so the CONSENSUS column has
-    # numbers instead of em-dashes. YoY/QoQ still need actuals/priors from
-    # MS or Yahoo quarterly_actuals — handled below.
+    # Memo-cascade fallback for Q+1 consensus: when MarketScreener's
+    # forecast table is empty (BKMB.OM, OQEP.OM, etc.), `_compute_memo`
+    # in build_report_payload tries Investing → Yahoo → MS annual ÷ 4.
+    # Pull whatever it found so the CONSENSUS column has numbers
+    # instead of em-dashes. The MS-annual path also surfaces EBITDA
+    # and Net Income proxies (Investing/Yahoo don't expose those at
+    # the Q+1 cadence). YoY/QoQ still need actuals/priors from MS or
+    # Yahoo quarterly_actuals — handled below.
     if memo_data and rev_q_consensus is None and eps_q_consensus is None:
         mc_rev = memo_data.get("next_quarter_consensus_revenue")
         mc_eps = memo_data.get("next_quarter_consensus_eps")
+        mc_eb  = memo_data.get("next_quarter_consensus_ebitda")
+        mc_ni  = memo_data.get("next_quarter_consensus_ni")
         if isinstance(mc_rev, (int, float)):
             rev_q_consensus = mc_rev
         if isinstance(mc_eps, (int, float)):
             eps_q_consensus = mc_eps
+        if isinstance(mc_eb, (int, float)) and ebitda_q_consensus is None:
+            ebitda_q_consensus = mc_eb
+        if isinstance(mc_ni, (int, float)) and ni_q_consensus is None:
+            ni_q_consensus = mc_ni
 
     # Yahoo quarterly_actuals fallback (used when MS forecast block was empty
     # or didn't yield a YoY pair).

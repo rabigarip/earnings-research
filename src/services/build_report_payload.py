@@ -177,6 +177,75 @@ def _next_q_from_yahoo(ticker: str) -> tuple[float | None, float | None, str | N
     return (rev, eps, "Yahoo Finance")
 
 
+def _next_q_from_ms_annual(ms_annual_forecasts: dict | None,
+                              next_quarter_label: str | None,
+                              ms_eps_dividend_forecasts: dict | None = None,
+                              ) -> tuple[float | None, float | None, str | None,
+                                          float | None, float | None]:
+    """Pull annual estimates from MarketScreener and derive a quarterly
+    proxy by dividing by 4. Returns (revenue, eps, source, ebitda, net_income).
+
+    Many GCC / EM names (BKMB.OM, OQEP.OM, etc.) have ANNUAL analyst
+    forecasts on MarketScreener but no per-quarter breakdown. Without
+    this fallback the Q+1 estimates table shows em-dashes despite the
+    data being visibly available on the MS page.
+
+    The ÷4 proxy is a flat-seasonality approximation — fine for banks
+    and most institutional-coverage names, less accurate for highly
+    seasonal businesses. The renderer surfaces the source label so the
+    analyst sees this came from "MarketScreener (annual ÷ 4)".
+    """
+    import re as _re_a
+    if not next_quarter_label or not isinstance(ms_annual_forecasts, dict):
+        return (None, None, None, None, None)
+    annual = ms_annual_forecasts.get("annual") or {}
+    if not isinstance(annual, dict):
+        return (None, None, None, None, None)
+    periods = annual.get("periods") or []
+    if not periods:
+        return (None, None, None, None, None)
+    m = _re_a.search(r"(\d{4})", str(next_quarter_label))
+    if not m:
+        return (None, None, None, None, None)
+    target_yr_str = m.group(1)
+    # Find the index in MS periods that matches the next-quarter year.
+    target_idx = None
+    for i, p in enumerate(periods):
+        if target_yr_str in str(p):
+            target_idx = i
+            break
+    if target_idx is None:
+        return (None, None, None, None, None)
+    def _get(arr_name):
+        arr = annual.get(arr_name) or []
+        if target_idx < len(arr):
+            v = arr[target_idx]
+            return float(v) if isinstance(v, (int, float)) else None
+        return None
+    rev_annual = _get("net_sales")
+    eb_annual = _get("ebitda")
+    ni_annual = _get("net_income")
+    eps_annual = None
+    # MS EPS sits in a separate dividend/EPS payload — pull from there.
+    if isinstance(ms_eps_dividend_forecasts, dict):
+        ed = ms_eps_dividend_forecasts.get("annual") or {}
+        eps_periods = ed.get("periods") or []
+        eps_arr = ed.get("eps") or []
+        for i, p in enumerate(eps_periods):
+            if target_yr_str in str(p) and i < len(eps_arr):
+                v = eps_arr[i]
+                if isinstance(v, (int, float)):
+                    eps_annual = float(v)
+                break
+    if all(v is None for v in (rev_annual, eb_annual, ni_annual, eps_annual)):
+        return (None, None, None, None, None)
+    rev_q = rev_annual / 4 if isinstance(rev_annual, (int, float)) else None
+    eps_q = eps_annual / 4 if isinstance(eps_annual, (int, float)) else None
+    eb_q = eb_annual / 4 if isinstance(eb_annual, (int, float)) else None
+    ni_q = ni_annual / 4 if isinstance(ni_annual, (int, float)) else None
+    return (rev_q, eps_q, "MarketScreener (annual ÷ 4)", eb_q, ni_q)
+
+
 def _compute_memo(
     *,
     company,
@@ -423,6 +492,8 @@ def _compute_memo(
     # cascade through Investing.com → Yahoo Finance so the Q+1 column doesn't
     # render as em-dashes when free fallbacks exist.
     next_quarter_consensus_source = None
+    next_quarter_consensus_ebitda = None
+    next_quarter_consensus_ni = None
     if next_quarter_consensus_revenue is not None or next_quarter_consensus_eps is not None:
         next_quarter_consensus_source = "MarketScreener"
     if next_quarter_consensus_revenue is None and next_quarter_consensus_eps is None and next_quarter_label:
@@ -438,9 +509,26 @@ def _compute_memo(
                 next_quarter_consensus_revenue = ya_rev
                 next_quarter_consensus_eps = ya_eps
                 next_quarter_consensus_source = ya_src
+            else:
+                # Final fallback: MS annual forecast ÷ 4. Used for GCC / EM
+                # names where MS publishes annual estimates but no per-quarter
+                # breakdown (BKMB.OM is the canonical case). Also surfaces
+                # EBITDA and Net Income quarterly proxies that the cascade
+                # above can't derive.
+                a_rev, a_eps, a_src, a_eb, a_ni = _next_q_from_ms_annual(
+                    ms_annual_forecasts, next_quarter_label, ms_eps_dividend_forecasts,
+                )
+                if any(v is not None for v in (a_rev, a_eps, a_eb, a_ni)):
+                    next_quarter_consensus_revenue = a_rev
+                    next_quarter_consensus_eps = a_eps
+                    next_quarter_consensus_ebitda = a_eb
+                    next_quarter_consensus_ni = a_ni
+                    next_quarter_consensus_source = a_src
 
     out["next_quarter_consensus_revenue"] = next_quarter_consensus_revenue
     out["next_quarter_consensus_eps"] = next_quarter_consensus_eps
+    out["next_quarter_consensus_ebitda"] = next_quarter_consensus_ebitda
+    out["next_quarter_consensus_ni"] = next_quarter_consensus_ni
     out["next_quarter_consensus_source"] = next_quarter_consensus_source
 
     # Calendar Quarterly results table: which metrics have data for next/prior/same-q-last-year
