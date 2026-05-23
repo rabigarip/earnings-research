@@ -226,11 +226,20 @@ def _next_q_from_ms_annual(ms_annual_forecasts: dict | None,
     eb_annual = _get("ebitda")
     ni_annual = _get("net_income")
     eps_annual = None
-    # MS EPS sits in a separate dividend/EPS payload — pull from there.
+    # MS EPS sits in a separate dividend/EPS payload. The /valuation-dividend/
+    # parser returns a FLAT dict (periods at top level, eps at top level —
+    # no "annual" wrapper), unlike the /finances/ parser which wraps things
+    # under "annual" / "quarterly". Try both shapes so we cover the parser's
+    # actual output AND any callers that pass a wrapped payload.
     if isinstance(ms_eps_dividend_forecasts, dict):
-        ed = ms_eps_dividend_forecasts.get("annual") or {}
-        eps_periods = ed.get("periods") or []
-        eps_arr = ed.get("eps") or []
+        ed_wrapped = ms_eps_dividend_forecasts.get("annual")
+        if isinstance(ed_wrapped, dict) and ed_wrapped.get("periods"):
+            eps_periods = ed_wrapped.get("periods") or []
+            eps_arr = ed_wrapped.get("eps") or []
+        else:
+            # Flat shape — what fetch_dividend_eps_page actually returns
+            eps_periods = ms_eps_dividend_forecasts.get("periods") or []
+            eps_arr = ms_eps_dividend_forecasts.get("eps") or []
         for i, p in enumerate(eps_periods):
             if target_yr_str in str(p) and i < len(eps_arr):
                 v = eps_arr[i]
