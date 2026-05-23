@@ -600,11 +600,36 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     # using shares = market_cap ÷ price. Then P/E = price ÷ EPS for each
     # forecast year. Matches Bloomberg P/E within ~1% on names tested.
     if not (periods and pe_vals):
-        quote_obs = cv.get("quote")
-        quote_price = market_cap = None
-        if quote_obs and isinstance(quote_obs.value, dict):
-            quote_price = quote_obs.value.get("price")
-            market_cap = quote_obs.value.get("market_cap")
+        # canonical_store stores price + market_cap as SEPARATE scalar
+        # fields ("current_price", "market_cap"). The earlier version of
+        # this code looked up a non-existent "quote" dict, which made
+        # shares_out perpetually None and the synth path never produced
+        # bars (the BKMB.OM deck on 2026-05-23 was the visible symptom).
+        price_obs = cv.get("current_price")
+        mcap_obs  = cv.get("market_cap")
+        quote_price = None
+        if price_obs is not None:
+            pv = price_obs.value
+            if isinstance(pv, (int, float)):
+                quote_price = float(pv)
+            elif isinstance(pv, dict):
+                _p = pv.get("price") or pv.get("value")
+                quote_price = float(_p) if isinstance(_p, (int, float)) else None
+        market_cap = None
+        if mcap_obs is not None:
+            mv = mcap_obs.value
+            if isinstance(mv, (int, float)):
+                market_cap = float(mv)
+            elif isinstance(mv, dict):
+                _m = mv.get("market_cap") or mv.get("value")
+                market_cap = float(_m) if isinstance(_m, (int, float)) else None
+            # MarketScreener publishes market cap in millions of local
+            # currency — same scale-adjustment the snapshot renderer
+            # applies. Without it the synth shares-outstanding count is
+            # off by a factor of 1e6 and the P/E values blow up to 11
+            # MILLIONx, which the sanity-guard then rejects.
+            if (mcap_obs.canonical_source or "").lower() == "marketscreener" and market_cap:
+                market_cap *= 1_000_000.0
         # Pull MS annual NI series via the raw-observations table —
         # canonical_store carries only metadata, not the full series.
         ms_ann_payload = None

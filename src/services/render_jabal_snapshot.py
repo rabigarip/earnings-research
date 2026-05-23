@@ -798,6 +798,58 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
     elif pe_fwd is None and isinstance(val_fwd, (int, float)):
         pe_fwd = val_fwd
 
+    # Final fallback for slide-1 P/E (FY EST): synthesize from MS annual
+    # net_income + market_cap when /valuation/ and Investing both empty.
+    # Mirrors the synth path in render_jabal_valuation.py — see that
+    # file for the math. Without this the BKMB slide-1 chip shows '—'
+    # even though the canonical_store has everything we need.
+    if pe_fwd is None and isinstance(mcap, (int, float)) and mcap > 0 \
+       and isinstance(last_price, (int, float)) and last_price > 0:
+        try:
+            from src.storage.db import get_conn as _gc_pe
+            import json as _json_pe
+            _conn = _gc_pe()
+            _row = _conn.execute(
+                "SELECT payload_json FROM raw_observations "
+                "WHERE provider='marketscreener' AND ticker=? AND field='income_statement_annual' "
+                "ORDER BY rowid DESC LIMIT 1",
+                (ticker,),
+            ).fetchone()
+            _conn.close()
+            _ms_ann = (_json_pe.loads(_row["payload_json"]) if _row else {}).get("annual") or {}
+        except Exception:
+            _ms_ann = {}
+        # Apply the same MS scale (1e6) the snapshot uses for market cap.
+        _mc_source = cv.get("market_cap").canonical_source if cv.get("market_cap") else ""
+        _mcap_raw = float(mcap) * (1_000_000.0 if (_mc_source or "").lower() == "marketscreener" else 1.0)
+        _shares = _mcap_raw / float(last_price) if last_price else None
+        _ni_series = _ms_ann.get("net_income") or []
+        _periods_raw = _ms_ann.get("periods") or []
+        from datetime import datetime as _dt2
+        _cur_yr = _dt2.now().year
+        if _shares and _ni_series:
+            # Pick the NI value for the current calendar year (or closest).
+            _best_idx, _best_diff = None, None
+            for _i, _p in enumerate(_periods_raw):
+                import re as _r3
+                _m3 = _r3.search(r"(\d{4})", str(_p) or "")
+                if not _m3: continue
+                _yr = int(_m3.group(1))
+                _ni_v = _ni_series[_i] if _i < len(_ni_series) else None
+                if not isinstance(_ni_v, (int, float)) or _ni_v <= 0:
+                    continue
+                _d = abs(_yr - _cur_yr)
+                if _best_diff is None or _d < _best_diff:
+                    _best_idx, _best_diff = _i, _d
+                    pe_fwd_year = _yr
+            if _best_idx is not None:
+                _ni_pick = float(_ni_series[_best_idx])
+                _eps_synth = _ni_pick / _shares
+                if _eps_synth > 0:
+                    _pe_synth = float(last_price) / _eps_synth
+                    if 1 < _pe_synth < 200:
+                        pe_fwd = _pe_synth
+
     # Performance deltas — try Yahoo's hist_prices "perf_*" keys first;
     # fall back to MS price_performance block (perf_1d_pct etc.) when the
     # canonical historical_prices is empty (yfinance-blocked tickers).
