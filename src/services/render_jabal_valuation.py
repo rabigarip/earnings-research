@@ -803,15 +803,24 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
                 periods.append(f"FY{fy2_year}")
                 pe_vals.append(float(pe_fy2))
 
+    # When Fallback A gave us only 1-2 periods (the SABIC case: Investing
+    # publishes pe_fy1 but not pe_fy2/fy3), still try Fallback B — its MS-
+    # annual synthesis often produces 5-8 years for the same ticker, which
+    # makes the chart legible instead of a single giant bar. Use B's
+    # result only when it yields strictly more periods than A.
+    _force_synth_retry = (len(periods) < 3)
     if not (periods and pe_vals):
         log.info("[pe-chart] %s: Investing valuation_forward empty too — trying Fallback B (synth from MS annual NI)", ticker)
+    elif _force_synth_retry:
+        log.info("[pe-chart] %s: Investing only gave %d period(s) — also trying Fallback B to widen the series",
+                 ticker, len(periods))
     # Fallback B: synthesize P/E series from MS annual net_income +
     # market_cap. MS publishes 8-year net-income forecasts on /finances/
     # for tickers where the structured /valuation/ table is empty (BKMB,
     # OQEP, most GCC names). We synthesize EPS = NI ÷ shares_outstanding,
     # using shares = market_cap ÷ price. Then P/E = price ÷ EPS for each
     # forecast year. Matches Bloomberg P/E within ~1% on names tested.
-    if not (periods and pe_vals):
+    if (not (periods and pe_vals)) or _force_synth_retry:
         # canonical_store stores price + market_cap as SEPARATE scalar
         # fields ("current_price", "market_cap"). The earlier version of
         # this code looked up a non-existent "quote" dict, which made
@@ -884,10 +893,16 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
                             synth_periods.append(f"FY{str(p)[-4:]}")
                             synth_pe.append(pe_synth)
             if synth_periods:
-                periods = synth_periods
-                pe_vals = synth_pe
-                log.info("[pe-chart] %s: synth produced %d bars: %s",
-                         ticker, len(periods), list(zip(periods, [round(v,1) for v in pe_vals])))
+                # If Fallback A produced something, only swap when synth
+                # is strictly richer; otherwise keep A's pre-vetted values.
+                if not (periods and pe_vals) or len(synth_periods) > len(periods):
+                    periods = synth_periods
+                    pe_vals = synth_pe
+                    log.info("[pe-chart] %s: synth produced %d bars (chosen): %s",
+                             ticker, len(periods), list(zip(periods, [round(v,1) for v in pe_vals])))
+                else:
+                    log.info("[pe-chart] %s: synth produced %d bars but Fallback A had %d — keeping A",
+                             ticker, len(synth_periods), len(periods))
             else:
                 log.warning("[pe-chart] %s: synth produced 0 bars (no valid NI rows or sanity-guard rejected all)", ticker)
     if len(periods) > 5 and len(pe_vals) == len(periods):

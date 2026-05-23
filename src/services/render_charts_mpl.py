@@ -278,19 +278,57 @@ def render_pe_historical_chart(history: list[dict] | None,
         return None
     plabels = [p for p, _ in pairs]
     pvals = [v for _, v in pairs]
-    ymax = max(pvals) * 1.18
-    ax.barh(range(len(plabels)), pvals, color=_CARD, edgecolor=_MUTED, height=0.55)
+    # Y limits centred around the bars — using a tight x-range based on
+    # min/max bar values produces a more legible chart than 0→ymax when
+    # the bars are all bunched in a narrow band (e.g. FY26 10.2x / FY27
+    # 11.4x). The 0-anchored axis made the differences invisible.
+    bmin = min(pvals); bmax = max(pvals)
+    span = max(bmax - bmin, 1.0)
+    xlo = max(0.0, bmin - span * 0.6)
+    xhi = bmax + span * 0.4
+    # Sparse-bars special case: a single bar at 13x rendered as a giant
+    # block all the way across the chart, which is what made the SABIC
+    # deck look broken. Use a horizontal lollipop (line + dot) instead —
+    # mirrors the Bloomberg "current ratio" look and conveys the value
+    # without screaming for a comparison that doesn't exist.
+    if len(pvals) == 1:
+        ax.hlines(y=0, xmin=xlo, xmax=pvals[0], color=_GOLD, linewidth=2.0,
+                    alpha=0.6, zorder=2)
+        ax.scatter([pvals[0]], [0], s=110, color=_GOLD_DK, zorder=4,
+                     edgecolors="white", linewidths=1.4)
+        ax.set_yticks([0])
+        ax.set_yticklabels(plabels)
+        ax.set_ylim(-0.8, 0.8)
+        ax.set_xlim(xlo, xhi)
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:.0f}x"))
+        ax.text(pvals[0], 0.25, f"{pvals[0]:.1f}x", ha="center", va="bottom",
+                  fontsize=10, color=_BLACK, weight="bold")
+        # Subtle note explaining why only one forward year is shown.
+        ax.text((xlo + xhi) / 2, -0.5,
+                  "Single-year consensus; richer forecast unavailable",
+                  ha="center", fontsize=7, color=_MUTED, style="italic")
+        fig.tight_layout(pad=0.4)
+        return _fig_to_png(fig)
+    # Multi-bar path — keep barh but use tight x-limits.
+    ax.barh(range(len(plabels)), pvals, color=_CARD, edgecolor=_GOLD_DK,
+              linewidth=1.0, height=0.55,
+              left=xlo)
+    # Reset bar starts so they actually begin at xlo (matplotlib barh
+    # default starts at zero and is then clipped by xlim — looks fine,
+    # but explicit `left=xlo` lets the eye compare lengths).
+    for patch, v in zip(ax.patches, pvals):
+        patch.set_width(v - xlo)
     ax.set_yticks(range(len(plabels)))
     ax.set_yticklabels(plabels)
     ax.invert_yaxis()
-    ax.set_xlim(0, ymax)
+    ax.set_xlim(xlo, xhi)
     ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:.0f}x"))
     for i, v in enumerate(pvals):
-        ax.text(v + ymax * 0.01, i, f"{v:.1f}x", va="center",
-                  fontsize=8, color=_BLACK)
-    if isinstance(current_pe, (int, float)) and current_pe > 0:
+        ax.text(v + span * 0.02, i, f"{v:.1f}x", va="center",
+                  fontsize=9, color=_BLACK, weight="bold")
+    if isinstance(current_pe, (int, float)) and current_pe > 0 and xlo <= current_pe <= xhi:
         ax.axvline(current_pe, color=_BLACK, linewidth=1.2, linestyle="--", alpha=0.8)
-        ax.text(current_pe, -0.6, f"Current  {current_pe:.1f}x",
+        ax.text(current_pe, -0.7, f"Current  {current_pe:.1f}x",
                   fontsize=8, color=_BLACK, weight="bold", ha="center")
     fig.tight_layout(pad=0.4)
     return _fig_to_png(fig)
