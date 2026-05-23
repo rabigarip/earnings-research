@@ -988,21 +988,29 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     surprise_history = (isq or {}).get("surprise_history") if isinstance(isq, dict) else None
 
     # `surprise_history` from Investing can be technically non-empty
-    # (list with 10 rows) while carrying no usable data — every row's
-    # eps_actual and eps_estimate are null. This is the Investing
-    # signature for thinly-covered names like BKMB.OM: the announce-
-    # dates are tracked but the values are not. Detect the "list of
-    # nulls" case and treat it as empty so the MS fallback below fires.
+    # (list with 10 rows) while carrying no usable data. Investing's
+    # signature for thinly-covered names is rows with announce dates
+    # but null actuals/estimates — OR partial rows where only one side
+    # of the pair is populated (just `eps_actual` without
+    # `eps_estimate`, or just revenue_actual). The chart filter below
+    # requires BOTH sides of the pair, so the "has real data" check
+    # must match that contract — otherwise we let partial data through
+    # the gate, the chart renders nothing, and the fallback is
+    # blocked from firing.
     def _has_real_surprise_data(rows: list | None) -> bool:
         if not rows or not isinstance(rows, list):
             return False
         for r in rows:
             if not isinstance(r, dict):
                 continue
+            # EPS pair (chart's primary metric)
             if (isinstance(r.get("eps_actual"), (int, float))
-                    or isinstance(r.get("eps_estimate"), (int, float))
-                    or isinstance(r.get("revenue_actual"), (int, float))
-                    or isinstance(r.get("revenue_estimate"), (int, float))):
+                    and isinstance(r.get("eps_estimate"), (int, float))):
+                return True
+            # Revenue pair (chart's fallback metric per the chart-renderer
+            # changes shipped in this same commit)
+            if (isinstance(r.get("revenue_actual"), (int, float))
+                    and isinstance(r.get("revenue_estimate"), (int, float))):
                 return True
         return False
 

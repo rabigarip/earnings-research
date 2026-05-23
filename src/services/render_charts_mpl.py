@@ -249,12 +249,43 @@ def render_earnings_history_chart(
 
     # Take the most recent `max_quarters` rows; the source already lists
     # them most-recent-first in the canonical shape.
-    rows = [r for r in surprise_history
-            if isinstance(r.get("eps_actual"), (int, float))
-            and isinstance(r.get("eps_estimate"), (int, float))]
+    #
+    # Filter logic — accept any row that has a COMPLETE pair on either
+    # metric. EPS is preferred; revenue is the fallback. For thinly-
+    # covered tickers (BKMB.OM) Investing publishes the rows with
+    # revenue actuals/estimates but no EPS — those still produce a
+    # readable surprise chart on the revenue axis.
+    def _has_eps_pair(r):
+        return (isinstance(r.get("eps_actual"), (int, float))
+                and isinstance(r.get("eps_estimate"), (int, float)))
+    def _has_rev_pair(r):
+        return (isinstance(r.get("revenue_actual"), (int, float))
+                and isinstance(r.get("revenue_estimate"), (int, float)))
+
+    rows = [r for r in surprise_history if _has_eps_pair(r) or _has_rev_pair(r)]
     rows = rows[:max_quarters]
     if not rows:
         return None
+
+    # If no row in the kept set has a complete EPS pair, switch the
+    # chart to revenue-axis mode. Otherwise stay on EPS for consistency.
+    using_revenue = (not any(_has_eps_pair(r) for r in rows)) or metric_label.lower() in ("revenue", "net sales", "sales")
+    if using_revenue and metric_label == "EPS":
+        metric_label = "Revenue"   # auto-relabel — caller didn't know
+
+    # Promote revenue values into the eps_* slot when EPS pair is
+    # missing, so the rest of the chart code can stay metric-agnostic.
+    if using_revenue:
+        for r in rows:
+            if not _has_eps_pair(r) and _has_rev_pair(r):
+                r["eps_actual"] = r["revenue_actual"]
+                r["eps_estimate"] = r["revenue_estimate"]
+                # Derive surprise % if absent
+                if not isinstance(r.get("eps_surprise_pct"), (int, float)):
+                    est = r["revenue_estimate"]
+                    if isinstance(est, (int, float)) and est not in (0, 0.0):
+                        r["eps_surprise_pct"] = (r["revenue_actual"] - est) / est * 100.0
+
     rows = list(reversed(rows))  # Oldest first for left-to-right plotting.
 
     # Parse "Q2 2025" -> a real datetime so the x-axis lines up with the
