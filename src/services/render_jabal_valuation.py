@@ -527,10 +527,98 @@ def render_valuation_slide(prs, data: ValuationData):
 
 # ── Data adapter ──────────────────────────────────────────────
 
+def _surprise_history_from_ms_calendar(ms_calendar_events: dict | None) -> list[dict]:
+    """Derive a Koyfin-style surprise history from MS's /calendar/
+    quarterly_results table.
+
+    Investing.com is the primary source for `surprise_history` (used by
+    the earnings-history chart on slide 3), but it returns empty for
+    thinly-covered names like BKMB.OM where Investing has the announce
+    dates but no actuals or estimates. MS publishes both released and
+    forecast values per metric per quarter on the /calendar/ page —
+    parsed into `ms_calendar_events.quarterly_results` by
+    `_parse_quarterly_results_table`. We convert that shape into the
+    {period, eps_actual, eps_estimate, eps_surprise_pct} list the chart
+    consumes.
+
+    Returns [] when MS calendar data is unavailable.
+    """
+    if not isinstance(ms_calendar_events, dict):
+        return []
+    qr = ms_calendar_events.get("quarterly_results") or {}
+    quarters = qr.get("quarters") or []
+    rows = qr.get("rows") or []
+    if not (quarters and rows):
+        return []
+    # Find the EPS row — MS uses "eps", "earnings per share", or similar.
+    eps_row = next(
+        (r for r in rows
+         if (r.get("metric_key") or "").lower() in ("eps", "earnings_per_share")
+            or "eps" in (r.get("metric_label") or "").lower()),
+        None,
+    )
+    if not eps_row:
+        return []
+    by_quarter = eps_row.get("by_quarter") or []
+    # Optional revenue row — surface alongside EPS in the chart data so
+    # downstream code can compute either dimension.
+    rev_row = next(
+        (r for r in rows
+         if (r.get("metric_key") or "").lower() in ("net_sales", "revenue", "sales")),
+        None,
+    )
+    rev_bq = rev_row.get("by_quarter") if rev_row else []
+    out: list[dict] = []
+    for i, q in enumerate(quarters):
+        cell = by_quarter[i] if i < len(by_quarter) else {}
+        if not isinstance(cell, dict):
+            continue
+        actual = cell.get("released")
+        estimate = cell.get("forecast")
+        spread = cell.get("spread_pct")
+        # Skip rows with no usable data.
+        if not (isinstance(actual, (int, float)) or isinstance(estimate, (int, float))):
+            continue
+        # Normalise the period label to the "Q2 2025" shape the chart parses.
+        import re as _re_sh
+        m = _re_sh.match(r"\s*(\d{4})\s*Q([1-4])", str(q) or "")
+        if m:
+            period = f"Q{m.group(2)} {m.group(1)}"
+        else:
+            m2 = _re_sh.match(r"\s*Q([1-4])\s*(\d{4})", str(q) or "")
+            period = f"Q{m2.group(1)} {m2.group(2)}" if m2 else str(q)
+        # Derive surprise % when MS didn't pre-compute it.
+        if not isinstance(spread, (int, float)):
+            if (isinstance(actual, (int, float)) and isinstance(estimate, (int, float))
+                    and estimate not in (0, 0.0)):
+                spread = (actual - estimate) / estimate * 100.0
+            else:
+                spread = None
+        row = {
+            "period": period,
+            "eps_actual": float(actual) if isinstance(actual, (int, float)) else None,
+            "eps_estimate": float(estimate) if isinstance(estimate, (int, float)) else None,
+            "eps_surprise_pct": float(spread) if isinstance(spread, (int, float)) else None,
+        }
+        rev_cell = rev_bq[i] if i < len(rev_bq) else {}
+        if isinstance(rev_cell, dict):
+            row["revenue_actual"] = (rev_cell.get("released")
+                                       if isinstance(rev_cell.get("released"), (int, float))
+                                       else None)
+            row["revenue_estimate"] = (rev_cell.get("forecast")
+                                          if isinstance(rev_cell.get("forecast"), (int, float))
+                                          else None)
+        out.append(row)
+    # Chart consumes most-recent-first.
+    out.sort(key=lambda r: r["period"], reverse=True)
+    return out
+
+
 def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
                             gen_date: str = "",
                             peers_override: Optional[list[dict]] = None,
                             historical_override: Optional[dict] = None,
+                            ms_calendar_events: Optional[dict] = None,
                             ) -> ValuationData:
     cv = get_all_fields(ticker)
     # iShares overlay removed (peer table no longer pulls regional ETF).
@@ -774,6 +862,18 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     investing_obs = get_observations_by_provider(ticker, "investing")
     isq = investing_obs.get("income_statement_quarterly") if investing_obs else None
     surprise_history = (isq or {}).get("surprise_history") if isinstance(isq, dict) else None
+
+    # Fallback: when Investing's surprise_history is empty (common on
+    # GCC ex-Saudi names — Investing tracks the announce date but has
+    # neither actuals nor estimates for BKMB / OQEP / ADNOCDRILL), derive
+    # it from MS's /calendar/ quarterly_results table which DOES carry
+    # released + forecast per quarter.
+    if not surprise_history:
+        derived = _surprise_history_from_ms_calendar(ms_calendar_events)
+        if derived:
+            log.info("[earnings-history] %s: using MS calendar fallback "
+                     "(%d quarters with data)", ticker, len(derived))
+            surprise_history = derived
 
     # Optional 5y forward-P/E history if upstream surfaced it; today
     # `valuation_historical` carries the FY-grouped period/pe pair only.

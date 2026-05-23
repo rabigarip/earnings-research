@@ -234,7 +234,8 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
                                      period_heading=period_heading,
                                      memo_data=getattr(payload, "memo_computed", None) or {})
     valuation = build_valuation_data(ticker, peers_override=peer_rows or None,
-                                       historical_override=historical_override)
+                                       historical_override=historical_override,
+                                       ms_calendar_events=getattr(payload, "ms_calendar_events", None))
 
     prs = Presentation()
     prs.slide_width  = _In(PAGE_W_IN)
