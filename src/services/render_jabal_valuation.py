@@ -536,53 +536,95 @@ def render_valuation_slide(prs, data: ValuationData):
 
 def _load_ms_calendar_from_snapshot(ticker: str) -> dict | None:
     """Load `quarterly_results` directly from the committed MS calendar
-    snapshot under data/marketscreener/, bypassing the pipeline. Used
-    when `payload.ms_calendar_events` arrives as None despite the
-    snapshot existing on disk (common when fetch_marketscreener_pages
-    flags PARTIAL because live HTTP 403'd, even though the snapshot
-    fallback fed the parser successfully).
+    snapshot under data/marketscreener/, bypassing the pipeline.
 
-    Resolves the ticker → MS slug → ISIN via company_master, builds the
-    runtime cache prefix (`ms_<ticker>_<isin>_<slug>`), points at the
-    snapshot file, parses with the production parser, and returns the
-    `quarterly_results` block.
+    Uses print() (not log.info) for diagnostics — Python's default
+    logging level is WARNING and the project never calls basicConfig(),
+    so previous log.info() lines were silently dropped. print() goes
+    straight to stdout which Render captures.
 
-    Returns None when company isn't curated for MS, the snapshot file
-    is absent, or parsing fails.
+    Also tries multiple snapshot-filename patterns so a single
+    cache-slug mismatch doesn't kill the chart.
     """
+    print(f"[snapshot-loader] {ticker}: starting tier-2 direct snapshot read", flush=True)
     try:
         from src.storage.db import load_company
-    except Exception:
+    except Exception as exc:
+        print(f"[snapshot-loader] {ticker}: load_company import FAIL: {exc}", flush=True)
         return None
-    row = load_company(ticker) or {}
+    try:
+        row = load_company(ticker) or {}
+    except Exception as exc:
+        print(f"[snapshot-loader] {ticker}: load_company call FAIL: {exc}", flush=True)
+        return None
     slug = (row.get("marketscreener_id") or "").strip()
     isin = (row.get("isin") or "").strip() or "noisin"
+    print(f"[snapshot-loader] {ticker}: load_company → slug={slug!r} isin={isin!r}",
+          flush=True)
     if not slug:
+        print(f"[snapshot-loader] {ticker}: no marketscreener_id — bailing", flush=True)
         return None
-    # Match the cache slug shape used by the production fetcher path.
+
     t_safe = ticker.replace(".", "_").strip() or "unknown"
-    cache_slug = f"ms_{t_safe}_{isin}_{slug}_calendar"
     import re as _re_load
-    safe = _re_load.sub(r"[^a-zA-Z0-9-]", "_", cache_slug)[:80]
     try:
         from src.config import root
-        snapshot_path = root() / "data" / "marketscreener" / f"ms_{safe}.html"
-    except Exception:
+        ms_dir = root() / "data" / "marketscreener"
+    except Exception as exc:
+        print(f"[snapshot-loader] {ticker}: path resolution FAIL: {exc}", flush=True)
         return None
-    if not snapshot_path.exists():
+    print(f"[snapshot-loader] {ticker}: ms_dir={ms_dir} exists={ms_dir.exists()}",
+          flush=True)
+
+    # Try multiple filename patterns — the "right" prefix is
+    # `ms_<ticker>_<isin>_<slug>_calendar` but we also try fallbacks
+    # in case the GHA refresh wrote files with a different prefix shape.
+    candidates = [
+        f"ms_{t_safe}_{isin}_{slug}_calendar",     # ideal: matches runtime cache_slug
+        f"ms_{t_safe}_calendar",                    # legacy ticker-only prefix
+    ]
+    snapshot_path = None
+    for cache_slug in candidates:
+        safe = _re_load.sub(r"[^a-zA-Z0-9-]", "_", cache_slug)[:80]
+        candidate = ms_dir / f"ms_{safe}.html"
+        if candidate.exists():
+            snapshot_path = candidate
+            print(f"[snapshot-loader] {ticker}: matched candidate {candidate.name}",
+                  flush=True)
+            break
+
+    if snapshot_path is None:
+        # Diagnostic: list ALL files in ms_dir matching this ticker so
+        # we can see exactly what filenames exist on disk.
+        try:
+            if ms_dir.exists():
+                matches = sorted(ms_dir.glob(f"*{t_safe}*calendar*"))
+                print(f"[snapshot-loader] {ticker}: no candidate matched. Files in "
+                      f"data/marketscreener/ matching *{t_safe}*calendar*: "
+                      f"{[p.name for p in matches[:5]]}",
+                      flush=True)
+        except Exception as exc:
+            print(f"[snapshot-loader] {ticker}: dir listing FAIL: {exc}", flush=True)
         return None
+
     try:
         html = snapshot_path.read_text(encoding="utf-8")
-    except Exception:
+    except Exception as exc:
+        print(f"[snapshot-loader] {ticker}: read FAIL: {exc}", flush=True)
         return None
     try:
         from bs4 import BeautifulSoup
         from src.providers.marketscreener_pages import _parse_quarterly_results_table
         soup = BeautifulSoup(html, "lxml")
         qr = _parse_quarterly_results_table(soup)
-    except Exception:
+    except Exception as exc:
+        print(f"[snapshot-loader] {ticker}: parse FAIL: {exc}", flush=True)
         return None
-    if not (qr.get("quarters") and qr.get("rows")):
+    n_quarters = len((qr or {}).get("quarters") or [])
+    n_rows = len((qr or {}).get("rows") or [])
+    print(f"[snapshot-loader] {ticker}: parser produced quarters={n_quarters} rows={n_rows}",
+          flush=True)
+    if not (n_quarters and n_rows):
         return None
     return qr
 
@@ -964,11 +1006,14 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
                 return True
         return False
 
+    print(f"[earnings-history] {ticker}: surprise_history from Investing has "
+          f"{len(surprise_history) if isinstance(surprise_history, list) else 0} rows, "
+          f"real_data={_has_real_surprise_data(surprise_history)}", flush=True)
     if not _has_real_surprise_data(surprise_history):
         if surprise_history:
-            log.info("[earnings-history] %s: Investing returned %d rows but "
-                     "all null — falling through to MS fallback",
-                     ticker, len(surprise_history))
+            print(f"[earnings-history] {ticker}: Investing returned "
+                  f"{len(surprise_history)} rows but all null — falling through "
+                  f"to MS fallback", flush=True)
         surprise_history = None
 
     # Fallback: when Investing's surprise_history is empty (common on
@@ -988,30 +1033,43 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     surprise_metric_label = "EPS"
     if not surprise_history:
         # Tier 1: pipeline-supplied
+        ms_cal_present = bool(ms_calendar_events
+                                and isinstance(ms_calendar_events, dict)
+                                and ms_calendar_events.get("quarterly_results"))
+        print(f"[earnings-history] {ticker}: tier-1 — ms_calendar_events "
+              f"present={ms_cal_present}", flush=True)
         derived, derived_label = _surprise_history_from_ms_calendar(ms_calendar_events)
         if derived:
-            log.info("[earnings-history] %s: using MS calendar fallback "
-                     "(%d quarters of %s data)", ticker, len(derived), derived_label)
+            print(f"[earnings-history] {ticker}: tier-1 MS calendar fallback "
+                  f"produced {len(derived)} {derived_label} rows", flush=True)
             surprise_history = derived
             surprise_metric_label = derived_label or "EPS"
         else:
             # Tier 2: direct snapshot load. Bypasses the pipeline entirely.
-            log.info("[earnings-history] %s: ms_calendar_events arrived empty — "
-                     "trying direct snapshot read", ticker)
+            print(f"[earnings-history] {ticker}: tier-1 empty — trying tier-2 "
+                  f"direct snapshot read", flush=True)
             try:
                 snapshot_qr = _load_ms_calendar_from_snapshot(ticker)
             except Exception as exc:
-                log.warning("[earnings-history] %s: snapshot read failed: %s", ticker, exc)
+                print(f"[earnings-history] {ticker}: snapshot read FAIL: {exc}",
+                      flush=True)
                 snapshot_qr = None
             if snapshot_qr:
                 derived, derived_label = _surprise_history_from_ms_calendar(
                     {"quarterly_results": snapshot_qr}
                 )
                 if derived:
-                    log.info("[earnings-history] %s: snapshot fallback produced "
-                             "%d quarters of %s data", ticker, len(derived), derived_label)
+                    print(f"[earnings-history] {ticker}: tier-2 snapshot fallback "
+                          f"produced {len(derived)} {derived_label} rows", flush=True)
                     surprise_history = derived
                     surprise_metric_label = derived_label or "EPS"
+                else:
+                    print(f"[earnings-history] {ticker}: tier-2 snapshot returned QR "
+                          f"but surprise extractor produced 0 rows", flush=True)
+            else:
+                print(f"[earnings-history] {ticker}: tier-2 snapshot loader "
+                      f"returned None — chart will show 'No earnings surprise "
+                      f"history available'", flush=True)
 
     # Optional 5y forward-P/E history if upstream surfaced it; today
     # `valuation_historical` carries the FY-grouped period/pe pair only.
