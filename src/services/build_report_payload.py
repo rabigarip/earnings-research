@@ -467,7 +467,17 @@ def _compute_memo(
             out["prior_year_same_quarter_label"] = f"{same_yr} Q{next_q}"
             out["prior_year_same_quarter_short"] = f"{next_q}Q{str(same_yr)[-2:]}"
 
-    # Next-quarter consensus revenue (Source: /finances/ quarterly)
+    # Next-quarter consensus revenue (Source: /finances/ quarterly).
+    # We pull from MS's quarterly forecast block ONLY when MS has a
+    # period that matches our `next_quarter_label`. The earlier code
+    # had a "fallback to last quarterly element" branch that silently
+    # mislabeled stale data — on BKMB.OM (whose MS data ends at Q1 2026
+    # while the deck previews Q2 2026), the fallback set
+    # next_quarter_consensus_revenue = 145.3 (the Q1'26 estimate) and
+    # served it as the Q2'26 consensus. Worse, because the cascade
+    # downstream short-circuits when EITHER revenue OR eps is non-None,
+    # the misleading 145.3 blocked the MS-annual÷4 cascade from
+    # populating Net Income and EPS. Removed.
     next_quarter_consensus_revenue = None
     next_quarter_consensus_eps = None
     if ms_quarterly_forecasts and next_quarter_label:
@@ -478,8 +488,6 @@ def _compute_memo(
             if p == next_quarter_label or (str(next_quarter_label).replace(" ", "") in str(p).replace(" ", "")):
                 next_quarter_consensus_revenue = net_sales[i] if i < len(net_sales) else None
                 break
-        if next_quarter_consensus_revenue is None and periods and net_sales:
-            next_quarter_consensus_revenue = net_sales[-1] if net_sales else None
     # Next-quarter EPS: from consensus_estimates (quarterly) if available
     if consensus and next_quarter_label:
         for est in consensus:

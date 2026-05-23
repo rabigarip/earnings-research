@@ -224,6 +224,7 @@ def render_earnings_history_chart(
         ticker: str = "",
         currency: str = "",
         max_quarters: int = 8,
+        metric_label: str = "EPS",
 ) -> Optional[bytes]:
     """Dual-panel chart inspired by the Koyfin reference.
 
@@ -314,6 +315,7 @@ def render_earnings_history_chart(
             pass
 
     # Estimate (open gray ring) + actual (filled dot) + connector line.
+    is_eps_metric = metric_label.upper() == "EPS"
     for d, est, act, surp in zip(qdates, estimates, actuals, surprises):
         fill = _POS if surp >= 0 else _NEG
         ax_top.plot([d, d], [est, act], color=_MUTED, linewidth=0.9, alpha=0.7, zorder=1)
@@ -323,14 +325,22 @@ def render_earnings_history_chart(
                           linewidths=1.0, zorder=4)
         # Actual value annotation just above (beat) or below (miss) the dot.
         y_off = 12 if act >= est else -16
-        ax_top.annotate(f"{act:.2f}",
+        annot = f"{act:.2f}" if is_eps_metric else f"{act:,.1f}"
+        ax_top.annotate(annot,
                           xy=(d, act),
                           xytext=(0, y_off), textcoords="offset points",
                           fontsize=7, color=_BLACK, ha="center",
                           weight="bold")
 
-    ax_top.set_ylabel("EPS", fontsize=8, color=_MUTED)
-    ax_top.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:.2f}"))
+    # Metric varies: EPS, Net Income (M currency), or Net Sales (M currency).
+    # Pick a y-axis formatter that fits the range — EPS is sub-1 typically,
+    # the others are millions and benefit from grouped formatting.
+    is_eps_axis = metric_label.upper() == "EPS"
+    ax_top.set_ylabel(metric_label, fontsize=8, color=_MUTED)
+    if is_eps_axis:
+        ax_top.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:.2f}"))
+    else:
+        ax_top.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:,.0f}"))
 
     # Surprise bars: positive green, negative red.
     colors = [_POS if s >= 0 else _NEG for s in surprises]
@@ -346,7 +356,7 @@ def render_earnings_history_chart(
     title_bits = []
     if ticker:
         title_bits.append(ticker)
-    title_bits.append("EPS Actual vs Estimate")
+    title_bits.append(f"{metric_label} Actual vs Estimate")
     ax_top.set_title("  ·  ".join(title_bits), fontsize=10, color=_BLACK,
                        loc="left", pad=4, weight="bold")
 

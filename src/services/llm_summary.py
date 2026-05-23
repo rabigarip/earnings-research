@@ -497,6 +497,18 @@ NUMERIC DISCIPLINE
 
   When citing a macro figure, keep the "(IMF YYYY)" / "(WB YYYY)"
   tag from the data block so the source year stays visible.
+
+  When citing a P/E multiple, KEEP the qualifier ("forward",
+  "trailing", "FY26E") that was attached in the data block.
+  The cover slide shows the forward P/E and the thesis often
+  references the trailing P/E — without the qualifier the reader
+  sees two different numbers and assumes inconsistency. Examples
+  the data block may give you:
+    - "Forward P/E 12.1x (FY2026)" → write "forward P/E of 12.1x"
+    - "trailing P/E 11.1x vs 5-year average 10.7x" → write
+      "trailing P/E of 11.1x, a 4% premium to its 5y average"
+  Never strip the qualifier; never blur forward and trailing into
+  one number.
 """
 
 
