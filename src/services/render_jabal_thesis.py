@@ -120,6 +120,59 @@ def _estimates_table(slide, top: float, rows: list[dict],
             x += col_w[i]
 
 
+def _annual_estimates_table(slide, top: float, rows: list[dict],
+                              fy_labels: list[str]):
+    """Annual-FY fallback table — used when per-quarter analyst consensus
+    is unavailable on MS (only annual estimates exist). Columns: METRIC |
+    FY+1E | FY+2E | FY+3E | YoY % (FY+1E vs last FY actual).
+
+    Row dict shape: {metric, fy1, fy2, fy3, yoy}. Numeric YoY rendered with
+    signed colour; currency cells rendered as black text.
+
+    This swaps the per-quarter table when the consensus source label is
+    'MarketScreener (annual ÷ 4)' — that synthetic proxy distorts both
+    levels and YoY/QoQ for any seasonal name (banks, energy, retail). A
+    transparent annual view is the analyst-correct call there: show what
+    we trust rather than fabricate quarterly precision.
+    """
+    # Ensure we always have 3 FY labels — pad with em-dashes if MS only
+    # publishes 1-2 forecast years.
+    fy = list(fy_labels) + ["—"] * (3 - len(fy_labels))
+    headers = ["METRIC", fy[0].upper(), fy[1].upper(), fy[2].upper(),
+                f"YoY {fy[0]}"]
+    col_w   = [2.20, 1.10, 1.10, 1.10, 1.10]
+    row_h   = 0.30
+    header_top = top
+    x = MARGIN_L
+    for i, h in enumerate(headers):
+        align = PP_ALIGN.LEFT if i == 0 else PP_ALIGN.RIGHT
+        _text(slide, x, header_top, col_w[i] - 0.05, row_h, h,
+              size=SZ_LABEL, color=MUTED, all_caps=True, align=align)
+        x += col_w[i]
+    _hrule(slide, MARGIN_L, header_top + row_h - 0.02, CONTENT_W, color=MUTED)
+    for ri, row in enumerate(rows):
+        y = header_top + row_h + ri * row_h
+        if ri % 2 == 1:
+            band = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
+                in_(MARGIN_L), in_(y - 0.02),
+                in_(CONTENT_W), in_(row_h))
+            band.fill.solid(); band.fill.fore_color.rgb = CARD
+            band.line.fill.background()
+        x = MARGIN_L
+        for i, key in enumerate(["metric", "fy1", "fy2", "fy3", "yoy"]):
+            val = row.get(key, "—")
+            align = PP_ALIGN.LEFT if i == 0 else PP_ALIGN.RIGHT
+            color = BLACK
+            if key == "yoy" and isinstance(val, (int, float)):
+                color = signed_color(val)
+                val = f"{val:+.1f}%"
+            elif val is None:
+                val = "—"
+            _text(slide, x, y, col_w[i] - 0.05, row_h, str(val),
+                  size=SZ_BODY, color=color, align=align)
+            x += col_w[i]
+
+
 def _two_col_pillared_card(slide, top: float, height: float,
                               left_title: str, left_bullets: list[str],
                               right_title: str, right_bullets: list[str]):
@@ -190,6 +243,12 @@ class ThesisData:
     gen_date: str = ""
     total_pages: int = 3
     period_heading: str = "Earnings Expectations"
+    # Annual-FY fallback fields — populated when per-quarter consensus is
+    # only available as the MS-annual÷4 synthetic proxy and the analyst
+    # call is to suppress the unreliable quarterly view.
+    is_annual_table: bool = False
+    annual_rows: list[dict] = field(default_factory=list)
+    annual_fy_labels: list[str] = field(default_factory=list)
 
 
 def render_thesis_slide(prs, data: ThesisData):
@@ -210,8 +269,12 @@ def render_thesis_slide(prs, data: ThesisData):
     _text(slide, MARGIN_L, 4.26, CONTENT_W, 0.18,
           data.estimates_subtitle or "Jabal estimates vs. consensus  ·  Local currency unless stated",
           size=Pt(9), color=GRAY)
-    _estimates_table(slide, 4.48, data.estimates_rows,
-                       period_label=data.estimates_period_label or "ESTIMATE")
+    if data.is_annual_table and data.annual_rows:
+        _annual_estimates_table(slide, 4.48, data.annual_rows,
+                                  fy_labels=data.annual_fy_labels or [])
+    else:
+        _estimates_table(slide, 4.48, data.estimates_rows,
+                           period_label=data.estimates_period_label or "ESTIMATE")
     _text(slide, MARGIN_L, 6.88, CONTENT_W, 0.18,
           data.estimates_footnote,
           size=Pt(9), color=GRAY)
@@ -797,14 +860,32 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
                         return i
                 return None
 
-            def _scaled_at(arr_name, idx):
+            def _raw_at(arr_name, idx):
+                """Return the raw MS quarterly value (no unit scaling)."""
                 if idx is None: return None
                 arr = _qtr.get(arr_name, []) or []
                 if idx >= len(arr): return None
                 v = arr[idx]
                 if not isinstance(v, (int, float)): return None
-                # Apply same unit scale that the consensus side already uses.
-                return float(v) * unit_scale
+                return float(v)
+
+            # Bring the consensus value to RAW MS scale so percent change
+            # is computed against same-units denominators. Two paths fill
+            # rev_q_consensus etc.:
+            #   (a) `_scale(next_est.get(...))` inside `used_ms` — already
+            #       multiplied by unit_scale (absolute currency units).
+            #   (b) `fwd.get("revenue_next_q")` / memo cascade — raw, in
+            #       the MS reported unit (millions).
+            # Percent change is scale-invariant ONLY when both sides match;
+            # mixing absolute vs millions yielded the -100% YoY/QoQ bug.
+            def _to_raw_ms(v):
+                if not isinstance(v, (int, float)): return None
+                return v / unit_scale if used_ms else v
+
+            _raw_rev_cons = _to_raw_ms(rev_q_consensus)
+            _raw_ni_cons  = _to_raw_ms(ni_q_consensus)
+            _raw_eb_cons  = _to_raw_ms(ebitda_q_consensus)
+            # EPS is per-share — never unit-scaled on either side.
 
             _py_idx = _find_period_idx(_nq_yr - 1, _nq_q)
             _pq_idx = _find_period_idx(_prev_q_yr, _prev_q_q)
@@ -817,24 +898,23 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
                 return (num - den) / den * 100.0
 
             if yoy_rev is None:
-                yoy_rev = _pct(rev_q_consensus,    _scaled_at("net_sales",  _py_idx))
+                yoy_rev = _pct(_raw_rev_cons, _raw_at("net_sales",  _py_idx))
             if yoy_ni is None:
-                yoy_ni  = _pct(ni_q_consensus,     _scaled_at("net_income", _py_idx))
+                yoy_ni  = _pct(_raw_ni_cons,  _raw_at("net_income", _py_idx))
             if yoy_ebitda is None:
-                yoy_ebitda = _pct(ebitda_q_consensus, _scaled_at("ebitda",  _py_idx))
+                yoy_ebitda = _pct(_raw_eb_cons, _raw_at("ebitda",  _py_idx))
             if yoy_eps is None:
-                # EPS not scaled — per-share figure already at the right magnitude.
                 _eps_arr = _qtr.get("eps", []) or []
                 _py_eps  = _eps_arr[_py_idx] if (_py_idx is not None and _py_idx < len(_eps_arr)) else None
                 yoy_eps = _pct(eps_q_consensus, _py_eps)
 
             # Per-field QoQ (vs immediately-prior Q actual)
             if qoq_rev is None:
-                qoq_rev = _pct(rev_q_consensus,    _scaled_at("net_sales",  _pq_idx))
+                qoq_rev = _pct(_raw_rev_cons, _raw_at("net_sales",  _pq_idx))
             if qoq_ni is None:
-                qoq_ni  = _pct(ni_q_consensus,     _scaled_at("net_income", _pq_idx))
+                qoq_ni  = _pct(_raw_ni_cons,  _raw_at("net_income", _pq_idx))
             if qoq_ebitda is None:
-                qoq_ebitda = _pct(ebitda_q_consensus, _scaled_at("ebitda",  _pq_idx))
+                qoq_ebitda = _pct(_raw_eb_cons, _raw_at("ebitda",  _pq_idx))
             if qoq_eps is None:
                 _eps_arr = _qtr.get("eps", []) or []
                 _pq_eps  = _eps_arr[_pq_idx] if (_pq_idx is not None and _pq_idx < len(_eps_arr)) else None
@@ -961,6 +1041,153 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
     return rows, unit_suffix
 
 
+def _build_annual_rows(*, ms_annual_forecasts: dict | None,
+                          ms_eps_dividend_forecasts: dict | None,
+                          is_bank: bool, currency: str,
+                          ) -> tuple[list[dict], list[str], str]:
+    """Build the annual-FY fallback table rows.
+
+    Returns (rows, fy_labels, unit_suffix). The first FY is treated as the
+    YoY base (last actual). The remaining 3 are forecasts FY+1E/+2E/+3E.
+
+    Returns ([], [], '') when MS doesn't carry annual data — caller falls
+    back to the quarterly path.
+    """
+    if not isinstance(ms_annual_forecasts, dict):
+        return [], [], ""
+    annual = ms_annual_forecasts.get("annual") or {}
+    if not isinstance(annual, dict):
+        return [], [], ""
+    periods_all = list(annual.get("periods") or [])
+    if not periods_all:
+        return [], [], ""
+    # MS publishes periods chronologically. Heuristic: the first index
+    # whose label doesn't END with 'A' (some publishers mark actuals) and
+    # whose year >= current year is the first forecast. Conservative
+    # alternative: use the last period as FY+3E, prior 3 are the FY series.
+    # We pick the LAST 4 periods so a stale snapshot still surfaces useful
+    # forward years. The first of those 4 is treated as the YoY base.
+    if len(periods_all) < 2:
+        return [], [], ""
+    take = periods_all[-4:] if len(periods_all) >= 4 else periods_all
+    base_label = take[0]
+    fy_labels_raw = take[1:]   # forecasts (1-3 entries)
+    # Indices into the source arrays
+    n = len(periods_all)
+    base_idx = n - len(take)
+    fwd_indices = list(range(base_idx + 1, n))
+
+    def _arr_at(arr_name: str, idx: int):
+        arr = annual.get(arr_name) or []
+        if 0 <= idx < len(arr):
+            v = arr[idx]
+            return float(v) if isinstance(v, (int, float)) else None
+        return None
+
+    # EPS sits in the dividend/EPS payload, possibly flat or wrapped.
+    eps_periods: list = []
+    eps_arr: list = []
+    if isinstance(ms_eps_dividend_forecasts, dict):
+        ed_wrapped = ms_eps_dividend_forecasts.get("annual")
+        if isinstance(ed_wrapped, dict) and ed_wrapped.get("periods"):
+            eps_periods = list(ed_wrapped.get("periods") or [])
+            eps_arr = list(ed_wrapped.get("eps") or [])
+        else:
+            eps_periods = list(ms_eps_dividend_forecasts.get("periods") or [])
+            eps_arr = list(ms_eps_dividend_forecasts.get("eps") or [])
+
+    def _eps_at(period_label):
+        for i, p in enumerate(eps_periods):
+            if str(p) == str(period_label) and i < len(eps_arr):
+                v = eps_arr[i]
+                return float(v) if isinstance(v, (int, float)) else None
+        return None
+
+    # Unit & currency formatting — mirror the quarterly table conventions.
+    unit_scale_label = (ms_annual_forecasts.get("unit_scale") or "").strip().lower()
+    if unit_scale_label.startswith("bil"):
+        unit_suffix = f"{currency.upper()}B" if currency else "B"
+        unit_div = 1.0   # values already in billions
+    elif unit_scale_label.startswith("thou"):
+        unit_suffix = f"{currency.upper()}M" if currency else "M"
+        unit_div = 1000.0   # convert thousands → millions for display
+    else:
+        unit_suffix = f"{currency.upper()}M" if currency else "M"
+        unit_div = 1.0   # MS default = millions
+
+    def _money(v):
+        if not isinstance(v, (int, float)): return None
+        scaled = v / unit_div
+        if abs(scaled) >= 100:  return f"{scaled:,.0f}"
+        if abs(scaled) >= 10:   return f"{scaled:,.1f}"
+        return f"{scaled:,.2f}"
+
+    def _eps_fmt(v):
+        if not isinstance(v, (int, float)): return None
+        return f"{v:,.2f}"
+
+    def _yoy(num, den):
+        if not (isinstance(num, (int, float))
+                and isinstance(den, (int, float)) and den != 0):
+            return None
+        return (num - den) / den * 100.0
+
+    # Map FY labels (raw → display). Append 'E' for forecast years.
+    def _fy_disp(p):
+        s = str(p)
+        return f"{s}E" if not s.upper().endswith("E") else s
+
+    fy_disp = [_fy_disp(p) for p in fy_labels_raw]
+
+    # Pull metric series across the 3 forecast indices + the base.
+    metric_specs = []
+    if is_bank:
+        metric_specs = [
+            (f"Revenue ({unit_suffix})", "net_sales", _money),
+            (f"Net Income ({unit_suffix})", "net_income", _money),
+            (f"EPS ({currency})", None, _eps_fmt),   # EPS handled separately
+        ]
+    else:
+        metric_specs = [
+            (f"Revenue ({unit_suffix})", "net_sales", _money),
+            (f"EBITDA ({unit_suffix})", "ebitda", _money),
+            (f"Net Income ({unit_suffix})", "net_income", _money),
+            (f"EPS ({currency})", None, _eps_fmt),
+        ]
+
+    rows: list[dict] = []
+    for label, arr_name, fmt in metric_specs:
+        if arr_name == "net_sales" and "EPS" in label:
+            continue   # never happens; defensive
+        if arr_name is None:
+            # EPS row
+            base_v = _eps_at(base_label)
+            fwd_vals = [_eps_at(p) for p in fy_labels_raw]
+        else:
+            base_v = _arr_at(arr_name, base_idx)
+            fwd_vals = [_arr_at(arr_name, i) for i in fwd_indices]
+        # Pad to 3 forecast columns
+        while len(fwd_vals) < 3:
+            fwd_vals.append(None)
+        yoy_pct = _yoy(fwd_vals[0], base_v) if fwd_vals else None
+        rows.append({
+            "metric": label,
+            "fy1": fmt(fwd_vals[0]) if fwd_vals[0] is not None else None,
+            "fy2": fmt(fwd_vals[1]) if fwd_vals[1] is not None else None,
+            "fy3": fmt(fwd_vals[2]) if fwd_vals[2] is not None else None,
+            "yoy": yoy_pct,
+        })
+
+    # If every value is None, treat as no data.
+    if all(r["fy1"] is None and r["fy2"] is None and r["fy3"] is None for r in rows):
+        return [], [], ""
+
+    # Pad FY labels to length 3 for the column headers.
+    while len(fy_disp) < 3:
+        fy_disp.append("—")
+    return rows, fy_disp, unit_suffix
+
+
 def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
                         gen_date: str = "",
                         catalysts: Optional[list[str]] = None,
@@ -969,6 +1196,8 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
                         quarterly: Optional[list] = None,
                         is_bank: bool = False,
                         ms_quarterly_forecasts: Optional[dict] = None,
+                        ms_annual_forecasts: Optional[dict] = None,
+                        ms_eps_dividend_forecasts: Optional[dict] = None,
                         period_heading: Optional[str] = None,
                         memo_data: Optional[dict] = None,
                         ) -> ThesisData:
@@ -1152,6 +1381,58 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
     if not is_bank:
         footnote_bits.append("Bps = basis points")
     estimates_footnote = "  ·  ".join(footnote_bits)
+
+    # ANALYST-VALIDITY GATE — when the only path that produced Q+1 consensus
+    # was `_next_q_from_ms_annual` (label: "MarketScreener (annual ÷ 4)"),
+    # the per-quarter numbers are a flat-seasonality synthesis, not real
+    # broker quarterly consensus. For seasonal names (banks, energy, retail)
+    # that distorts both levels AND YoY/QoQ. The correct presentation is
+    # to surface MS annual forecasts directly (FY+1E / FY+2E / FY+3E with
+    # YoY vs last actual) and clearly label the period as ANNUAL.
+    _memo_src = (memo_data or {}).get("next_quarter_consensus_source") or ""
+    _use_annual = "annual" in _memo_src.lower() and "÷" in _memo_src
+    annual_rows: list[dict] = []
+    annual_fy_labels: list[str] = []
+    annual_unit_suffix = ""
+    if _use_annual and ms_annual_forecasts:
+        annual_rows, annual_fy_labels, annual_unit_suffix = _build_annual_rows(
+            ms_annual_forecasts=ms_annual_forecasts,
+            ms_eps_dividend_forecasts=ms_eps_dividend_forecasts,
+            is_bank=is_bank, currency=deck_currency,
+        )
+    if annual_rows:
+        # Re-label the section heading and subtitle for annual mode.
+        period_heading_final = "Annual Earnings Expectations"
+        subtitle_unit_phrase_a = (
+            f"{(deck_currency or '').upper()} {('trillions' if annual_unit_suffix.endswith('T') else 'billions' if annual_unit_suffix.endswith('B') else 'millions' if annual_unit_suffix.endswith('M') else 'units')} unless stated".strip()
+        )
+        estimates_subtitle_a = (
+            f"Annual analyst consensus  ·  {subtitle_unit_phrase_a}  ·  "
+            f"per-quarter breakdown unavailable for this name"
+        )
+        footnote_a = "  ·  ".join([
+            "Estimates: Jabal Research",
+            f"Consensus: MarketScreener annual",
+            f"YoY computed vs prior-FY actual",
+        ])
+        from datetime import datetime
+        return ThesisData(
+            exec_summary_body=summary,
+            estimates_rows=rows,
+            estimates_footnote=footnote_a,
+            estimates_subtitle=estimates_subtitle_a,
+            estimates_period_label=estimates_period_label,
+            catalysts=catalysts or llm_catalysts or default_catalysts,
+            risks=risks or llm_risks or default_risks_template,
+            watch_list=watch_list or llm_watch or default_watch_template,
+            sources_line=_sources_line_from_cv(cv),
+            analyst_name=analyst_name,
+            gen_date=gen_date or datetime.utcnow().strftime("%d %b %Y"),
+            period_heading=period_heading_final,
+            is_annual_table=True,
+            annual_rows=annual_rows,
+            annual_fy_labels=annual_fy_labels,
+        )
 
     from datetime import datetime
     return ThesisData(

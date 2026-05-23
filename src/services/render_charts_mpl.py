@@ -124,47 +124,78 @@ def render_52w_price_chart(close_series: list[dict], currency: str = "") -> Opti
         return None
 
     fig, ax = plt.subplots(figsize=(5.2, 2.2))
-    ax.plot(dates, vals, color=_GOLD, linewidth=1.6)
-    ax.fill_between(dates, vals, min(vals) * 0.98, color=_GOLD, alpha=0.08)
+    # Light fill below the curve for visual weight on slide-3 right column.
+    hi_val = max(vals); lo_val = min(vals)
+    pad = (hi_val - lo_val) * 0.10 if hi_val > lo_val else max(abs(hi_val) * 0.05, 0.5)
+    y_lo = lo_val - pad
+    y_hi = hi_val + pad
+    ax.set_ylim(y_lo, y_hi)
+    ax.fill_between(dates, vals, y_lo, color=_GOLD, alpha=0.10, zorder=1)
+    ax.plot(dates, vals, color=_GOLD_DK, linewidth=1.7, zorder=3)
     _setup_axes(ax)
-    # Six monthly major ticks — readable even on a tight slide column.
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
-    # Y axis: currency-aware tick formatter, no comma for low-priced names.
+
+    # Y-axis currency-aware tick formatter — minor grid only (no horizontal
+    # bars across the price line; the curve is the focal point).
     def _money(v, _pos):
         if abs(v) >= 1000: return f"{v:,.0f}"
         if abs(v) >= 10:   return f"{v:.1f}"
         return f"{v:.2f}"
     ax.yaxis.set_major_formatter(FuncFormatter(_money))
+    ax.grid(axis="y", color=_MUTED, linewidth=0.4, alpha=0.18, zorder=0)
 
-    # 52-week high / low dashed reference lines. Investment-committee
-    # readers ask "where in the range?" first — answer it visually.
-    hi_val = max(vals); lo_val = min(vals)
-    ax.axhline(hi_val, color=_MUTED, linewidth=0.8, linestyle="--", alpha=0.55)
-    ax.axhline(lo_val, color=_MUTED, linewidth=0.8, linestyle="--", alpha=0.55)
-    # Labels pinned to the LEFT edge so they don't collide with the
-    # last-close annotation on the right.
+    # 52-week high / low reference lines, drawn faintly so the curve dominates.
+    ax.axhline(hi_val, color=_MUTED, linewidth=0.7, linestyle=(0, (3, 3)),
+                 alpha=0.55, zorder=2)
+    ax.axhline(lo_val, color=_MUTED, linewidth=0.7, linestyle=(0, (3, 3)),
+                 alpha=0.55, zorder=2)
+    # High/low markers (small filled dots on the curve) — gives the reader
+    # an immediate anchor for where the extremes landed in time.
+    try:
+        hi_dt = dates[vals.index(hi_val)]
+        lo_dt = dates[vals.index(lo_val)]
+        ax.scatter([hi_dt, lo_dt], [hi_val, lo_val], s=14, color=_GOLD_DK,
+                     zorder=4, edgecolors="white", linewidths=0.8)
+    except (ValueError, IndexError):
+        pass
+    # High / low labels pinned to the left edge — italic, muted.
     left_dt = dates[0]
-    ax.annotate(f"52w high  {_money(hi_val, None)}",
-                xy=(left_dt, hi_val), xytext=(2, 2),
+    ax.annotate(f"High  {_money(hi_val, None)}",
+                xy=(left_dt, hi_val), xytext=(3, 3),
                 textcoords="offset points",
                 fontsize=7, color=_MUTED, va="bottom", ha="left",
                 style="italic")
-    ax.annotate(f"52w low  {_money(lo_val, None)}",
-                xy=(left_dt, lo_val), xytext=(2, -2),
+    ax.annotate(f"Low  {_money(lo_val, None)}",
+                xy=(left_dt, lo_val), xytext=(3, -3),
                 textcoords="offset points",
                 fontsize=7, color=_MUTED, va="top", ha="left",
                 style="italic")
 
-    # Last-close annotation pinned to the right edge.
+    # Last-close marker + label.
     last_dt = dates[-1]
     last_val = vals[-1]
-    ax.scatter([last_dt], [last_val], s=22, color=_GOLD_DK,
-                zorder=3, edgecolors="white", linewidths=1.0)
+    ax.scatter([last_dt], [last_val], s=44, color=_GOLD_DK,
+                zorder=5, edgecolors="white", linewidths=1.4)
     ax.annotate(f"{currency} {_money(last_val, None)}".strip(),
                 xy=(last_dt, last_val),
                 xytext=(6, 0), textcoords="offset points",
-                fontsize=8, color=_BLACK, va="center", ha="left")
+                fontsize=9, color=_BLACK, weight="bold",
+                va="center", ha="left")
+
+    # Performance badge — % move over the visible window, anchored top-left.
+    first_val = vals[0]
+    if isinstance(first_val, (int, float)) and first_val != 0:
+        ret_pct = (last_val - first_val) / first_val * 100.0
+        sign = "+" if ret_pct >= 0 else ""
+        badge_color = "#1f7a4d" if ret_pct >= 0 else "#a13d3d"
+        ax.text(0.99, 0.96, f"{sign}{ret_pct:.1f}%  over 52w",
+                  transform=ax.transAxes,
+                  fontsize=8, color=badge_color, weight="bold",
+                  ha="right", va="top",
+                  bbox=dict(facecolor="white", edgecolor=_MUTED,
+                              boxstyle="round,pad=0.25", alpha=0.9, linewidth=0.6))
+
     fig.tight_layout(pad=0.4)
     return _fig_to_png(fig)
 
