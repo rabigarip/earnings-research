@@ -163,11 +163,16 @@ def main() -> int:
         print("No tickers resolved; aborting.", file=sys.stderr)
         return 1
 
-    # CRITICAL: this env var tells _fetch_page in marketscreener_pages.py
-    # to ALSO commit each successful HTML response to data/marketscreener/.
-    # Production runs never set this, so deck generation can't accidentally
-    # write snapshot files.
+    # CRITICAL: these env vars tell _fetch_page in marketscreener_pages.py to:
+    #  (1) commit each successful HTML response to data/marketscreener/, AND
+    #  (2) use curl_cffi (Chrome 120 TLS fingerprint) instead of `requests`.
+    # MS's Cloudflare blocks plain `requests` from datacenter IPs even
+    # with proper User-Agent headers; curl_cffi mimics Chrome's TLS
+    # ClientHello which passes the JS challenge. Same trick we use for
+    # Investing.com. Production runs (Render) never set these — they
+    # read snapshots from data/marketscreener/ instead.
     os.environ["MS_TRACKED_REFRESH"] = "1"
+    os.environ["MS_USE_CURL_CFFI"] = "1"
 
     fetchers = _build_page_fetchers()
     n_targets = len(targets)

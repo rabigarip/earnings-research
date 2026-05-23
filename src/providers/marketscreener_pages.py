@@ -239,44 +239,81 @@ def _fetch_page(url: str, cache_slug: str) -> tuple[BeautifulSoup | None, list[s
             pass  # fall through to network
 
     live_failed = False
-    try:
-        session = _get_session()
-        # Set referer for non-search pages (looks like natural browsing)
-        if "/search/" not in url:
-            session.headers["Sec-Fetch-Site"] = "same-origin"
-            session.headers["Referer"] = "https://www.marketscreener.com/"
-        else:
-            session.headers["Sec-Fetch-Site"] = "none"
-            session.headers.pop("Referer", None)
+    # Opt-in: route HTTP through curl_cffi with Chrome TLS impersonation.
+    # Plain `requests` has a distinctive TLS fingerprint Cloudflare flags
+    # as bot traffic; curl_cffi mimics Chrome 120's exact ClientHello.
+    # We already use this trick for Investing.com — the GHA refresh
+    # workflow sets MS_USE_CURL_CFFI=1 so the snapshot-refresh job
+    # bypasses the 403s that plain requests gets from MS's Cloudflare.
+    # Production decks (Render) keep using `requests` because the
+    # snapshot-fallback path doesn't need live MS access at all.
+    if os.environ.get("MS_USE_CURL_CFFI") == "1":
+        try:
+            from curl_cffi import requests as cr
+        except ImportError:
+            cr = None
+        if cr is not None:
+            try:
+                resp = cr.get(
+                    url, impersonate="chrome120", timeout=timeout,
+                    headers={
+                        "Accept-Language": "en-US,en;q=0.9",
+                        "Referer": "https://www.marketscreener.com/"
+                                   if "/search/" not in url else "",
+                    },
+                )
+                if resp.status_code != 200:
+                    errors.append(f"HTTP {resp.status_code} (curl_cffi)")
+                    live_failed = True
+                else:
+                    text = resp.text
+                    if _is_blocked_response(text):
+                        errors.append("Captcha (curl_cffi)")
+                        live_failed = True
+                    else:
+                        if os.environ.get("MS_TRACKED_REFRESH") == "1":
+                            _write_snapshot(cache_slug, text)
+                        return BeautifulSoup(text, "lxml"), errors
+            except Exception as e:
+                errors.append(f"curl_cffi exception: {e}")
+                live_failed = True
+        # else: fall through to requests path below
 
-        resp = session.get(url, timeout=timeout)
-        if resp.status_code != 200:
-            errors.append(f"HTTP {resp.status_code}")
-            live_failed = True
-        else:
-            text = resp.text
-            if _is_blocked_response(text):
-                errors.append("Captcha or access denied")
+    if not live_failed:
+        try:
+            session = _get_session()
+            # Set referer for non-search pages (looks like natural browsing)
+            if "/search/" not in url:
+                session.headers["Sec-Fetch-Site"] = "same-origin"
+                session.headers["Referer"] = "https://www.marketscreener.com/"
+            else:
+                session.headers["Sec-Fetch-Site"] = "none"
+                session.headers.pop("Referer", None)
+
+            resp = session.get(url, timeout=timeout)
+            if resp.status_code != 200:
+                errors.append(f"HTTP {resp.status_code}")
                 live_failed = True
             else:
-                if _USE_CONFIG and cfg().get("scraping", {}).get("cache_html"):
-                    try:
-                        cache_dir = root() / "cache"
-                        cache_dir.mkdir(exist_ok=True)
-                        safe = re.sub(r"[^a-zA-Z0-9-]", "_", cache_slug)[:80]
-                        (cache_dir / f"ms_{safe}.html").write_text(text, encoding="utf-8")
-                    except Exception:
-                        pass
-                # In refresh-script mode, ALSO commit the HTML to the
-                # repo-tracked snapshot dir so Render can read it later.
-                # Gated by env var so production deck runs don't write
-                # snapshot files on every fetch.
-                if os.environ.get("MS_TRACKED_REFRESH") == "1":
-                    _write_snapshot(cache_slug, text)
-                return BeautifulSoup(text, "lxml"), errors
-    except requests.RequestException as e:
-        errors.append(str(e))
-        live_failed = True
+                text = resp.text
+                if _is_blocked_response(text):
+                    errors.append("Captcha or access denied")
+                    live_failed = True
+                else:
+                    if _USE_CONFIG and cfg().get("scraping", {}).get("cache_html"):
+                        try:
+                            cache_dir = root() / "cache"
+                            cache_dir.mkdir(exist_ok=True)
+                            safe = re.sub(r"[^a-zA-Z0-9-]", "_", cache_slug)[:80]
+                            (cache_dir / f"ms_{safe}.html").write_text(text, encoding="utf-8")
+                        except Exception:
+                            pass
+                    if os.environ.get("MS_TRACKED_REFRESH") == "1":
+                        _write_snapshot(cache_slug, text)
+                    return BeautifulSoup(text, "lxml"), errors
+        except requests.RequestException as e:
+            errors.append(str(e))
+            live_failed = True
 
     # Live fetch failed (HTTP error, network error, captcha, or 403).
     # Fall back to the repo-tracked snapshot if one exists. This is
