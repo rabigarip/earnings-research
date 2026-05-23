@@ -1382,15 +1382,73 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
         footnote_bits.append("Bps = basis points")
     estimates_footnote = "  ·  ".join(footnote_bits)
 
-    # ANALYST-VALIDITY GATE — when the only path that produced Q+1 consensus
-    # was `_next_q_from_ms_annual` (label: "MarketScreener (annual ÷ 4)"),
-    # the per-quarter numbers are a flat-seasonality synthesis, not real
-    # broker quarterly consensus. For seasonal names (banks, energy, retail)
-    # that distorts both levels AND YoY/QoQ. The correct presentation is
-    # to surface MS annual forecasts directly (FY+1E / FY+2E / FY+3E with
-    # YoY vs last actual) and clearly label the period as ANNUAL.
+    # ANALYST-VALIDITY GATE — three independent signals can swap the per-
+    # quarter table for an annual FY view. Each addresses a real failure
+    # mode observed in the wild:
+    #
+    #   (1) memo cascade source contains "annual ÷" — the upstream code
+    #       explicitly flagged it used the synthetic ÷4 proxy.
+    #   (2) MS quarterly section has no forward-dated rows — i.e. MS
+    #       publishes annual forecasts but no per-quarter breakdown.
+    #       This is the BKMB shape: the calendar path can still inject a
+    #       stale prior-quarter actual as the "next Q" estimate, which
+    #       overwrites the source label and hides (1).
+    #   (3) Q+1 consensus equals the immediately-prior-quarter actual to
+    #       within rounding — the carry-forward fingerprint. When the
+    #       calendar tier-2 fallback misclassifies a Q1 actual as a Q2
+    #       forecast, this is the only signal that catches it.
+    #
+    # ANY one of these is sufficient to swap to the annual table.
     _memo_src = (memo_data or {}).get("next_quarter_consensus_source") or ""
-    _use_annual = "annual" in _memo_src.lower() and "÷" in _memo_src
+    _signal_explicit_annual = "annual" in _memo_src.lower() and "÷" in _memo_src
+
+    _signal_no_quarterly_fwd = False
+    if isinstance(ms_quarterly_forecasts, dict):
+        try:
+            _nx, _lt, _pr, _pon, _pq = _ms_quarterly_split(ms_quarterly_forecasts)
+            if not _nx:
+                # No forward-dated quarterly row at all — MS doesn't
+                # publish a per-quarter forecast for this name.
+                _signal_no_quarterly_fwd = True
+        except Exception:
+            _signal_no_quarterly_fwd = False
+    else:
+        # No quarterly payload at all → annual is the only honest view.
+        _signal_no_quarterly_fwd = True
+
+    # (3) — compare memo consensus to the immediately-prior-quarter
+    # actual from MS quarterly arrays. If revenue + NI both match the
+    # last actual to within 1% AND there's no actual newer than that,
+    # this is the carry-forward bug.
+    _signal_carry_forward = False
+    if isinstance(ms_quarterly_forecasts, dict) and memo_data:
+        try:
+            _qq = (ms_quarterly_forecasts.get("quarterly") or {})
+            _rev_arr = _qq.get("net_sales") or []
+            _ni_arr  = _qq.get("net_income") or []
+            # Find last non-None actual index (i.e. the most-recent value).
+            _last_rev = next((v for v in reversed(_rev_arr)
+                                if isinstance(v, (int, float))), None)
+            _last_ni  = next((v for v in reversed(_ni_arr)
+                                if isinstance(v, (int, float))), None)
+            _mc_rev = memo_data.get("next_quarter_consensus_revenue")
+            _mc_ni  = memo_data.get("next_quarter_consensus_ni") \
+                       or memo_data.get("next_quarter_consensus_net_income")
+            def _close(a, b, tol=0.01):
+                if not (isinstance(a, (int, float))
+                        and isinstance(b, (int, float)) and b != 0):
+                    return False
+                return abs(a - b) / abs(b) < tol
+            # Carry-forward when BOTH metrics match — single-metric match
+            # could legitimately be a flat consensus.
+            if _close(_mc_rev, _last_rev) and _close(_mc_ni, _last_ni):
+                _signal_carry_forward = True
+        except Exception:
+            pass
+
+    _use_annual = (_signal_explicit_annual
+                    or _signal_no_quarterly_fwd
+                    or _signal_carry_forward)
     annual_rows: list[dict] = []
     annual_fy_labels: list[str] = []
     annual_unit_suffix = ""
