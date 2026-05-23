@@ -945,6 +945,32 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     isq = investing_obs.get("income_statement_quarterly") if investing_obs else None
     surprise_history = (isq or {}).get("surprise_history") if isinstance(isq, dict) else None
 
+    # `surprise_history` from Investing can be technically non-empty
+    # (list with 10 rows) while carrying no usable data — every row's
+    # eps_actual and eps_estimate are null. This is the Investing
+    # signature for thinly-covered names like BKMB.OM: the announce-
+    # dates are tracked but the values are not. Detect the "list of
+    # nulls" case and treat it as empty so the MS fallback below fires.
+    def _has_real_surprise_data(rows: list | None) -> bool:
+        if not rows or not isinstance(rows, list):
+            return False
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            if (isinstance(r.get("eps_actual"), (int, float))
+                    or isinstance(r.get("eps_estimate"), (int, float))
+                    or isinstance(r.get("revenue_actual"), (int, float))
+                    or isinstance(r.get("revenue_estimate"), (int, float))):
+                return True
+        return False
+
+    if not _has_real_surprise_data(surprise_history):
+        if surprise_history:
+            log.info("[earnings-history] %s: Investing returned %d rows but "
+                     "all null — falling through to MS fallback",
+                     ticker, len(surprise_history))
+        surprise_history = None
+
     # Fallback: when Investing's surprise_history is empty (common on
     # GCC ex-Saudi names — Investing tracks the announce date but has
     # neither actuals nor estimates for BKMB / OQEP / ADNOCDRILL), derive
