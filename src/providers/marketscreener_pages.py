@@ -140,6 +140,64 @@ def _cache_slug(url: str, page_name: str, cache_key_prefix: str | None = None) -
     return f"{page_name}_{slug}"
 
 
+# ─── Repo-tracked snapshot path (Cloudflare workaround) ─────────────
+#
+# Render's egress IPs are Cloudflare-blocked from MarketScreener (every
+# page returns HTTP 403). Same problem we solved for Investing.com via
+# the data/investing/ snapshot pattern — GitHub Actions runners use
+# residential-class IPs that aren't flagged, so a daily GHA workflow
+# refreshes the snapshots and commits them to the repo.
+#
+# Layout:
+#   data/marketscreener/ms_<safe-cache-slug>.html
+#
+# Where `<safe-cache-slug>` is the same hash the on-disk cache uses, so
+# the live-fetch and snapshot-fetch paths share one filename grammar.
+
+def _snapshot_path_for(cache_slug: str):
+    """Return the committed-snapshot path for a given cache_slug, or
+    None if we can't resolve the repo root. Mirrors the cache/ filename
+    shape so live+snapshot use one grammar."""
+    try:
+        from src.config import root
+        safe = re.sub(r"[^a-zA-Z0-9-]", "_", cache_slug)[:80]
+        return root() / "data" / "marketscreener" / f"ms_{safe}.html"
+    except Exception:
+        return None
+
+
+def _read_snapshot(cache_slug: str) -> str | None:
+    """Return the snapshot HTML for a cache_slug, or None if absent /
+    blocked-content / unreadable. Used as the fallback when live fetch
+    fails with 403 / captcha."""
+    p = _snapshot_path_for(cache_slug)
+    if p is None or not p.exists():
+        return None
+    try:
+        text = p.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    if _is_blocked_response(text):
+        return None
+    return text
+
+
+def _write_snapshot(cache_slug: str, html: str) -> bool:
+    """Persist the live HTML to the repo-tracked snapshot location.
+    Only invoked when `MS_TRACKED_REFRESH=1` is set (refresh-script
+    mode) so production deck runs don't accidentally commit data.
+    Returns True on write success."""
+    p = _snapshot_path_for(cache_slug)
+    if p is None:
+        return False
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(html, encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
 def _fetch_page(url: str, cache_slug: str) -> tuple[BeautifulSoup | None, list[str]]:
     """Fetch URL via shared session (cookies + keep-alive), optional cache, return (soup, errors).
 
@@ -180,6 +238,7 @@ def _fetch_page(url: str, cache_slug: str) -> tuple[BeautifulSoup | None, list[s
         except Exception:
             pass  # fall through to network
 
+    live_failed = False
     try:
         session = _get_session()
         # Set referer for non-search pages (looks like natural browsing)
@@ -193,23 +252,43 @@ def _fetch_page(url: str, cache_slug: str) -> tuple[BeautifulSoup | None, list[s
         resp = session.get(url, timeout=timeout)
         if resp.status_code != 200:
             errors.append(f"HTTP {resp.status_code}")
-            return None, errors
-        text = resp.text
-        if _is_blocked_response(text):
-            errors.append("Captcha or access denied")
-            return None, errors
-        if _USE_CONFIG and cfg().get("scraping", {}).get("cache_html"):
-            try:
-                cache_dir = root() / "cache"
-                cache_dir.mkdir(exist_ok=True)
-                safe = re.sub(r"[^a-zA-Z0-9-]", "_", cache_slug)[:80]
-                (cache_dir / f"ms_{safe}.html").write_text(text, encoding="utf-8")
-            except Exception:
-                pass
-        return BeautifulSoup(text, "lxml"), errors
+            live_failed = True
+        else:
+            text = resp.text
+            if _is_blocked_response(text):
+                errors.append("Captcha or access denied")
+                live_failed = True
+            else:
+                if _USE_CONFIG and cfg().get("scraping", {}).get("cache_html"):
+                    try:
+                        cache_dir = root() / "cache"
+                        cache_dir.mkdir(exist_ok=True)
+                        safe = re.sub(r"[^a-zA-Z0-9-]", "_", cache_slug)[:80]
+                        (cache_dir / f"ms_{safe}.html").write_text(text, encoding="utf-8")
+                    except Exception:
+                        pass
+                # In refresh-script mode, ALSO commit the HTML to the
+                # repo-tracked snapshot dir so Render can read it later.
+                # Gated by env var so production deck runs don't write
+                # snapshot files on every fetch.
+                if os.environ.get("MS_TRACKED_REFRESH") == "1":
+                    _write_snapshot(cache_slug, text)
+                return BeautifulSoup(text, "lxml"), errors
     except requests.RequestException as e:
         errors.append(str(e))
-        return None, errors
+        live_failed = True
+
+    # Live fetch failed (HTTP error, network error, captcha, or 403).
+    # Fall back to the repo-tracked snapshot if one exists. This is
+    # always-on — no env gate — because Render is the canonical user
+    # of this fallback and it's safer to serve stale data than nothing.
+    if live_failed:
+        snapshot_html = _read_snapshot(cache_slug)
+        if snapshot_html is not None:
+            errors.append("(served from data/marketscreener/ snapshot)")
+            return BeautifulSoup(snapshot_html, "lxml"), errors
+
+    return None, errors
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
