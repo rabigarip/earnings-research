@@ -231,17 +231,23 @@ def get_report(run_id: str):
 
 
 @app.get("/api/reports/{run_id}/download")
-def download_report(run_id: str, filename: str | None = None):
-    """Download the earnings preview file for this run (.pptx).
+def download_report(run_id: str, filename: str | None = None, type: str | None = None):
+    """Download an artefact from this run.
+
+    Query params:
+      `filename` — explicit filename to serve (path-traversal protected;
+                   must exist in report_output_dir()).
+      `type`     — `report` (default, serves the .pptx deck) OR
+                   `provenance` (serves the .xlsx data-trace sidecar
+                   that's written alongside every deck — every cell on
+                   the deck traced back to its source provider, URL,
+                   data period, and fetch timestamp).
 
     Resolution order:
-      1. `?filename=<name>` query parameter (preferred; set by POST /api/reports).
-         Path-traversal protected, must exist in report_output_dir().
-      2. DB lookup by run_id → memo_path field.
-
-    The query-param path makes downloads survive a DB-persist failure: the
-    POST response carries the actual filename, and the GET serves it without
-    a SQLite round-trip.
+      1. `?filename=<name>` (explicit).
+      2. `?type=provenance` (auto-resolves the sidecar from the deck's
+         filename in the DB).
+      3. DB lookup by run_id → memo_path field (the .pptx).
     """
     from src.storage.db import load_run
     from src.config import report_output_dir
@@ -249,7 +255,6 @@ def download_report(run_id: str, filename: str | None = None):
 
     memo_filename: str | None = None
     if filename:
-        # Defensive: strip path separators, reject traversal.
         candidate = filename.strip().replace("\\", "/").split("/")[-1]
         if candidate and ".." not in candidate:
             memo_filename = candidate
@@ -265,14 +270,35 @@ def download_report(run_id: str, filename: str | None = None):
         if not memo_filename or ".." in memo_filename:
             raise HTTPException(status_code=404, detail="No report file for this run")
 
+    # Provenance sidecar swap: take the deck filename and substitute
+    # the `.pptx` suffix with `.provenance.xlsx`. The sidecar is
+    # written by `generate_report._write_jabal_preview` via
+    # `out_path.with_suffix(".provenance.xlsx")`, so the deck and
+    # sidecar always live in the same directory with a deterministic
+    # name pair.
+    if (type or "").strip().lower() == "provenance":
+        if memo_filename.lower().endswith(".pptx"):
+            memo_filename = memo_filename[:-len(".pptx")] + ".provenance.xlsx"
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="Provenance sidecar only available for .pptx reports",
+            )
+
     file_path = out_dir / memo_filename
     if not file_path.is_file():
-        raise HTTPException(status_code=404, detail="Report file no longer available (may have been removed)")
-    media = (
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-        if memo_filename.lower().endswith(".pptx")
-        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    )
+        raise HTTPException(
+            status_code=404,
+            detail=f"File no longer available: {memo_filename}",
+        )
+    if memo_filename.lower().endswith(".pptx"):
+        media = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    elif memo_filename.lower().endswith(".xlsx"):
+        media = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    elif memo_filename.lower().endswith(".docx"):
+        media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    else:
+        media = "application/octet-stream"
     response = FileResponse(path=str(file_path), media_type=media, filename=memo_filename)
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     response.headers["Pragma"] = "no-cache"

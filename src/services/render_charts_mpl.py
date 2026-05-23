@@ -61,6 +61,35 @@ def _setup_axes(ax):
     ax.set_axisbelow(True)
 
 
+def _fmt_compact_money(v: float) -> str:
+    """Format a raw monetary value with B/M/K suffix. Used for chart
+    annotations where '133,000,000.0' is harder to scan than '133.0M'.
+
+    Heuristics:
+      >= 1e9   → '1.23B'
+      >= 1e6   → '133.0M'
+      >= 1e3   → '15.4K'
+      < 1e3    → '0.42'   (likely already a per-share figure)
+    """
+    if not isinstance(v, (int, float)):
+        return str(v)
+    abs_v = abs(v)
+    if abs_v >= 1e9:
+        return f"{v/1e9:.2f}B"
+    if abs_v >= 1e6:
+        return f"{v/1e6:.1f}M"
+    if abs_v >= 1e3:
+        return f"{v/1e3:.1f}K"
+    return f"{v:.2f}"
+
+
+def _qfmt_date(dt: datetime) -> str:
+    """Format a datetime as Q-tag for the earnings-history x-axis.
+    `datetime(2025, 9, 1)` → 'Q3 \\'25'. Quarter is derived from month."""
+    q = (dt.month - 1) // 3 + 1
+    return f"Q{q} '{str(dt.year)[-2:]}"
+
+
 def _fig_to_png(fig, dpi: int = 180) -> bytes:
     """Render to PNG bytes; close the figure to free memory."""
     buf = BytesIO()
@@ -107,6 +136,26 @@ def render_52w_price_chart(close_series: list[dict], currency: str = "") -> Opti
         if abs(v) >= 10:   return f"{v:.1f}"
         return f"{v:.2f}"
     ax.yaxis.set_major_formatter(FuncFormatter(_money))
+
+    # 52-week high / low dashed reference lines. Investment-committee
+    # readers ask "where in the range?" first — answer it visually.
+    hi_val = max(vals); lo_val = min(vals)
+    ax.axhline(hi_val, color=_MUTED, linewidth=0.8, linestyle="--", alpha=0.55)
+    ax.axhline(lo_val, color=_MUTED, linewidth=0.8, linestyle="--", alpha=0.55)
+    # Labels pinned to the LEFT edge so they don't collide with the
+    # last-close annotation on the right.
+    left_dt = dates[0]
+    ax.annotate(f"52w high  {_money(hi_val, None)}",
+                xy=(left_dt, hi_val), xytext=(2, 2),
+                textcoords="offset points",
+                fontsize=7, color=_MUTED, va="bottom", ha="left",
+                style="italic")
+    ax.annotate(f"52w low  {_money(lo_val, None)}",
+                xy=(left_dt, lo_val), xytext=(2, -2),
+                textcoords="offset points",
+                fontsize=7, color=_MUTED, va="top", ha="left",
+                style="italic")
+
     # Last-close annotation pinned to the right edge.
     last_dt = dates[-1]
     last_val = vals[-1]
@@ -355,8 +404,11 @@ def render_earnings_history_chart(
         ax_top.scatter([d], [act], s=80, color=fill, edgecolors="white",
                           linewidths=1.0, zorder=4)
         # Actual value annotation just above (beat) or below (miss) the dot.
+        # EPS stays as a 2dp decimal (typical range 0.x to 5.x).
+        # Revenue / Net Income / Net Sales use compact M/B suffix:
+        # '133,000,000.0' is harder to scan than '133.0M'.
         y_off = 12 if act >= est else -16
-        annot = f"{act:.2f}" if is_eps_metric else f"{act:,.1f}"
+        annot = f"{act:.2f}" if is_eps_metric else _fmt_compact_money(act)
         ax_top.annotate(annot,
                           xy=(d, act),
                           xytext=(0, y_off), textcoords="offset points",
@@ -371,7 +423,8 @@ def render_earnings_history_chart(
     if is_eps_axis:
         ax_top.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:.2f}"))
     else:
-        ax_top.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:,.0f}"))
+        # M/B suffix on y-axis ticks too — matches the annotation style.
+        ax_top.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: _fmt_compact_money(v)))
 
     # Surprise bars: positive green, negative red.
     colors = [_POS if s >= 0 else _NEG for s in surprises]
@@ -380,8 +433,13 @@ def render_earnings_history_chart(
     ax_bot.axhline(0, color=_MUTED, linewidth=0.6)
     ax_bot.set_ylabel("Surprise %", fontsize=8, color=_MUTED)
     ax_bot.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:+.0f}%"))
-    ax_bot.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
-    ax_bot.xaxis.set_major_formatter(mdates.DateFormatter("%b %y"))
+    # Quarter-tagged x-axis (Q3 '24, Q4 '24, Q1 '25, …) — removes the
+    # 'Sep 25 = the quarter or the report date?' ambiguity that came
+    # with the previous '%b %y' locale-style ticks.
+    ax_bot.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[3, 6, 9, 12]))
+    ax_bot.xaxis.set_major_formatter(FuncFormatter(
+        lambda v, _p: _qfmt_date(mdates.num2date(v))
+    ))
 
     # Title strip — kept short so it doesn't compete with the slide section label.
     title_bits = []

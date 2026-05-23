@@ -82,6 +82,10 @@ export default function GenerateReportPage() {
   const [suggestOpen, setSuggestOpen] = useState(false);
   const [highlight, setHighlight] = useState(-1);
   const [suggestLoading, setSuggestLoading] = useState(false);
+  // After a successful report generation we stash the run-id + filename
+  // so the user can grab the provenance sidecar separately (without
+  // re-running the pipeline). Cleared on every new generate-click.
+  const [lastReport, setLastReport] = useState(null); // {runId, filename, ticker}
   const blurCloseTimer = useRef(null);
   const searchAbortRef = useRef(null);
   const inputRef = useRef(null);
@@ -144,6 +148,7 @@ export default function GenerateReportPage() {
     setError("");
     setStatus("Generating report...");
     setLoading(true);
+    setLastReport(null);
     try {
       const tk = ticker.trim().toUpperCase();
       const createRes = await fetch(`${API_BASE}/api/reports`, {
@@ -194,11 +199,51 @@ export default function GenerateReportPage() {
       // Defer revoke so Safari actually starts the download.
       setTimeout(() => URL.revokeObjectURL(url), 100);
       setStatus(`Done. Downloaded ${filename}`);
+      // Stash the run-id + filename so the user can grab the
+      // provenance sidecar (data-trace .xlsx) without re-running.
+      setLastReport({ runId, filename: dlFilename || filename, ticker: tk });
     } catch (e) {
       setError(errorToUserMessage(e));
       setStatus("");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const downloadProvenance = async () => {
+    if (!lastReport?.runId) return;
+    setError("");
+    try {
+      const params = new URLSearchParams({
+        type: "provenance",
+        t: String(Date.now()),
+      });
+      if (lastReport.filename) params.set("filename", lastReport.filename);
+      const res = await fetch(
+        `${API_BASE}/api/reports/${lastReport.runId}/download?${params.toString()}`,
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(
+          toErrorText(formatApiErrorDetail(err?.detail))
+            || "Provenance sidecar not available for this run",
+        );
+      }
+      const blob = await res.blob();
+      const filename = extractFilename(
+        res.headers.get("content-disposition"),
+        `${lastReport.ticker}_provenance.xlsx`,
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+    } catch (e) {
+      setError(errorToUserMessage(e));
     }
   };
 
@@ -329,6 +374,22 @@ export default function GenerateReportPage() {
 
         {status ? <p className="mt-4 text-sm text-emerald-400">{status}</p> : null}
         {error ? <p className="mt-2 text-sm text-rose-400">{error}</p> : null}
+
+        {lastReport ? (
+          <div className="mt-4 pt-4 border-t border-slate-800">
+            <p className="text-xs text-slate-400 mb-2">
+              Data trace: every number on the deck mapped to its source provider,
+              URL, data period, and fetch timestamp.
+            </p>
+            <button
+              type="button"
+              onClick={downloadProvenance}
+              className="w-full rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200"
+            >
+              Download data sources (.xlsx)
+            </button>
+          </div>
+        ) : null}
         </div>
       </div>
     </div>

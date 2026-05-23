@@ -1024,6 +1024,41 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
                   f"to MS fallback", flush=True)
         surprise_history = None
 
+    # When Investing's surprise_history IS used (primary path), detect
+    # whether it actually has EPS pairs or only revenue pairs. The chart
+    # renderer auto-relabels but only inside its own scope; the slide-3
+    # section title is set HERE, before the chart is called. So we need
+    # the same detection upstream to keep title + chart consistent.
+    def _detect_metric_in_surprise(rows: list | None) -> str:
+        if not rows or not isinstance(rows, list):
+            return ""
+        # Prefer EPS — if any row has a complete EPS pair we treat the
+        # whole chart as EPS-metric (consistent with chart's preference).
+        for r in rows:
+            if not isinstance(r, dict): continue
+            if (isinstance(r.get("eps_actual"), (int, float))
+                    and isinstance(r.get("eps_estimate"), (int, float))):
+                return "EPS"
+        for r in rows:
+            if not isinstance(r, dict): continue
+            if (isinstance(r.get("revenue_actual"), (int, float))
+                    and isinstance(r.get("revenue_estimate"), (int, float))):
+                return "Revenue"
+        return ""
+
+    # If Investing kept its data, sync the section label to what the
+    # chart will actually plot.
+    if surprise_history:
+        detected = _detect_metric_in_surprise(surprise_history)
+        if detected:
+            # Stash on a local — the actual label assignment happens
+            # in the surprise_metric_label = ... block below.
+            _investing_detected_metric = detected
+        else:
+            _investing_detected_metric = ""
+    else:
+        _investing_detected_metric = ""
+
     # Fallback: when Investing's surprise_history is empty (common on
     # GCC ex-Saudi names — Investing tracks the announce date but has
     # neither actuals nor estimates for BKMB / OQEP / ADNOCDRILL), derive
@@ -1038,7 +1073,9 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     #      from live attempts). In that case the data DOES exist as a
     #      committed snapshot under data/marketscreener/ — load it
     #      directly so we don't lose the chart over a plumbing miss.
-    surprise_metric_label = "EPS"
+    # Default label, overridden when MS fallback runs or Investing data
+    # carries only revenue pairs.
+    surprise_metric_label = _investing_detected_metric or "EPS"
     if not surprise_history:
         # Tier 1: pipeline-supplied
         ms_cal_present = bool(ms_calendar_events

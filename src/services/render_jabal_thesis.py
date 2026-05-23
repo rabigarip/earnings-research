@@ -764,6 +764,82 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
         if ni_q_consensus is None and isinstance(mc_ni, (int, float)):
             ni_q_consensus = mc_ni
 
+    # YoY / QoQ for tickers where `_ms_quarterly_split` returned empty
+    # `next_est` (all MS dates already past → all rows bucketed as
+    # actuals → no estimate row to anchor against). For BKMB-shape
+    # names, the Q+1 forecast is now in rev_q_consensus / eps_q_consensus
+    # / ni_q_consensus / ebitda_q_consensus (from the memo cascade
+    # above), and the prior-year-same-Q and immediately-prior-Q actuals
+    # are in MS quarterly periods data. Look them up directly here
+    # rather than going through the past/future bucketing.
+    if (ms_quarterly_forecasts and isinstance(ms_quarterly_forecasts, dict)
+        and (yoy_rev is None or yoy_ni is None
+             or qoq_rev is None or qoq_ni is None)):
+        nq_label = (memo_data or {}).get("next_quarter_label") or ""
+        import re as _re_q
+        _m_nq = _re_q.search(
+            r"(\d{4})\s*Q([1-4])|Q([1-4])\s*(\d{4})", nq_label
+        )
+        if _m_nq:
+            _nq_yr = int(_m_nq.group(1) or _m_nq.group(4))
+            _nq_q  = int(_m_nq.group(2) or _m_nq.group(3))
+            _prev_q_q  = _nq_q - 1 if _nq_q > 1 else 4
+            _prev_q_yr = _nq_yr if _nq_q > 1 else _nq_yr - 1
+
+            _qtr = ms_quarterly_forecasts.get("quarterly", {}) or {}
+            _periods = _qtr.get("periods", []) or []
+
+            def _find_period_idx(yr, q):
+                """Find the index in MS periods array for {yr}Q{q}."""
+                want = f"{yr}Q{q}"
+                for i, p in enumerate(_periods):
+                    if str(p or "").replace(" ", "") == want:
+                        return i
+                return None
+
+            def _scaled_at(arr_name, idx):
+                if idx is None: return None
+                arr = _qtr.get(arr_name, []) or []
+                if idx >= len(arr): return None
+                v = arr[idx]
+                if not isinstance(v, (int, float)): return None
+                # Apply same unit scale that the consensus side already uses.
+                return float(v) * unit_scale
+
+            _py_idx = _find_period_idx(_nq_yr - 1, _nq_q)
+            _pq_idx = _find_period_idx(_prev_q_yr, _prev_q_q)
+
+            # Per-field YoY (vs prior-year same Q actual)
+            def _pct(num, den):
+                if not (isinstance(num, (int, float))
+                        and isinstance(den, (int, float)) and den != 0):
+                    return None
+                return (num - den) / den * 100.0
+
+            if yoy_rev is None:
+                yoy_rev = _pct(rev_q_consensus,    _scaled_at("net_sales",  _py_idx))
+            if yoy_ni is None:
+                yoy_ni  = _pct(ni_q_consensus,     _scaled_at("net_income", _py_idx))
+            if yoy_ebitda is None:
+                yoy_ebitda = _pct(ebitda_q_consensus, _scaled_at("ebitda",  _py_idx))
+            if yoy_eps is None:
+                # EPS not scaled — per-share figure already at the right magnitude.
+                _eps_arr = _qtr.get("eps", []) or []
+                _py_eps  = _eps_arr[_py_idx] if (_py_idx is not None and _py_idx < len(_eps_arr)) else None
+                yoy_eps = _pct(eps_q_consensus, _py_eps)
+
+            # Per-field QoQ (vs immediately-prior Q actual)
+            if qoq_rev is None:
+                qoq_rev = _pct(rev_q_consensus,    _scaled_at("net_sales",  _pq_idx))
+            if qoq_ni is None:
+                qoq_ni  = _pct(ni_q_consensus,     _scaled_at("net_income", _pq_idx))
+            if qoq_ebitda is None:
+                qoq_ebitda = _pct(ebitda_q_consensus, _scaled_at("ebitda",  _pq_idx))
+            if qoq_eps is None:
+                _eps_arr = _qtr.get("eps", []) or []
+                _pq_eps  = _eps_arr[_pq_idx] if (_pq_idx is not None and _pq_idx < len(_eps_arr)) else None
+                qoq_eps = _pct(eps_q_consensus, _pq_eps)
+
     # Yahoo quarterly_actuals fallback (used when MS forecast block was empty
     # or didn't yield a YoY pair).
     if not used_ms and quarterly:

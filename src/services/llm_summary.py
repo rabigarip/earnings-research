@@ -427,11 +427,34 @@ slide — your job is to INTERPRET them, not restate them.
 Deliver a JSON object with these keys. No markdown, no preface, no
 trailing prose. JSON only.
 
-"thesis_paragraph" — 3-5 sentences. Tell the reader the setup heading
-   into the print: what the Street is pricing in, the bull / bear pivot,
-   what would change the view. The Apple / JPMorgan / Tesla examples
-   below show the voice and rhythm we want. DO NOT copy them — they are
-   reference shape, not a template you fill in:
+"thesis_paragraph" — 5-7 sentences (~150-220 words). A full
+   institutional executive summary, not a one-paragraph teaser. The
+   reader is an analyst's PM who hasn't followed the name closely;
+   they need the setup, the two-sided case, the swing factor, and
+   your posture. Cover this rhythm:
+
+   - Sentence 1-2: The setup heading into the print. What's the Street
+     pricing in (rating, target, upside)? What's the consensus skew
+     (analyst count, dispersion, recent revisions)?
+   - Sentence 3-4: The two-sided case. What supports the bull view
+     (sector trend, beat history, margin trajectory, valuation gap)?
+     What supports the bear view (commodity headwind, NIM compression,
+     stretched multiple)? Each side anchored in a number from the
+     data block.
+   - Sentence 5: The single factor most likely to move consensus on
+     the call (mgmt guidance, asset quality update, capex change, etc.)
+   - Sentence 6-7: How the setup looks (constructive / balanced /
+     asymmetric / high-risk-high-reward) AND what would change your
+     view. Be specific about WHICH metric crossing WHICH threshold
+     would flip the read.
+
+   Substance over slot-filling. Each sentence must add information
+   the prior one didn't. Don't repeat the highlight pills or the
+   catalyst bullets — the thesis paragraph is the SYNTHESIS.
+
+   The Apple / JPMorgan / Tesla examples below show the voice and
+   rhythm we want. DO NOT copy them — they are reference shape, not
+   a template you fill in:
 
      Apple — "Apple enters earnings with focus on iPhone demand,
        Services growth, gross margin, and next-quarter guidance.
