@@ -135,8 +135,45 @@ def _data_period_from_value(field: str, value: Any) -> str:
 
 # ── Main entry ───────────────────────────────────────────────────
 
+def _explode_dict_value(slide: str, section: str, label_prefix: str,
+                          d: dict, src: str, src_url: str,
+                          fetched_at: str, notes: str) -> list[list[str]]:
+    """Expand a dict-valued canonical_store cell into one row per scalar
+    sub-key, so the analyst sees every number on its own line instead of
+    a `<dict: ...>` placeholder. Skips nested dicts/lists (the parent row
+    still emits as a summary)."""
+    out_rows = []
+    SKIP_KEYS = {"summary"}   # long-form prose, not a numeric provenance row
+    for k, v in d.items():
+        if k in SKIP_KEYS:
+            continue
+        if v is None:
+            continue
+        if isinstance(v, (dict, list)):
+            # Skip nested structures from the explosion; the parent row
+            # surfaces them with a `<dict>` / `<list>` placeholder so the
+            # analyst knows to inspect them in raw fixtures.
+            continue
+        # Format numbers compactly; leave strings as-is.
+        if isinstance(v, (int, float)):
+            disp = (f"{v:,.4f}" if abs(v) < 1 else
+                    f"{v:,.2f}" if abs(v) < 1e6 else
+                    f"{v:,.0f}")
+        else:
+            s = str(v)
+            disp = s if len(s) <= 80 else s[:77] + "…"
+        out_rows.append([
+            slide, section, f"{label_prefix} · {k}",
+            disp, src, src_url, "", fetched_at, notes,
+        ])
+    return out_rows
+
+
 def write_provenance_xlsx(ticker: str, out_path: Path,
-                            memo_data: Optional[dict] = None) -> Optional[Path]:
+                            memo_data: Optional[dict] = None,
+                            payload: Any = None,
+                            peer_rows: Optional[list[dict]] = None,
+                            ) -> Optional[Path]:
     """Walk canonical_store + memo + macro for `ticker` and write an
     .xlsx audit sheet to `out_path`. Returns the path on success, None
     if openpyxl is unavailable (kept optional so the deck still ships).
@@ -164,46 +201,95 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
 
     rows: list[list[str]] = []
 
-    # 1. Every canonical_store cell for the ticker.
+    # 1. Every canonical_store cell for the ticker — parent summary row
+    #    plus per-sub-key explosion for dict-valued cells so every number
+    #    on the deck is individually traceable.
     cv = get_all_fields(ticker)
     for field, c in sorted(cv.items()):
         slide, section, label = _FIELD_MAP.get(field, ("Other", "Other", field))
         period = _data_period_from_value(field, c.value)
-        # If the cell value is a dict carrying its own per-key sources,
-        # we still emit one row at the field level — the deck consumes
-        # the dict as one unit.
+        src = (c.canonical_source or "").strip()
+        src_url = _source_url(c.canonical_source, ticker)
+        fetched_at = c.last_refreshed_at.strftime("%Y-%m-%d %H:%M UTC")
+        notes = (c.notes or "").strip()
         rows.append([
             slide, section, label,
-            _value_repr(c.value),
-            (c.canonical_source or "").strip(),
-            _source_url(c.canonical_source, ticker),
-            period,
-            c.last_refreshed_at.strftime("%Y-%m-%d %H:%M UTC"),
-            (c.notes or "").strip(),
+            _value_repr(c.value), src, src_url,
+            period, fetched_at, notes,
         ])
+        # Dict explosion — one row per scalar sub-key. Keeps the analyst
+        # from having to open raw JSON to see e.g. `current_price`,
+        # `market_cap`, `mean_target_price`, `fwd_pe`, individually.
+        if isinstance(c.value, dict):
+            rows.extend(_explode_dict_value(slide, section, label,
+                                              c.value, src, src_url,
+                                              fetched_at, notes))
+        # Historical price series: surface 52w stats (high / low / last /
+        # period return) since the slide shows them and the full daily
+        # series is too noisy to print row-by-row.
+        if field == "historical_prices" and isinstance(c.value, list) and c.value:
+            try:
+                vals = [float(pt["close"]) for pt in c.value
+                        if isinstance(pt, dict) and isinstance(pt.get("close"), (int, float))]
+                if len(vals) >= 2:
+                    hi = max(vals); lo = min(vals)
+                    first = vals[0]; last = vals[-1]
+                    ret_pct = (last - first) / first * 100.0 if first else None
+                    stats = [
+                        ("52w high",  f"{hi:,.4f}" if hi < 1 else f"{hi:,.2f}"),
+                        ("52w low",   f"{lo:,.4f}" if lo < 1 else f"{lo:,.2f}"),
+                        ("Last close", f"{last:,.4f}" if last < 1 else f"{last:,.2f}"),
+                        ("# observations", str(len(vals))),
+                    ]
+                    if ret_pct is not None:
+                        stats.append(("52w return %", f"{ret_pct:+.2f}%"))
+                    for k, v in stats:
+                        rows.append([slide, section, f"{label} · {k}",
+                                       v, src, src_url, "", fetched_at, ""])
+            except (KeyError, ValueError, TypeError):
+                pass
+        # Quarterly surprise track: one row per (period, eps_surprise_pct)
+        if (field == "income_statement_quarterly" and isinstance(c.value, dict)
+            and isinstance(c.value.get("surprise_history"), list)):
+            for r in (c.value["surprise_history"] or [])[:8]:
+                if not isinstance(r, dict): continue
+                p = r.get("period") or r.get("date") or ""
+                sp = r.get("eps_surprise_pct")
+                ra = r.get("revenue_actual")
+                re_ = r.get("revenue_estimate")
+                if isinstance(sp, (int, float)) and p:
+                    rows.append([slide, section, f"{label} · {p} EPS surprise",
+                                   f"{sp:+.2f}%", src, src_url, str(p),
+                                   fetched_at, ""])
+                if isinstance(ra, (int, float)) and isinstance(re_, (int, float)) and p:
+                    rows.append([slide, section, f"{label} · {p} Revenue act/est",
+                                   f"{ra:,.0f} / {re_:,.0f}", src, src_url, str(p),
+                                   fetched_at, ""])
 
-    # 2. Memo-derived fields (next_quarter_consensus_revenue/eps, source).
+    # 2. Memo-derived fields — every Q+1 consensus that fed slide 2 plus
+    #    derived YoY / QoQ deltas. Full coverage: revenue, EPS, EBITDA,
+    #    Net Income, and the implied upside on slide 1.
     if memo_data:
         nq_src = memo_data.get("next_quarter_consensus_source")
-        nq_label = memo_data.get("next_earnings_label") or ""
-        if memo_data.get("next_quarter_consensus_revenue") is not None:
-            rows.append([
-                "Slide 2", "Estimates Table",
-                f"Q+1 consensus revenue ({nq_label})",
-                _value_repr(memo_data["next_quarter_consensus_revenue"]),
-                nq_src or "MarketScreener",
-                _source_url(nq_src or "MarketScreener", ticker),
-                nq_label, "", "Cascade: MS → Investing → Yahoo",
-            ])
-        if memo_data.get("next_quarter_consensus_eps") is not None:
-            rows.append([
-                "Slide 2", "Estimates Table",
-                f"Q+1 consensus EPS ({nq_label})",
-                _value_repr(memo_data["next_quarter_consensus_eps"]),
-                nq_src or "MarketScreener",
-                _source_url(nq_src or "MarketScreener", ticker),
-                nq_label, "", "Cascade: MS → Investing → Yahoo",
-            ])
+        nq_label = memo_data.get("next_quarter_label") or memo_data.get("next_earnings_label") or ""
+        cascade_note = "Cascade: MS quarterly → Investing → Yahoo → MS annual÷4"
+        memo_keys_quarterly = [
+            ("next_quarter_consensus_revenue", "Q+1 consensus Revenue"),
+            ("next_quarter_consensus_eps",     "Q+1 consensus EPS"),
+            ("next_quarter_consensus_ebitda",  "Q+1 consensus EBITDA"),
+            ("next_quarter_consensus_ni",      "Q+1 consensus Net Income"),
+        ]
+        for key, human in memo_keys_quarterly:
+            v = memo_data.get(key)
+            if v is not None:
+                rows.append([
+                    "Slide 2", "Estimates Table",
+                    f"{human} ({nq_label})" if nq_label else human,
+                    _value_repr(v),
+                    nq_src or "MarketScreener",
+                    _source_url(nq_src or "MarketScreener", ticker),
+                    nq_label, "", cascade_note,
+                ])
         # Implied upside / target reflected in the deck.
         if memo_data.get("implied_upside_pct") is not None:
             rows.append([
@@ -213,6 +299,87 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
                 "(target_mean / quote.price - 1) × 100",
                 "", "", "Per-cell formula",
             ])
+        # Next-quarter YoY/QoQ derivations (when memo computed them).
+        # _compute_memo uses *_growth_pct suffix for revenue/NI; the
+        # thesis renderer additionally computes per-metric YoY/QoQ but
+        # doesn't write back. Both shapes covered here.
+        yoy_qoq_keys = [
+            ("next_quarter_yoy_revenue_growth_pct", "Q+1 YoY revenue %"),
+            ("next_quarter_yoy_ni_growth_pct",       "Q+1 YoY net income %"),
+            ("next_quarter_yoy_revenue",             "Q+1 YoY revenue %"),
+            ("next_quarter_yoy_eps",                 "Q+1 YoY EPS %"),
+            ("next_quarter_yoy_ebitda",              "Q+1 YoY EBITDA %"),
+            ("next_quarter_yoy_ni",                  "Q+1 YoY net income %"),
+            ("next_quarter_qoq_revenue",             "Q+1 QoQ revenue %"),
+            ("next_quarter_qoq_eps",                 "Q+1 QoQ EPS %"),
+            ("next_quarter_qoq_ebitda",              "Q+1 QoQ EBITDA %"),
+            ("next_quarter_qoq_ni",                  "Q+1 QoQ net income %"),
+        ]
+        for key, human in yoy_qoq_keys:
+            v = memo_data.get(key)
+            if isinstance(v, (int, float)):
+                rows.append([
+                    "Slide 2", "Estimates Table", human,
+                    f"{v:+.2f}%", "Derived",
+                    "consensus vs same-Q prior-year (YoY) or prior-Q (QoQ)",
+                    nq_label, "", "Computed in _compute_memo / render time",
+                ])
+
+    # 3. Peer comparables — emit one row per peer × per shown metric.
+    #    Slide 3 shows: COMPANY | TICKER | MCAP | P/E | P/TBV | DIV YIELD |
+    #    1Y RETURN. Trace each cell so the analyst can drill into source.
+    if peer_rows:
+        for pr in peer_rows:
+            if not isinstance(pr, dict): continue
+            ptick = pr.get("ticker") or pr.get("symbol") or ""
+            pname = pr.get("name") or pr.get("company") or ptick
+            metrics_to_emit = [
+                ("market_cap", "Market cap"),
+                ("forward_pe", "Forward P/E"),
+                ("price_to_book", "P/TBV"),
+                ("price_to_tangible_book", "P/TBV"),
+                ("dividend_yield", "Dividend yield %"),
+                ("return_1y_pct", "1Y return %"),
+            ]
+            for src_key, human in metrics_to_emit:
+                v = pr.get(src_key)
+                if v is None: continue
+                rows.append([
+                    "Slide 3", "Peer Comparables",
+                    f"{pname} ({ptick}) · {human}",
+                    _value_repr(v),
+                    (pr.get("source") or "yfinance"),
+                    _source_url(pr.get("source") or "yfinance", ptick),
+                    "", "", "",
+                ])
+
+    # 4. MS annual forecasts — emit FY year × metric rows when present.
+    #    These back the annual-fallback table on slide 2 and the forward
+    #    P/E bars on slide 3.
+    annual = None
+    if payload is not None:
+        msa = getattr(payload, "ms_annual_forecasts", None)
+        if isinstance(msa, dict):
+            annual = msa.get("annual") if isinstance(msa.get("annual"), dict) else msa
+    if annual and isinstance(annual.get("periods"), list):
+        periods = annual["periods"]
+        for arr_key, human in [("net_sales", "Net sales"),
+                                  ("ebitda",    "EBITDA"),
+                                  ("net_income", "Net income")]:
+            arr = annual.get(arr_key) or []
+            for i, p in enumerate(periods):
+                if i >= len(arr): continue
+                v = arr[i]
+                if not isinstance(v, (int, float)): continue
+                rows.append([
+                    "Slide 2", "Annual Forecasts (MS)",
+                    f"{human} · {p}",
+                    _value_repr(v),
+                    "MarketScreener",
+                    "https://www.marketscreener.com",
+                    str(p), "",
+                    "Annual estimate; per-quarter breakdown not published",
+                ])
 
     # 3. LLM-generated prose (thesis, catalysts, risks, watch_list, highlights).
     # These are not in canonical_store; we surface them explicitly so the

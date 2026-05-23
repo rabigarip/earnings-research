@@ -254,7 +254,10 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
     try:
         from src.services.render_provenance import write_provenance_xlsx
         provenance_path = out_path.with_suffix(".provenance.xlsx")
-        write_provenance_xlsx(ticker, provenance_path, memo_data=memo_data)
+        write_provenance_xlsx(ticker, provenance_path,
+                                memo_data=memo_data,
+                                payload=payload,
+                                peer_rows=peer_rows or None)
     except Exception as _exc:
         import logging as _logging
         _logging.getLogger(__name__).warning(
