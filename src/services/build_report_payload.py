@@ -507,48 +507,75 @@ def _compute_memo(
         next_quarter_consensus_source = "MarketScreener"
         log.info("[forwards] %s: MS quarterly hit (rev=%s, eps=%s)",
                  _ticker_log, next_quarter_consensus_revenue, next_quarter_consensus_eps)
-    if next_quarter_consensus_revenue is None and next_quarter_consensus_eps is None and next_quarter_label:
+    # Cascade now fires when ANY of the four target fields (rev, eps,
+    # ebitda, ni) is missing — not only when both rev AND eps are None.
+    # The previous gate locked out MS-annual÷4 for BKMB-style names
+    # where MS quarterly carried a partial row (revenue from a different
+    # source) but the OTHER fields stayed empty. Each cascade layer
+    # contributes whatever it has; missing fields get supplemented.
+    needs_cascade = (
+        next_quarter_label
+        and (next_quarter_consensus_revenue is None
+             or next_quarter_consensus_eps is None
+             or next_quarter_consensus_ebitda is None
+             or next_quarter_consensus_ni is None)
+    )
+    if needs_cascade:
         ticker_for_fallback = getattr(company, "ticker", "") or out.get("ticker", "")
-        log.info("[forwards] %s: MS quarterly empty for label=%r — trying cascade",
-                 _ticker_log, next_quarter_label)
+        log.info("[forwards] %s: cascading for label=%r (rev=%s eps=%s eb=%s ni=%s)",
+                 _ticker_log, next_quarter_label,
+                 next_quarter_consensus_revenue, next_quarter_consensus_eps,
+                 next_quarter_consensus_ebitda, next_quarter_consensus_ni)
+
+        def _fill(src_rev, src_eps, src_src, src_eb=None, src_ni=None):
+            """Fill any missing field from a cascade layer's output. Returns
+            True if any field was newly populated."""
+            nonlocal next_quarter_consensus_revenue, next_quarter_consensus_eps
+            nonlocal next_quarter_consensus_ebitda, next_quarter_consensus_ni
+            nonlocal next_quarter_consensus_source
+            updated = False
+            if next_quarter_consensus_revenue is None and isinstance(src_rev, (int, float)):
+                next_quarter_consensus_revenue = src_rev
+                updated = True
+            if next_quarter_consensus_eps is None and isinstance(src_eps, (int, float)):
+                next_quarter_consensus_eps = src_eps
+                updated = True
+            if next_quarter_consensus_ebitda is None and isinstance(src_eb, (int, float)):
+                next_quarter_consensus_ebitda = src_eb
+                updated = True
+            if next_quarter_consensus_ni is None and isinstance(src_ni, (int, float)):
+                next_quarter_consensus_ni = src_ni
+                updated = True
+            if updated and not next_quarter_consensus_source and src_src:
+                next_quarter_consensus_source = src_src
+            return updated
+
         inv_rev, inv_eps, inv_src = _next_q_from_investing(ticker_for_fallback, next_quarter_label)
-        log.info("[forwards] %s: Investing returned rev=%s, eps=%s, src=%s",
+        log.info("[forwards] %s: Investing returned rev=%s eps=%s src=%s",
                  _ticker_log, inv_rev, inv_eps, inv_src)
-        if inv_rev is not None or inv_eps is not None:
-            next_quarter_consensus_revenue = inv_rev
-            next_quarter_consensus_eps = inv_eps
-            next_quarter_consensus_source = inv_src
-        else:
-            ya_rev, ya_eps, ya_src = _next_q_from_yahoo(ticker_for_fallback)
-            log.info("[forwards] %s: Yahoo returned rev=%s, eps=%s",
-                     _ticker_log, ya_rev, ya_eps)
-            if ya_rev is not None or ya_eps is not None:
-                next_quarter_consensus_revenue = ya_rev
-                next_quarter_consensus_eps = ya_eps
-                next_quarter_consensus_source = ya_src
-            else:
-                # Final fallback: MS annual forecast ÷ 4. Used for GCC / EM
-                # names where MS publishes annual estimates but no per-quarter
-                # breakdown (BKMB.OM is the canonical case). Also surfaces
-                # EBITDA and Net Income quarterly proxies that the cascade
-                # above can't derive.
-                a_rev, a_eps, a_src, a_eb, a_ni = _next_q_from_ms_annual(
-                    ms_annual_forecasts, next_quarter_label, ms_eps_dividend_forecasts,
-                )
-                log.info("[forwards] %s: MS-annual÷4 returned rev=%s eps=%s eb=%s ni=%s",
-                         _ticker_log, a_rev, a_eps, a_eb, a_ni)
-                if any(v is not None for v in (a_rev, a_eps, a_eb, a_ni)):
-                    next_quarter_consensus_revenue = a_rev
-                    next_quarter_consensus_eps = a_eps
-                    next_quarter_consensus_ebitda = a_eb
-                    next_quarter_consensus_ni = a_ni
-                    next_quarter_consensus_source = a_src
-                else:
-                    log.warning("[forwards] %s: ALL cascade layers empty — "
-                                "ms_annual periods=%s, next_q_label=%r",
-                                _ticker_log,
-                                ((ms_annual_forecasts or {}).get("annual") or {}).get("periods"),
-                                next_quarter_label)
+        _fill(inv_rev, inv_eps, inv_src)
+
+        ya_rev, ya_eps, ya_src = _next_q_from_yahoo(ticker_for_fallback)
+        log.info("[forwards] %s: Yahoo returned rev=%s eps=%s", _ticker_log, ya_rev, ya_eps)
+        _fill(ya_rev, ya_eps, ya_src)
+
+        # Final fallback: MS annual÷4. Always run when needed — even if
+        # earlier layers filled rev, MS-annual÷4 still provides NI and
+        # EBITDA proxies that Investing/Yahoo don't expose quarterly.
+        a_rev, a_eps, a_src, a_eb, a_ni = _next_q_from_ms_annual(
+            ms_annual_forecasts, next_quarter_label, ms_eps_dividend_forecasts,
+        )
+        log.info("[forwards] %s: MS-annual÷4 returned rev=%s eps=%s eb=%s ni=%s",
+                 _ticker_log, a_rev, a_eps, a_eb, a_ni)
+        _fill(a_rev, a_eps, a_src, a_eb, a_ni)
+
+        if all(v is None for v in (next_quarter_consensus_revenue, next_quarter_consensus_eps,
+                                      next_quarter_consensus_ebitda, next_quarter_consensus_ni)):
+            log.warning("[forwards] %s: ALL cascade layers empty — "
+                        "ms_annual periods=%s, next_q_label=%r",
+                        _ticker_log,
+                        ((ms_annual_forecasts or {}).get("annual") or {}).get("periods"),
+                        next_quarter_label)
 
     out["next_quarter_consensus_revenue"] = next_quarter_consensus_revenue
     out["next_quarter_consensus_eps"] = next_quarter_consensus_eps

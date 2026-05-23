@@ -534,6 +534,59 @@ def render_valuation_slide(prs, data: ValuationData):
 
 # ── Data adapter ──────────────────────────────────────────────
 
+def _load_ms_calendar_from_snapshot(ticker: str) -> dict | None:
+    """Load `quarterly_results` directly from the committed MS calendar
+    snapshot under data/marketscreener/, bypassing the pipeline. Used
+    when `payload.ms_calendar_events` arrives as None despite the
+    snapshot existing on disk (common when fetch_marketscreener_pages
+    flags PARTIAL because live HTTP 403'd, even though the snapshot
+    fallback fed the parser successfully).
+
+    Resolves the ticker → MS slug → ISIN via company_master, builds the
+    runtime cache prefix (`ms_<ticker>_<isin>_<slug>`), points at the
+    snapshot file, parses with the production parser, and returns the
+    `quarterly_results` block.
+
+    Returns None when company isn't curated for MS, the snapshot file
+    is absent, or parsing fails.
+    """
+    try:
+        from src.storage.db import load_company
+    except Exception:
+        return None
+    row = load_company(ticker) or {}
+    slug = (row.get("marketscreener_id") or "").strip()
+    isin = (row.get("isin") or "").strip() or "noisin"
+    if not slug:
+        return None
+    # Match the cache slug shape used by the production fetcher path.
+    t_safe = ticker.replace(".", "_").strip() or "unknown"
+    cache_slug = f"ms_{t_safe}_{isin}_{slug}_calendar"
+    import re as _re_load
+    safe = _re_load.sub(r"[^a-zA-Z0-9-]", "_", cache_slug)[:80]
+    try:
+        from src.config import root
+        snapshot_path = root() / "data" / "marketscreener" / f"ms_{safe}.html"
+    except Exception:
+        return None
+    if not snapshot_path.exists():
+        return None
+    try:
+        html = snapshot_path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    try:
+        from bs4 import BeautifulSoup
+        from src.providers.marketscreener_pages import _parse_quarterly_results_table
+        soup = BeautifulSoup(html, "lxml")
+        qr = _parse_quarterly_results_table(soup)
+    except Exception:
+        return None
+    if not (qr.get("quarters") and qr.get("rows")):
+        return None
+    return qr
+
+
 def _surprise_history_from_ms_calendar(
         ms_calendar_events: dict | None) -> tuple[list[dict], str]:
     """Derive a surprise history from MS's /calendar/ quarterly_results.
@@ -897,14 +950,42 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     # neither actuals nor estimates for BKMB / OQEP / ADNOCDRILL), derive
     # it from MS's /calendar/ quarterly_results table which DOES carry
     # released + forecast per quarter.
+    #
+    # Two-tier fallback:
+    #   1. `ms_calendar_events` parameter (passed by the pipeline). This
+    #      is the normal path when fetch_marketscreener_pages succeeded.
+    #   2. Direct snapshot read. The pipeline plumbing can drop the
+    #      calendar payload silently (status=PARTIAL with HTTP 403 noise
+    #      from live attempts). In that case the data DOES exist as a
+    #      committed snapshot under data/marketscreener/ — load it
+    #      directly so we don't lose the chart over a plumbing miss.
     surprise_metric_label = "EPS"
     if not surprise_history:
+        # Tier 1: pipeline-supplied
         derived, derived_label = _surprise_history_from_ms_calendar(ms_calendar_events)
         if derived:
             log.info("[earnings-history] %s: using MS calendar fallback "
                      "(%d quarters of %s data)", ticker, len(derived), derived_label)
             surprise_history = derived
             surprise_metric_label = derived_label or "EPS"
+        else:
+            # Tier 2: direct snapshot load. Bypasses the pipeline entirely.
+            log.info("[earnings-history] %s: ms_calendar_events arrived empty — "
+                     "trying direct snapshot read", ticker)
+            try:
+                snapshot_qr = _load_ms_calendar_from_snapshot(ticker)
+            except Exception as exc:
+                log.warning("[earnings-history] %s: snapshot read failed: %s", ticker, exc)
+                snapshot_qr = None
+            if snapshot_qr:
+                derived, derived_label = _surprise_history_from_ms_calendar(
+                    {"quarterly_results": snapshot_qr}
+                )
+                if derived:
+                    log.info("[earnings-history] %s: snapshot fallback produced "
+                             "%d quarters of %s data", ticker, len(derived), derived_label)
+                    surprise_history = derived
+                    surprise_metric_label = derived_label or "EPS"
 
     # Optional 5y forward-P/E history if upstream surfaced it; today
     # `valuation_historical` carries the FY-grouped period/pe pair only.
