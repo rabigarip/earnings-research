@@ -2,11 +2,80 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import statistics
+from pathlib import Path
 import yfinance as yf
 
 logger = logging.getLogger(__name__)
+
+
+# ── Persistent P/B cache ─────────────────────────────────────────
+#
+# Yahoo's `priceToBook` field flakes intermittently for our GCC peer
+# universe (QNBK.QA, 1180.SR, ENBD.AE, etc.) — same ticker returns a
+# real value one call and `null` the next. Investing's equity page
+# doesn't carry book value at all. The fix: cache the most recent
+# successful value per peer and serve it when the live call returns
+# nothing usable. The cache file is in /tmp on Render (writable) or
+# the repo's `cache/` dir locally.
+
+def _peer_cache_path() -> Path:
+    """Resolve a writable cache file. Falls back to /tmp on read-only
+    Render filesystems."""
+    try:
+        from src.config import root
+        p = root() / "cache" / "peer_pb_cache.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        # Probe write — bail to /tmp if read-only.
+        if not p.exists():
+            p.write_text("{}", encoding="utf-8")
+        return p
+    except Exception:
+        return Path("/tmp/earnings-peer-pb-cache.json")
+
+
+def _read_peer_cache() -> dict[str, dict]:
+    try:
+        return json.loads(_peer_cache_path().read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _write_peer_cache(cache: dict[str, dict]) -> None:
+    try:
+        _peer_cache_path().write_text(json.dumps(cache, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _iso_now() -> str:
+    """UTC ISO-8601 timestamp for cache annotation."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _derive_pb(info: dict, current_price: float | None) -> float | None:
+    """Pull P/B from yfinance info with two derivations as fallback.
+
+    1. `priceToBook` — the official field
+    2. `priceToBookRatio` — older yfinance / alternate naming
+    3. `current_price / bookValue` — compute when only book-per-share is given
+
+    Returns None when none of those produce a positive ratio.
+    """
+    raw = info.get("priceToBook")
+    if isinstance(raw, (int, float)) and raw > 0:
+        return float(raw)
+    alt = info.get("priceToBookRatio")
+    if isinstance(alt, (int, float)) and alt > 0:
+        return float(alt)
+    bv = info.get("bookValue")
+    if (isinstance(bv, (int, float)) and bv > 0
+            and isinstance(current_price, (int, float)) and current_price > 0):
+        return float(current_price) / float(bv)
+    return None
 
 
 def fetch_peer_multiples(peer_tickers: list[str]) -> dict:
@@ -126,6 +195,8 @@ def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
     Used by the slide-3 peer comparables table.
     """
     rows: list[dict] = []
+    pb_cache = _read_peer_cache()
+    cache_dirty = False
     for t in peer_tickers or []:
         tt = (t or "").strip()
         if not tt:
@@ -185,8 +256,25 @@ def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
         # P/B (Yahoo: priceToBook). For banks this doubles as our P/TBV
         # proxy — yfinance doesn't expose tangibleBookValue separately, so
         # bank decks render P/B in the P/TBV column with that caveat.
-        pb_raw = info.get("priceToBook")
-        pb_val = float(pb_raw) if isinstance(pb_raw, (int, float)) and pb_raw > 0 else None
+        # Yahoo flakes on `priceToBook` for GCC peers — `_derive_pb`
+        # tries the field, then the legacy field name, then computes from
+        # price ÷ bookValue. If that ALSO fails, fall back to the most
+        # recent cached value (preserves continuity across runs and
+        # prevents the table from flipping from 1.5x → '—' → 1.5x on
+        # successive generations).
+        cur_price_for_pb = info.get("currentPrice") or info.get("regularMarketPrice")
+        pb_val = _derive_pb(info, cur_price_for_pb)
+        if pb_val is not None:
+            # Persist the fresh value so next run's flake doesn't surface.
+            pb_cache[tt] = {"pb": pb_val, "as_of": _iso_now()}
+            cache_dirty = True
+        else:
+            cached = pb_cache.get(tt) or {}
+            cached_pb = cached.get("pb")
+            if isinstance(cached_pb, (int, float)) and cached_pb > 0:
+                pb_val = float(cached_pb)
+                logger.info("peer %s: priceToBook unavailable live — using cached %.2fx (as of %s)",
+                            tt, pb_val, cached.get("as_of") or "?")
         pb_fmt = f"{pb_val:.1f}x" if pb_val else "—"
         # EV/EBITDA (Yahoo: enterpriseToEbitda). Meaningless for banks.
         ev_raw = info.get("enterpriseToEbitda")
@@ -206,5 +294,7 @@ def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
             "ret_1y": ret_1y,
             "ret_1y_fmt": ret_1y_fmt,
         })
+    if cache_dirty:
+        _write_peer_cache(pb_cache)
     return rows
 
