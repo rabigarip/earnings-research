@@ -111,20 +111,43 @@ def _ms_slug_for(ticker: str, companies: list[dict]) -> str | None:
     return None
 
 
+def _isin_for(ticker: str, companies: list[dict]) -> str:
+    """Return the curated ISIN for `ticker`, or empty string."""
+    for c in companies:
+        if (c.get("ticker") or "").upper() == ticker.upper():
+            return (c.get("isin") or "").strip()
+    return ""
+
+
 def _base_url(ms_slug: str) -> str:
     return f"https://www.marketscreener.com/quote/stock/{ms_slug}/"
 
 
-def _refresh_ticker(ticker: str, ms_slug: str, fetchers, delay: float) -> dict[str, bool]:
+def _refresh_ticker(ticker: str, ms_slug: str, isin: str, fetchers,
+                     delay: float) -> dict[str, bool]:
     """Run every page-fetcher for one ticker, capture HTML to the
-    repo-tracked snapshot dir. Returns a per-page ok/fail map."""
+    repo-tracked snapshot dir. Returns a per-page ok/fail map.
+
+    CRITICAL: the runtime pipeline builds its cache_key_prefix as
+      `ms_<ticker>_<isin>_<slug>`
+    (see `_cache_key_prefix` in src/services/fetch_marketscreener_pages.py).
+    The snapshot files we write here MUST use the same prefix or the
+    runtime won't find them. Earlier versions of this script used a
+    ticker-only prefix and the snapshots silently never loaded —
+    leaving the Q+1 table empty on BKMB even after a successful refresh.
+    """
     base = _base_url(ms_slug)
+    # Mirror src/services/fetch_marketscreener_pages._cache_key_prefix.
+    t = (ticker or "").replace(".", "_").strip() or "unknown"
+    i = (isin or "noisin").strip() or "noisin"
+    s = (ms_slug or "").strip() or "unknown"
+    cache_prefix = f"ms_{t}_{i}_{s}"
     out: dict[str, bool] = {}
     for page_name, fn in fetchers:
         try:
             # The fetcher writes to data/marketscreener/ via _fetch_page
             # whenever MS_TRACKED_REFRESH=1 (we set it in main()).
-            _, status = fn(base, cache_key_prefix=ticker)
+            _, status = fn(base, cache_key_prefix=cache_prefix)
             ok = status.status in ("success", "partial")
             out[page_name] = ok
         except Exception as exc:
@@ -189,7 +212,8 @@ def main() -> int:
             print(f"[{i}/{n_targets}] {tk:18} -> SKIP (no marketscreener_id)")
             continue
         print(f"[{i}/{n_targets}] {tk:18} -> {slug}")
-        result = _refresh_ticker(tk, slug, fetchers, args.delay)
+        isin = _isin_for(tk, companies)
+        result = _refresh_ticker(tk, slug, isin, fetchers, args.delay)
         ok = sum(1 for v in result.values() if v)
         kinds = " ".join(k for k, v in result.items() if v)
         print(f"      {ok}/{n_pages} pages ok: {kinds}")
