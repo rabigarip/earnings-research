@@ -489,16 +489,36 @@ def _compute_memo(
     # populating Net Income and EPS. Removed.
     next_quarter_consensus_revenue = None
     next_quarter_consensus_eps = None
+    next_quarter_consensus_ebitda = None
+    next_quarter_consensus_ni = None
+    # MS QUARTERLY FORECAST IS GROUND TRUTH — pull all four metrics from
+    # the same row at the same time so downstream consumers see a
+    # consistent same-source consensus. Previously only `net_sales` was
+    # captured here, and EBITDA / NI were left for the cascade to fill
+    # from a *different* source (Investing / MS-annual÷4), giving SABIC
+    # the famous 0.94 EBITDA (MS) / 3.01 revenue (Investing) mismatch.
     if ms_quarterly_forecasts and next_quarter_label:
         qtr = ms_quarterly_forecasts.get("quarterly", {})
         periods = qtr.get("periods", [])
         net_sales = qtr.get("net_sales", [])
+        ebitda_arr = qtr.get("ebitda", [])
+        ni_arr     = qtr.get("net_income", [])
+        eps_arr    = qtr.get("eps", [])
+        target_norm = str(next_quarter_label).replace(" ", "")
         for i, p in enumerate(periods):
-            if p == next_quarter_label or (str(next_quarter_label).replace(" ", "") in str(p).replace(" ", "")):
-                next_quarter_consensus_revenue = net_sales[i] if i < len(net_sales) else None
+            if p == next_quarter_label or target_norm in str(p).replace(" ", ""):
+                if i < len(net_sales)  and isinstance(net_sales[i],  (int, float)):
+                    next_quarter_consensus_revenue = net_sales[i]
+                if i < len(ebitda_arr) and isinstance(ebitda_arr[i], (int, float)):
+                    next_quarter_consensus_ebitda = ebitda_arr[i]
+                if i < len(ni_arr)     and isinstance(ni_arr[i],     (int, float)):
+                    next_quarter_consensus_ni = ni_arr[i]
+                if i < len(eps_arr)    and isinstance(eps_arr[i],    (int, float)):
+                    next_quarter_consensus_eps = eps_arr[i]
                 break
-    # Next-quarter EPS: from consensus_estimates (quarterly) if available
-    if consensus and next_quarter_label:
+    # Next-quarter EPS fallback: from consensus_estimates (quarterly).
+    # Only used when MS quarterly didn't carry an EPS for this period.
+    if next_quarter_consensus_eps is None and consensus and next_quarter_label:
         for est in consensus:
             if est.period_label and (next_quarter_label in est.period_label or est.period_label in (next_quarter_label or "")):
                 next_quarter_consensus_eps = est.eps
@@ -509,13 +529,16 @@ def _compute_memo(
     # cascade through Investing.com → Yahoo Finance so the Q+1 column doesn't
     # render as em-dashes when free fallbacks exist.
     next_quarter_consensus_source = None
-    next_quarter_consensus_ebitda = None
-    next_quarter_consensus_ni = None
     _ticker_log = getattr(company, "ticker", "") or out.get("ticker", "?")
-    if next_quarter_consensus_revenue is not None or next_quarter_consensus_eps is not None:
+    if any(v is not None for v in (next_quarter_consensus_revenue,
+                                       next_quarter_consensus_eps,
+                                       next_quarter_consensus_ebitda,
+                                       next_quarter_consensus_ni)):
         next_quarter_consensus_source = "MarketScreener"
-        log.info("[forwards] %s: MS quarterly hit (rev=%s, eps=%s)",
-                 _ticker_log, next_quarter_consensus_revenue, next_quarter_consensus_eps)
+        log.info("[forwards] %s: MS quarterly hit (rev=%s eps=%s eb=%s ni=%s)",
+                 _ticker_log, next_quarter_consensus_revenue,
+                 next_quarter_consensus_eps, next_quarter_consensus_ebitda,
+                 next_quarter_consensus_ni)
     # Cascade now fires when ANY of the four target fields (rev, eps,
     # ebitda, ni) is missing — not only when both rev AND eps are None.
     # The previous gate locked out MS-annual÷4 for BKMB-style names
@@ -647,13 +670,29 @@ def _compute_memo(
         out["calendar_prior_quarter_released"] = calendar_prior
         out["calendar_same_q_prior_yr_released"] = calendar_same_ly
         out["calendar_quarterly_rows"] = [{"metric_key": r.get("metric_key"), "metric_label": r.get("metric_label"), "unit": r.get("unit")} for r in rows_qr if r.get("metric_key") != "announcement_date"]
-        # Override consensus from calendar when available (calendar is from same page as earnings date)
-        if calendar_next.get("net_sales") is not None:
+        # Calendar fill — ONLY when /finances/?type=trimestral didn't yield
+        # a value. The previous unconditional override caused SABIC to show
+        # 3.01 SARB revenue (a calendar-parser value) instead of MS quarterly
+        # 2.614 SARB. Calendar and /finances/ should agree, but when they
+        # don't, /finances/ has historically been the more reliable parse.
+        if (out.get("next_quarter_consensus_revenue") is None
+            and calendar_next.get("net_sales") is not None):
             out["next_quarter_consensus_revenue"] = calendar_next["net_sales"]
-            out["next_quarter_consensus_source"] = "MarketScreener"
-        if calendar_next.get("eps") is not None:
+            if not out.get("next_quarter_consensus_source"):
+                out["next_quarter_consensus_source"] = "MarketScreener"
+        if (out.get("next_quarter_consensus_eps") is None
+            and calendar_next.get("eps") is not None):
             out["next_quarter_consensus_eps"] = calendar_next["eps"]
-            out["next_quarter_consensus_source"] = "MarketScreener"
+            if not out.get("next_quarter_consensus_source"):
+                out["next_quarter_consensus_source"] = "MarketScreener"
+        # Also let calendar fill EBITDA / NI when /finances/ was empty for
+        # them — those keys exist on the calendar payload too.
+        if (out.get("next_quarter_consensus_ebitda") is None
+            and calendar_next.get("ebitda") is not None):
+            out["next_quarter_consensus_ebitda"] = calendar_next["ebitda"]
+        if (out.get("next_quarter_consensus_ni") is None
+            and calendar_next.get("net_income") is not None):
+            out["next_quarter_consensus_ni"] = calendar_next["net_income"]
 
     # Next-quarter YoY revenue / NI growth: prior-year same quarter from quarterly_actuals
     # e.g. next = 2026 Q1 → prior year = 2025 Q1; growth = (Q1'26 - Q1'25)/Q1'25 (we may not have Q1'26 actuals, so we use consensus for context or leave blank)

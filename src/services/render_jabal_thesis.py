@@ -724,10 +724,16 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
     val_fwd = cv.get("valuation_forward")
     fwd = val_fwd.value if val_fwd and isinstance(val_fwd.value, dict) else {}
 
-    rev_q_consensus = next((fwd.get(k) for k in ("revenue_next_q",)
-                            if isinstance(fwd.get(k), (int, float))), None)
-    eps_q_consensus = next((fwd.get(k) for k in ("eps_next_q",)
-                            if isinstance(fwd.get(k), (int, float))), None)
+    # Defer canonical_store reads until AFTER we've consulted MS quarterly.
+    # MarketScreener publishes the entire quarterly forecast table (rev,
+    # EBITDA, NI, EPS, all four metrics, with the same labels and units)
+    # — when present, that table IS the consensus, full stop. Reading
+    # `fwd.revenue_next_q` first lets Investing's value override MS, which
+    # is the bug that produced SABIC's 3.01 SARB revenue (Investing) /
+    # 0.94 SARB EBITDA (MS) — mixed sources giving a fake 31% margin and
+    # garbage YoY/QoQ deltas.
+    rev_q_consensus = None
+    eps_q_consensus = None
     ebitda_q_consensus = None
     ni_q_consensus = None
     nii_q_consensus = None
@@ -759,23 +765,31 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
         def _scale(v):
             return v * unit_scale if isinstance(v, (int, float)) else v
         if next_est:
-            rev_q_consensus    = rev_q_consensus    or _scale(next_est.get("revenue"))
+            # MS quarterly forecast WINS — when MS publishes a forward-
+            # dated Q+1 row, every metric in that row is the canonical
+            # consensus. Don't `or` against canonical_store (Investing-
+            # sourced) values; mixing sources gave us SABIC's 3.01B
+            # revenue (Investing) + 0.94B EBITDA (MS) → fake 31% margin.
+            rev_q_consensus    = _scale(next_est.get("revenue"))
             ebitda_q_consensus = _scale(next_est.get("ebitda"))
             ni_q_consensus     = _scale(next_est.get("net_income"))
             nii_q_consensus    = _scale(next_est.get("nii"))
-            eps_q_consensus    = eps_q_consensus    or next_est.get("eps")
+            eps_q_consensus    = next_est.get("eps")
         # ANALYTICAL CONTRACT: YoY in a "Q<n> Earnings Expectations" table
         # is the forecast-vs-prior-year-actual comparison — what the next
         # quarter's consensus implies vs the same quarter last year. Falling
         # back to last-reported YoY would mislabel the column.
         # Use same-source pairing: MS forecast vs MS prior-year actual.
         if next_est and prior_of_next:
+            # ALL four metrics computed from MS pair when both sides exist.
+            # Previously revenue + EPS deferred to Investing — but if MS
+            # already has the forecast AND the prior-year actual, that's
+            # the cleanest YoY: same source, same units, no scale fights.
+            yoy_rev    = _yoy_pct(next_est.get("revenue"),    prior_of_next.get("revenue"))
             yoy_ebitda = _yoy_pct(next_est.get("ebitda"),     prior_of_next.get("ebitda"))
             yoy_nii    = _yoy_pct(next_est.get("nii"),        prior_of_next.get("nii"))
             yoy_ni     = _yoy_pct(next_est.get("net_income"), prior_of_next.get("net_income"))
-            # Revenue + EPS YoY come from the Investing fallback below
-            # so the YoY denominator matches the source of the displayed
-            # CONSENSUS (Investing wins for those rows via trust ladder).
+            yoy_eps    = _yoy_pct(next_est.get("eps"),        prior_of_next.get("eps"))
             curr_rev_ms = next_est.get("revenue") or 0
             prev_rev_ms = prior_of_next.get("revenue") or 0
             curr_eb_ms  = next_est.get("ebitda")
@@ -787,6 +801,7 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
         # QoQ: next-Q forecast vs immediately-prior-quarter actual.
         if next_est and prior_quarter:
             qoq_rev    = _yoy_pct(next_est.get("revenue"),    prior_quarter.get("revenue"))
+            qoq_eps    = _yoy_pct(next_est.get("eps"),        prior_quarter.get("eps"))
             qoq_ebitda = _yoy_pct(next_est.get("ebitda"),     prior_quarter.get("ebitda"))
             qoq_nii    = _yoy_pct(next_est.get("nii"),        prior_quarter.get("nii"))
             qoq_ni     = _yoy_pct(next_est.get("net_income"), prior_quarter.get("net_income"))
