@@ -234,7 +234,54 @@ def _peer_label(ticker: str, sector: str = "", industry: str = "") -> str:
     return f"Selected {region.lower()} peers" if region != "Global" else "Selected global peers"
 
 
-def _peer_table(slide, top: float, peers: list[dict], *, is_bank: bool = False):
+def _peer_avg_row(peers: list[dict], *, is_bank: bool) -> dict:
+    """Compute the 'PEER AVG' header row from the numeric fields on
+    each peer dict. Only ratio metrics are averaged (P/E, P/B / P/TBV,
+    EV/EBITDA, dividend yield, 1Y return); the market-cap column is
+    left as '—' since averaging mcaps across peers of different sizes
+    isn't analytically useful."""
+    import re as _re_avg
+    def _vals(key):
+        return [p.get(key) for p in peers if isinstance(p.get(key), (int, float))]
+    def _mean(xs):
+        return (sum(xs) / len(xs)) if xs else None
+    def _fmt_x(v):
+        return f"{v:.1f}x" if isinstance(v, (int, float)) else "—"
+    def _fmt_pct(v, signed=False):
+        if not isinstance(v, (int, float)): return "—"
+        return f"{v:+.1f}%" if signed else f"{v:.2f}%"
+
+    # div_yield_fmt stores strings like "5.10%" — recover the number.
+    def _div_mean():
+        ys = []
+        for p in peers:
+            s = str(p.get("div_yield_fmt") or "").strip()
+            if not s or s == "—": continue
+            m = _re_avg.search(r"([+\-]?\d+(?:\.\d+)?)", s)
+            if m:
+                try: ys.append(float(m.group(1)))
+                except ValueError: pass
+        return _mean(ys)
+
+    pe_avg = _mean(_vals("pe"))
+    pb_avg = _mean(_vals("pb"))
+    ev_avg = _mean(_vals("ev_ebitda"))
+    ret_avg = _mean(_vals("ret_1y"))
+    div_avg = _div_mean()
+    return {
+        "name": "Peer Average",
+        "ticker": "",
+        "market_cap_fmt": "—",
+        "pe": pe_avg,            "pe_fmt": _fmt_x(pe_avg),
+        "pb": pb_avg,            "pb_fmt": _fmt_x(pb_avg),
+        "ev_ebitda": ev_avg,     "ev_ebitda_fmt": _fmt_x(ev_avg),
+        "div_yield_fmt": _fmt_pct(div_avg) if div_avg is not None else "—",
+        "ret_1y": ret_avg,       "ret_1y_fmt": _fmt_pct(ret_avg, signed=True),
+    }
+
+
+def _peer_table(slide, top: float, peers: list[dict], *, is_bank: bool = False,
+                 subject_row: dict | None = None):
     """Rows: name, ticker, mcap, P/E, then a sector-appropriate book/
     enterprise multiple set, dividend yield, 1Y return.
 
@@ -267,7 +314,21 @@ def _peer_table(slide, top: float, peers: list[dict], *, is_bank: bool = False):
     # sign-aware colour and the alignment loop below.
     ret_col_idx = len(headers) - 1
 
-    for ri, p in enumerate(peers[:5]):
+    # Build the row list. Mohamed (2026-05): "let's add bank muscat on
+    # it as the second row, and the first row being an average row, and
+    # have both first two rows in bold." Subject + Peer Average prepend
+    # the peer list and render bold so the reader can gauge the subject
+    # against the comp set without scanning.
+    avg_row = _peer_avg_row(peers, is_bank=is_bank) if peers else None
+    rendered_rows: list[tuple[dict, bool]] = []   # (row_dict, is_bold)
+    if avg_row:
+        rendered_rows.append((avg_row, True))
+    if subject_row:
+        rendered_rows.append((subject_row, True))
+    for p in peers[:5]:
+        rendered_rows.append((p, False))
+
+    for ri, (p, is_bold) in enumerate(rendered_rows):
         y = top + row_h + ri * row_h
         if ri % 2 == 1:
             band = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,
@@ -304,8 +365,14 @@ def _peer_table(slide, top: float, peers: list[dict], *, is_bank: bool = False):
             if i == ret_col_idx and isinstance(ret_val, (int, float)):
                 color = signed_color(ret_val)
             _text(slide, x, y, col_w[i] - 0.05, row_h, str(cell),
-                  size=SZ_BODY, color=color, align=align)
+                  size=SZ_BODY, color=color, align=align, bold=is_bold)
             x += col_w[i]
+    # Faint separator under the bold rows so the reader sees where the
+    # "comparable" section starts.
+    if rendered_rows and rendered_rows[0][1]:
+        bold_count = sum(1 for _, b in rendered_rows if b)
+        _hrule(slide, MARGIN_L, top + row_h + bold_count * row_h - 0.02,
+                CONTENT_W, color=MUTED)
 
 
 # ── Sentiment row ─────────────────────────────────────────────
@@ -424,6 +491,10 @@ class ValuationData:
     gen_date: str
     total_pages: int = 3
     is_bank: bool = False
+    # Subject row — same shape as a peer dict, prepended to the peer table
+    # so the reader sees Bank Muscat (or any subject) inline with its
+    # comps. Bolded along with the Peer Average row.
+    subject_peer_row: dict | None = None
     # Earnings-history chart inputs (replaces the legacy "Market Sentiment"
     # row at the bottom of slide 3 — duplicates info already on slide 1).
     surprise_history: list[dict] | None = None
@@ -502,7 +573,8 @@ def render_valuation_slide(prs, data: ValuationData):
     # Peer table
     _section_label(slide, MARGIN_L, 4.97, CONTENT_W,
                     f"Peer Comparables  ·  {data.peer_table_label}")
-    _peer_table(slide, 5.29, data.peers, is_bank=data.is_bank)
+    _peer_table(slide, 5.29, data.peers, is_bank=data.is_bank,
+                 subject_row=data.subject_peer_row)
 
     # Earnings history (replaces the legacy "Market Sentiment" row — the
     # consensus distribution + average target are already on slide 1, and
@@ -1138,6 +1210,83 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     if vh and isinstance(vh.value, dict):
         pe_history = vh.value.get("forward_pe_history") or None
 
+    # Build the subject row that prepends the peer table. Pulls the same
+    # multiples the peer comps show (P/E, P/B / P/TBV, div yield, 1Y
+    # return, market cap) from canonical_store for direct visual gauge.
+    subject_peer_row = None
+    try:
+        _mcap_obs = cv.get("market_cap")
+        _mcap = _mcap_obs.value if _mcap_obs else None
+        _mcap_num = float(_mcap) if isinstance(_mcap, (int, float)) else None
+        # MS publishes mcap in millions; normalize to raw units when needed.
+        if _mcap_num and _mcap_obs and (_mcap_obs.canonical_source or "").lower() == "marketscreener":
+            _mcap_num *= 1_000_000.0
+        def _fmt_mcap(v):
+            if not isinstance(v, (int, float)) or v <= 0: return "—"
+            if v >= 1e9: return f"{currency.upper()} {v/1e9:.1f}B" if currency else f"{v/1e9:.1f}B"
+            if v >= 1e6: return f"{currency.upper()} {v/1e6:.0f}M" if currency else f"{v/1e6:.0f}M"
+            return f"{v:,.0f}"
+
+        # Forward P/E — prefer the chart's current_pe (already vetted by
+        # the sanity guard); fall back to valuation_forward.fwd_pe.
+        _pe_num = current_pe
+        if not isinstance(_pe_num, (int, float)):
+            _vf = cv.get("valuation_forward")
+            _vfv = _vf.value if _vf and isinstance(_vf.value, dict) else {}
+            _pe_num = _vfv.get("fwd_pe") or _vfv.get("pe_fy1")
+
+        # P/B from canonical valuation_forward or — for banks — Yahoo's
+        # priceToBook surfaced under quote.
+        _pb_num = None
+        _vf_obs = cv.get("valuation_forward")
+        if _vf_obs and isinstance(_vf_obs.value, dict):
+            _pb_num = _vf_obs.value.get("price_to_book") or _vf_obs.value.get("priceToBook")
+        if not isinstance(_pb_num, (int, float)):
+            _q_obs = cv.get("quote")
+            if _q_obs and isinstance(_q_obs.value, dict):
+                _pb_num = _q_obs.value.get("priceToBook")
+
+        # EV/EBITDA — non-banks. Try valuation_forward first, then quote.
+        _ev_num = None
+        if _vf_obs and isinstance(_vf_obs.value, dict):
+            _ev_num = _vf_obs.value.get("enterprise_to_ebitda") or _vf_obs.value.get("enterpriseToEbitda")
+
+        # Dividend yield — already on slide 1 as a percent.
+        _dy_obs = cv.get("dividend_yield")
+        _dy_num = _dy_obs.value if _dy_obs and isinstance(_dy_obs.value, (int, float)) else None
+        if isinstance(_dy_num, dict):
+            _dy_num = _dy_num.get("yield") or _dy_num.get("dividend_yield")
+
+        # 1Y return — derive from close_series last vs ~252 trading days back.
+        _ret_1y = None
+        if close_series and len(close_series) >= 2:
+            try:
+                _first = next((float(p["close"]) for p in close_series
+                               if isinstance(p.get("close"), (int, float))), None)
+                _last_close = next((float(p["close"]) for p in reversed(close_series)
+                                     if isinstance(p.get("close"), (int, float))), None)
+                if _first and _last_close and _first > 0:
+                    _ret_1y = (_last_close / _first - 1.0) * 100.0
+            except (KeyError, ValueError, TypeError):
+                pass
+
+        subject_peer_row = {
+            "name": pname,
+            "ticker": ticker,
+            "market_cap_fmt": _fmt_mcap(_mcap_num),
+            "pe": _pe_num if isinstance(_pe_num, (int, float)) else None,
+            "pe_fmt": f"{_pe_num:.1f}x" if isinstance(_pe_num, (int, float)) else "—",
+            "pb": _pb_num if isinstance(_pb_num, (int, float)) else None,
+            "pb_fmt": f"{_pb_num:.1f}x" if isinstance(_pb_num, (int, float)) else "—",
+            "ev_ebitda": _ev_num if isinstance(_ev_num, (int, float)) else None,
+            "ev_ebitda_fmt": f"{_ev_num:.1f}x" if isinstance(_ev_num, (int, float)) else "—",
+            "div_yield_fmt": f"{_dy_num:.2f}%" if isinstance(_dy_num, (int, float)) and _dy_num > 0 else "—",
+            "ret_1y": _ret_1y,
+            "ret_1y_fmt": f"{_ret_1y:+.1f}%" if isinstance(_ret_1y, (int, float)) else "—",
+        }
+    except Exception:
+        subject_peer_row = None
+
     return ValuationData(
         company_name=pname,
         close_series=close_series,
@@ -1157,6 +1306,7 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
         analyst_name=analyst_name,
         gen_date=gen_date or datetime.utcnow().strftime("%d %b %Y"),
         is_bank=is_bank_flag,
+        subject_peer_row=subject_peer_row,
         surprise_history=surprise_history,
         surprise_metric_label=surprise_metric_label,
         ticker=ticker,

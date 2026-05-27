@@ -122,25 +122,22 @@ def _estimates_table(slide, top: float, rows: list[dict],
 
 def _annual_estimates_table(slide, top: float, rows: list[dict],
                               fy_labels: list[str]):
-    """Annual-FY fallback table — used when per-quarter analyst consensus
-    is unavailable on MS (only annual estimates exist). Columns: METRIC |
-    FY+1E | FY+2E | FY+3E | YoY % (FY+1E vs last FY actual).
+    """Annual-FY fallback table — columns: METRIC | FY+1 | FY+2 | FY+3 |
+    YoY (FY+1 vs last actual) | CAGR (FY+3 vs last actual, annualised).
 
-    Row dict shape: {metric, fy1, fy2, fy3, yoy}. Numeric YoY rendered with
-    signed colour; currency cells rendered as black text.
+    Row dict shape: {metric, fy1, fy2, fy3, yoy, cagr}. YoY + CAGR
+    rendered with signed colour; currency cells rendered as black text.
 
-    This swaps the per-quarter table when the consensus source label is
-    'MarketScreener (annual ÷ 4)' — that synthetic proxy distorts both
-    levels and YoY/QoQ for any seasonal name (banks, energy, retail). A
-    transparent annual view is the analyst-correct call there: show what
-    we trust rather than fabricate quarterly precision.
+    Mohamed (2026-05): "instead of the last column, or in addition we can
+    add the cagr since it shows a forward of three years." Kept both —
+    YoY anchors against the prior FY actual (short-term momentum read),
+    CAGR captures the multi-year trajectory implied by the strip.
     """
-    # Ensure we always have 3 FY labels — pad with em-dashes if MS only
-    # publishes 1-2 forecast years.
     fy = list(fy_labels) + ["—"] * (3 - len(fy_labels))
     headers = ["METRIC", fy[0].upper(), fy[1].upper(), fy[2].upper(),
-                f"YoY {fy[0]}"]
-    col_w   = [2.20, 1.10, 1.10, 1.10, 1.10]
+                f"YoY {fy[0]}", f"3Y CAGR"]
+    # Slightly tighter columns so the 6th column fits inside CONTENT_W.
+    col_w   = [1.90, 1.00, 1.00, 1.00, 1.10, 1.10]
     row_h   = 0.30
     header_top = top
     x = MARGIN_L
@@ -159,11 +156,11 @@ def _annual_estimates_table(slide, top: float, rows: list[dict],
             band.fill.solid(); band.fill.fore_color.rgb = CARD
             band.line.fill.background()
         x = MARGIN_L
-        for i, key in enumerate(["metric", "fy1", "fy2", "fy3", "yoy"]):
+        for i, key in enumerate(["metric", "fy1", "fy2", "fy3", "yoy", "cagr"]):
             val = row.get(key, "—")
             align = PP_ALIGN.LEFT if i == 0 else PP_ALIGN.RIGHT
             color = BLACK
-            if key == "yoy" and isinstance(val, (int, float)):
+            if key in ("yoy", "cagr") and isinstance(val, (int, float)):
                 color = signed_color(val)
                 val = f"{val:+.1f}%"
             elif val is None:
@@ -1059,6 +1056,7 @@ def _build_estimates_rows(cv: dict, quarterly: list | None = None,
 def _build_annual_rows(*, ms_annual_forecasts: dict | None,
                           ms_eps_dividend_forecasts: dict | None,
                           is_bank: bool, currency: str,
+                          bloomberg_bundle: dict | None = None,
                           ) -> tuple[list[dict], list[str], str]:
     """Build the annual-FY fallback table rows.
 
@@ -1067,7 +1065,134 @@ def _build_annual_rows(*, ms_annual_forecasts: dict | None,
 
     Returns ([], [], '') when MS doesn't carry annual data — caller falls
     back to the quarterly path.
+
+    SOURCE PRIORITY (Bloomberg overrides everything rule):
+      1. `bloomberg_bundle.annuals` when an uploaded Bloomberg FA xlsx
+         is on disk for the ticker — the deck shows the same FY values
+         the analyst sees on their BBG screen.
+      2. `ms_annual_forecasts` + `ms_eps_dividend_forecasts` — the
+         MarketScreener /finances/ + /valuation-dividend/ blocks.
     """
+    # ── Bloomberg path ─────────────────────────────────────────────
+    bbg_annuals = []
+    if isinstance(bloomberg_bundle, dict):
+        bbg_annuals = list(bloomberg_bundle.get("annuals") or [])
+    if bbg_annuals:
+        # Strip Current/LTM rows so we don't double-count alongside the
+        # chronological actuals + estimates.
+        bbg_annuals = [a for a in bbg_annuals if not a.get("is_ltm")]
+        # Anchor YoY against the LAST ACTUAL year, not "the entry before
+        # the first forecast we picked." With BBG showing FY25 Act + FY26-
+        # FY29 Est, the naive last-4 slice picked FY26 as the YoY base
+        # and made the FY27E YoY column look like 0% growth. Correct:
+        # base = last `is_estimate=False`, fwds = first 3 estimates after it.
+        actuals = [a for a in bbg_annuals if not a.get("is_estimate")]
+        estimates = [a for a in bbg_annuals if a.get("is_estimate")]
+        if not actuals or not estimates:
+            return [], [], ""
+        base = actuals[-1]
+        fwds = estimates[:3]
+        unit_suffix = f"{currency.upper()}M" if currency else "M"
+
+        def _money(v):
+            if not isinstance(v, (int, float)): return None
+            if abs(v) >= 100: return f"{v:,.0f}"
+            if abs(v) >= 10:  return f"{v:,.1f}"
+            return f"{v:,.2f}"
+
+        def _eps_fmt(v):
+            # 3 decimals — Bloomberg EPS values are sub-1.0 for many
+            # banks (BKMB FY26E = 0.035). At 2 decimals the entire
+            # forecast strip rounds to "0.03 / 0.04 / 0.04" which
+            # hides the trajectory the IC reader is looking for.
+            if not isinstance(v, (int, float)): return None
+            return f"{v:,.3f}"
+
+        def _yoy(num, den):
+            if not (isinstance(num, (int, float))
+                    and isinstance(den, (int, float)) and den != 0):
+                return None
+            return (num - den) / den * 100.0
+
+        import re as _re_bbg_fy
+        from datetime import datetime as _dt_bbg
+        _current_year = _dt_bbg.utcnow().year
+        def _fy_disp(label):
+            """Suffix convention requested by Mohamed (2026-05):
+                 A = actual (past FY)
+                 E = expected (current FY — book closes this year)
+                 F = forecast (future FYs beyond current)
+               Bloomberg labels are "FY 2026 Est" / "FY 2025"; we use the
+               year + is_estimate flag to assign A/E/F."""
+            s = str(label or "")
+            m = _re_bbg_fy.search(r"(\d{4})", s)
+            if not m: return s
+            yr = int(m.group(1))
+            if "est" not in s.lower():
+                return f"FY{yr}A"
+            return f"FY{yr}E" if yr == _current_year else f"FY{yr}F"
+
+        fy_disp = [_fy_disp(f.get("period_label")) for f in fwds]
+        while len(fy_disp) < 3:
+            fy_disp.append("—")
+
+        base_m = base.get("metrics") or {}
+        def _m(d, k):
+            v = d.get(k)
+            return float(v) if isinstance(v, (int, float)) else None
+
+        if is_bank:
+            metric_specs = [
+                (f"Revenue ({unit_suffix})", "revenue",    _money),
+                (f"Net Income ({unit_suffix})", "net_income", _money),
+                (f"EPS ({currency})",       "eps",        _eps_fmt),
+            ]
+        else:
+            metric_specs = [
+                (f"Revenue ({unit_suffix})", "revenue",    _money),
+                (f"EBITDA ({unit_suffix})", "ebitda",     _money),
+                (f"Net Income ({unit_suffix})", "net_income", _money),
+                (f"EPS ({currency})",       "eps",        _eps_fmt),
+            ]
+
+        def _cagr(end_v, base_v, years):
+            """Annualised compound growth rate as a percentage."""
+            if not (isinstance(end_v, (int, float))
+                    and isinstance(base_v, (int, float))
+                    and base_v > 0 and end_v > 0 and years > 0):
+                return None
+            return ((end_v / base_v) ** (1.0 / years) - 1.0) * 100.0
+
+        rows: list[dict] = []
+        for label, key, fmt in metric_specs:
+            base_v = _m(base_m, key)
+            fwd_vals = [_m(f.get("metrics") or {}, key) for f in fwds]
+            n_fwd = len(fwd_vals)
+            while len(fwd_vals) < 3:
+                fwd_vals.append(None)
+            yoy_pct = _yoy(fwd_vals[0], base_v)
+            # CAGR uses the LAST non-None forecast as the endpoint and the
+            # base actual as the start. Years = position of that endpoint
+            # in the forecast strip (1, 2, or 3 depending on coverage).
+            cagr_pct = None
+            last_idx = None
+            for i in range(min(n_fwd, 3) - 1, -1, -1):
+                if fwd_vals[i] is not None:
+                    last_idx = i; break
+            if last_idx is not None:
+                cagr_pct = _cagr(fwd_vals[last_idx], base_v, last_idx + 1)
+            rows.append({
+                "metric": label,
+                "fy1": fmt(fwd_vals[0]) if fwd_vals[0] is not None else None,
+                "fy2": fmt(fwd_vals[1]) if fwd_vals[1] is not None else None,
+                "fy3": fmt(fwd_vals[2]) if fwd_vals[2] is not None else None,
+                "yoy": yoy_pct,
+                "cagr": cagr_pct,
+            })
+        if any(r["fy1"] is not None for r in rows):
+            return rows, fy_disp, unit_suffix
+
+    # ── MS path ────────────────────────────────────────────────────
     if not isinstance(ms_annual_forecasts, dict):
         return [], [], ""
     annual = ms_annual_forecasts.get("annual") or {}
@@ -1147,10 +1272,23 @@ def _build_annual_rows(*, ms_annual_forecasts: dict | None,
             return None
         return (num - den) / den * 100.0
 
-    # Map FY labels (raw → display). Append 'E' for forecast years.
+    # A / E / F suffix convention (Mohamed 2026-05):
+    #   A = past actual
+    #   E = current FY (expected)
+    #   F = future FY (forecast)
+    import re as _re_ms_fy
+    from datetime import datetime as _dt_ms_fy
+    _current_year_ms = _dt_ms_fy.utcnow().year
     def _fy_disp(p):
-        s = str(p)
-        return f"{s}E" if not s.upper().endswith("E") else s
+        s = str(p or "")
+        m = _re_ms_fy.search(r"(\d{4})", s)
+        if not m: return s
+        yr = int(m.group(1))
+        # MS forecast periods are all forward; we can't distinguish A
+        # from E/F here cheaply. We DO know current_year, so:
+        if yr < _current_year_ms:  return f"FY{yr}A"
+        if yr == _current_year_ms: return f"FY{yr}E"
+        return f"FY{yr}F"
 
     fy_disp = [_fy_disp(p) for p in fy_labels_raw]
 
@@ -1185,12 +1323,23 @@ def _build_annual_rows(*, ms_annual_forecasts: dict | None,
         while len(fwd_vals) < 3:
             fwd_vals.append(None)
         yoy_pct = _yoy(fwd_vals[0], base_v) if fwd_vals else None
+        # CAGR: last non-None forecast vs base, annualised.
+        cagr_pct = None
+        for i in range(min(3, len(fwd_vals)) - 1, -1, -1):
+            if fwd_vals[i] is not None and isinstance(base_v, (int, float)) and base_v > 0:
+                try:
+                    if fwd_vals[i] > 0:
+                        cagr_pct = ((fwd_vals[i] / base_v) ** (1.0 / (i + 1)) - 1.0) * 100.0
+                except (TypeError, ValueError, ZeroDivisionError):
+                    cagr_pct = None
+                break
         rows.append({
             "metric": label,
             "fy1": fmt(fwd_vals[0]) if fwd_vals[0] is not None else None,
             "fy2": fmt(fwd_vals[1]) if fwd_vals[1] is not None else None,
             "fy3": fmt(fwd_vals[2]) if fwd_vals[2] is not None else None,
             "yoy": yoy_pct,
+            "cagr": cagr_pct,
         })
 
     # If every value is None, treat as no data.
@@ -1213,6 +1362,7 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
                         ms_quarterly_forecasts: Optional[dict] = None,
                         ms_annual_forecasts: Optional[dict] = None,
                         ms_eps_dividend_forecasts: Optional[dict] = None,
+                        bloomberg_bundle: Optional[dict] = None,
                         period_heading: Optional[str] = None,
                         memo_data: Optional[dict] = None,
                         ) -> ThesisData:
@@ -1461,16 +1611,24 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
         except Exception:
             pass
 
+    # Bloomberg bundle on disk also triggers annual mode — if BBG is
+    # available, the deck uses the analyst's screen values regardless of
+    # whether MS has a per-quarter forecast.
+    _signal_bloomberg = bool(bloomberg_bundle
+                              and isinstance(bloomberg_bundle, dict)
+                              and (bloomberg_bundle.get("annuals") or []))
     _use_annual = (_signal_explicit_annual
                     or _signal_no_quarterly_fwd
-                    or _signal_carry_forward)
+                    or _signal_carry_forward
+                    or _signal_bloomberg)
     annual_rows: list[dict] = []
     annual_fy_labels: list[str] = []
     annual_unit_suffix = ""
-    if _use_annual and ms_annual_forecasts:
+    if _use_annual and (ms_annual_forecasts or bloomberg_bundle):
         annual_rows, annual_fy_labels, annual_unit_suffix = _build_annual_rows(
             ms_annual_forecasts=ms_annual_forecasts,
             ms_eps_dividend_forecasts=ms_eps_dividend_forecasts,
+            bloomberg_bundle=bloomberg_bundle,
             is_bank=is_bank, currency=deck_currency,
         )
     if annual_rows:
@@ -1479,13 +1637,15 @@ def build_thesis_data(ticker: str, *, analyst_name: str = "Jabal Research",
         subtitle_unit_phrase_a = (
             f"{(deck_currency or '').upper()} {('trillions' if annual_unit_suffix.endswith('T') else 'billions' if annual_unit_suffix.endswith('B') else 'millions' if annual_unit_suffix.endswith('M') else 'units')} unless stated".strip()
         )
+        _consensus_source_a = ("Bloomberg consensus" if _signal_bloomberg
+                                  else "MarketScreener annual")
         estimates_subtitle_a = (
             f"Annual analyst consensus  ·  {subtitle_unit_phrase_a}  ·  "
             f"per-quarter breakdown unavailable for this name"
         )
         footnote_a = "  ·  ".join([
             "Estimates: Jabal Research",
-            f"Consensus: MarketScreener annual",
+            f"Consensus: {_consensus_source_a}",
             f"YoY computed vs prior-FY actual",
         ])
         from datetime import datetime

@@ -371,9 +371,15 @@ def render_snapshot_slide(prs, data: SnapshotData):
     _key_data_row(slide, 4.38, [
         ("LAST CLOSE", data.last_close_fmt),
         ("MARKET CAP", data.market_cap_fmt),
-        ("REPORT DATE", data.report_date),
+        # Clarify it's the EARNINGS announcement date the company will
+        # report on, not the date this deck was generated (which lives in
+        # the footer). Mohamed flagged "REPORT DATE" as ambiguous.
+        ("EARNINGS DATE", data.report_date),
         (data.pe_fy_est_label or "P/E (FY EST)", data.pe_fy_est_fmt),
-        ("DIV. YIELD", data.div_yield_fmt),
+        # Dividend yield is current — quote_price × shares / last paid
+        # 12-month total — so label it "TTM" to disambiguate from the
+        # forward yield implied by FY-est dividend forecasts.
+        ("DIV YIELD (TTM)", data.div_yield_fmt),
         ("CURRENCY", data.currency),
     ])
     _performance_row(slide, 5.42, [

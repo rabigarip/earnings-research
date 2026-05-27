@@ -233,6 +233,7 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
                                      ms_quarterly_forecasts=getattr(payload, "ms_quarterly_forecasts", None),
                                      ms_annual_forecasts=getattr(payload, "ms_annual_forecasts", None),
                                      ms_eps_dividend_forecasts=getattr(payload, "ms_eps_dividend_forecasts", None),
+                                     bloomberg_bundle=getattr(payload, "bloomberg_bundle", None),
                                      period_heading=period_heading,
                                      memo_data=getattr(payload, "memo_computed", None) or {})
     valuation = build_valuation_data(ticker, peers_override=peer_rows or None,

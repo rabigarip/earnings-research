@@ -428,29 +428,46 @@ Deliver a JSON object with these keys. No markdown, no preface, no
 trailing prose. JSON only.
 
 "thesis_paragraph" — 5-7 sentences (~150-220 words). A full
-   institutional executive summary, not a one-paragraph teaser. The
-   reader is an analyst's PM who hasn't followed the name closely;
-   they need the setup, the two-sided case, the swing factor, and
-   your posture. Cover this rhythm:
+   institutional executive summary written for an analyst's PM.
 
-   - Sentence 1-2: The setup heading into the print. What's the Street
-     pricing in (rating, target, upside)? What's the consensus skew
-     (analyst count, dispersion, recent revisions)?
-   - Sentence 3-4: The two-sided case. What supports the bull view
-     (sector trend, beat history, margin trajectory, valuation gap)?
-     What supports the bear view (commodity headwind, NIM compression,
-     stretched multiple)? Each side anchored in a number from the
+   HARD RULES (Mohamed feedback 2026-05):
+     * BANK-SPECIFIC OPERATIONAL FIGURES first, macro figures last.
+       For banks: cite loan growth %, NIM bps, NPL ratio, cost-to-
+       income, ROE, capital ratios when the data block carries them.
+       For non-banks: revenue growth %, EBITDA margin, FCF, capex.
+       NEVER lead a sentence with "GDP growth of X% provides a
+       supportive backdrop" — that's not analysis, it's filler.
+       Macro can ANCHOR a single sentence at most, and only when
+       it's mechanically tied to a company driver (e.g. "the IMF's
+       3.5% GDP forecast supports the bank's 5-7% loan-growth
+       target through 2026").
+     * DO NOT echo the WHAT-TO-WATCH list. The 3 watch questions
+       live in their own card on the same slide — repeating them
+       in the thesis paragraph is duplicate content. The thesis
+       paragraph SYNTHESIZES; the watch list ENUMERATES. Different
+       jobs.
+     * DO NOT echo the highlight pills (EARNINGS / VALUATION /
+       POSITIONING / WATCH / RISK) — they already sit on slide 1.
+
+   Cover this rhythm:
+
+   - Sentence 1-2: The setup heading into the print — what the
+     Street prices in (rating, target, upside, analyst count).
+   - Sentence 3-4: The TWO-SIDED case anchored in BUSINESS metrics.
+     Bull: loan growth / margin trajectory / NIM expansion /
+     deposit growth / capital ratio. Bear: NIM compression /
+     NPL trend / cost-to-income drift / multiple stretched.
+     Each side cites at least one company-specific number from the
      data block.
-   - Sentence 5: The single factor most likely to move consensus on
-     the call (mgmt guidance, asset quality update, capex change, etc.)
+   - Sentence 5: The single factor most likely to MOVE consensus
+     on the call (management guidance on NIM, asset quality update,
+     capital return change, etc.)
    - Sentence 6-7: How the setup looks (constructive / balanced /
-     asymmetric / high-risk-high-reward) AND what would change your
-     view. Be specific about WHICH metric crossing WHICH threshold
-     would flip the read.
+     asymmetric / high-risk-high-reward) AND what would flip your
+     view — be specific about WHICH metric crossing WHICH threshold.
 
    Substance over slot-filling. Each sentence must add information
-   the prior one didn't. Don't repeat the highlight pills or the
-   catalyst bullets — the thesis paragraph is the SYNTHESIS.
+   the prior one didn't.
 
    The Apple / JPMorgan / Tesla examples below show the voice and
    rhythm we want. DO NOT copy them — they are reference shape, not
@@ -492,25 +509,56 @@ trailing prose. JSON only.
    pressuring the story, what the read on the call is, and how the
    setup looks. Substance over slot-filling.
 
-"catalysts" — 3 items. Forward-looking drivers: what could MOVE the
-   print or the multiple. Specific to this company. Analytical, not
-   number-restatement. Number anchors are welcome but NOT required
-   on every bullet — the test is "does this teach the reader
-   something they couldn't get from the data table?"
+"catalysts" — 3 items. Forward-looking drivers, company-specific.
+   Mohamed feedback 2026-05:
+     * BAN "loan growth driven by [country] GDP forecast" as a
+       catalyst — that's restating macro under a different header.
+       A real loan-growth catalyst names the bank's own pipeline,
+       management guidance range, or sector market-share trend.
+     * EVERY bullet should be specific enough that swapping the
+       company name with a peer would make the bullet wrong. If
+       it could equally describe ENBD or QNB, it's too generic.
+     * Each bullet should carry a SPECIFIC number or named
+       management lever — not just "updates to capital return"
+       but "any extension of the 4.83% dividend yield via buyback
+       authorization", or "NIM trajectory above the 3.2% peer
+       average", or "fee income exceeding 25% of total revenue".
 
-"risks" — 3 items. Company-specific downside paths, not generic
-   macro statements unattached to the business model. Same voice as
-   catalysts.
+"risks" — 3 items. Company-specific downside paths.
+   Mohamed feedback 2026-05:
+     * Do NOT repeat valuation premium / P/E gap if that's already
+       in the VALUATION highlight pill. Pick risks that aren't
+       already surfaced elsewhere on the deck.
+     * "Unexpected" without context is meaningless. If you cite
+       a risk like "deterioration in asset quality", tie it to a
+       baseline figure ("from the current 2.1% NPL ratio") or to
+       a sector trend the data block carries.
 
-"watch_list" — 3 items, each ending in "?". The precise things to
-   listen for on the call.
+"watch_list" — 3 items, each ending in "?". The precise QUESTIONS
+   an analyst would put to management on the call. Sharpest /
+   most-specific framing wins. These are NOT echoed in the thesis
+   paragraph — they live in their own card.
 
 "highlights" — 5 items as `{{"category": str, "body": str}}`. The
-   five categories in order: EARNINGS, VALUATION, POSITIONING, WATCH,
-   RISK. Each body is ONE short interpretive sentence (≤18 words).
-   These pills sit next to a panel that already shows the numbers —
-   tell the reader what those numbers MEAN. Pure restatements
-   ("Dividend yield 4.83%") add nothing — interpret instead.
+   five categories in order: EARNINGS, VALUATION, POSITIONING,
+   WATCH, RISK. Each body is ONE short interpretive sentence
+   (≤18 words). Mohamed feedback 2026-05:
+     * EARNINGS — anchor in COMPANY metrics (loan-growth pace,
+       margin direction, EPS revision trend), not macro filler
+       like "GDP provides a backdrop". GDP is not an earnings
+       driver at this resolution.
+     * VALUATION — cite the actual P/E AND the comparator
+       (peer-set average if available, OR 5-year trailing
+       average), not just one. "Forward P/E 12.1x vs 5y avg
+       10.7x" is the minimum.
+     * POSITIONING — Street skew (rating split, target dispersion,
+       beat history) — interpretive.
+     * WATCH — the ONE highest-conviction thing to listen for on
+       the call. Not three; one.
+     * RISK — sharp, NOT vanilla. "Multiple compression" is
+       vanilla. "NIM compression from accelerating deposit
+       betas at current 3.2% NIM" is sharp. Add at least one
+       number anchor.
 
 NUMERIC DISCIPLINE
   Numbers you cite must come from the data block above — no
