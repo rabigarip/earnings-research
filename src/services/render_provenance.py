@@ -353,7 +353,44 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
                     "", "", "",
                 ])
 
-    # 4. MS annual forecasts — emit FY year × metric rows when present.
+    # 4. Company-disclosed quarterly figures (Phase 1 of the disclosed-
+    #    source pipeline). When `data/disclosed/{ticker}.json` exists,
+    #    each disclosed quarter is emitted as one row per metric so the
+    #    audit trail shows the exact IR-portal PDF the value came from.
+    try:
+        from src.services.disclosed_loader import load_disclosed
+        d_payload = load_disclosed(ticker)
+    except Exception:
+        d_payload = None
+    if d_payload:
+        company_name = d_payload.get("company") or ticker
+        sd_map = d_payload.get("_source_documents") or {}
+        for q in d_payload.get("quarterly", []) or []:
+            if not isinstance(q, dict): continue
+            period = str(q.get("period") or "").strip()
+            if not period: continue
+            doc = q.get("source_doc") or ""
+            url = sd_map.get(period) or ""
+            metric_pairs = [
+                ("operating_income", "Operating Income (raw currency)"),
+                ("net_interest_income", "Net Interest Income"),
+                ("fee_income_net", "Fee & Commission Income (net)"),
+                ("net_income", "Net Income"),
+                ("eps", "EPS"),
+            ]
+            for key, human in metric_pairs:
+                v = q.get(key)
+                if not isinstance(v, (int, float)): continue
+                rows.append([
+                    "Slide 3", "Earnings History (Disclosed)",
+                    f"{human} · {period}",
+                    _value_repr(v),
+                    f"{company_name} IR",
+                    url, period, "",
+                    f"Standalone-quarter value from {doc}",
+                ])
+
+    # 5. MS annual forecasts — emit FY year × metric rows when present.
     #    These back the annual-fallback table on slide 2 and the forward
     #    P/E bars on slide 3.
     annual = None

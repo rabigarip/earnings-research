@@ -1074,6 +1074,25 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
     isq = investing_obs.get("income_statement_quarterly") if investing_obs else None
     surprise_history = (isq or {}).get("surprise_history") if isinstance(isq, dict) else None
 
+    # COMPANY-DISCLOSED OVERLAY (Phase 1 of the disclosed-source pipeline)
+    # Bank Muscat's quarterly IR PDFs ship standalone-quarter income
+    # statements that disagree with Investing AND MarketScreener on Q2/Q3
+    # 2025. When `data/disclosed/{ticker}.json` exists, its `operating_
+    # income`/`net_income`/`eps` values override the aggregator's
+    # `*_actual` columns. The aggregator's `*_estimate` columns remain
+    # (companies don't publish consensus estimates).
+    try:
+        from src.services.disclosed_loader import overlay_surprise_history
+        surprise_history, _disclosed_src_map = overlay_surprise_history(
+            ticker, surprise_history)
+        if _disclosed_src_map:
+            print(f"[earnings-history] {ticker}: disclosed overlay applied to "
+                  f"{len(_disclosed_src_map)} periods: "
+                  f"{sorted(_disclosed_src_map.keys())}", flush=True)
+    except Exception as _exc:
+        print(f"[earnings-history] {ticker}: disclosed overlay skipped "
+              f"({_exc.__class__.__name__}: {_exc})", flush=True)
+
     # `surprise_history` from Investing can be technically non-empty
     # (list with 10 rows) while carrying no usable data. Investing's
     # signature for thinly-covered names is rows with announce dates
