@@ -1,5 +1,6 @@
 import { BrowserRouter, Link, NavLink, Route, Routes } from "react-router-dom";
 import CalendarPage from "./pages/CalendarPage";
+import DashboardPage from "./pages/DashboardPage";
 import GenerateReportPage from "./pages/GenerateReportPage";
 
 function NavBar() {
@@ -21,6 +22,12 @@ function NavBar() {
             Generate
           </NavLink>
           <NavLink
+            to="/dashboard"
+            className={({ isActive }) => `${base} ${isActive ? active : idle}`}
+          >
+            Dashboard
+          </NavLink>
+          <NavLink
             to="/calendar"
             className={({ isActive }) => `${base} ${isActive ? active : idle}`}
           >
@@ -40,6 +47,7 @@ export default function App() {
         <main>
           <Routes>
             <Route path="/" element={<GenerateReportPage />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="*" element={<GenerateReportPage />} />
           </Routes>

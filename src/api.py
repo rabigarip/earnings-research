@@ -210,6 +210,131 @@ def _run_to_report_row(run: dict) -> dict:
     }
 
 
+# ────────────────────── v2 dashboard endpoints ──────────────────
+# Calendar-driven, on-demand workflow. Backed by data/tickers.json
+# (the 500-ticker universe registry) and data/calendar/upcoming.json
+# (the daily-refreshed earnings horizon). No persistent store; both
+# files are git-tracked artifacts.
+
+@app.get("/api/v2/upcoming")
+def v2_upcoming(horizon_days: int = 14, family: str | None = None,
+                  country: str | None = None):
+    """Read data/calendar/upcoming.json and return the active set.
+
+    Optional filters:
+      family   — comma-separated template families (bank,energy,tech,...)
+      country  — comma-separated ISO-2 codes (SA,OM,AE,IN,...)
+
+    Backs the dashboard's main "Upcoming Earnings" view. Each row
+    carries a `ticker` the analyst can click to generate a deck.
+    """
+    from pathlib import Path as _P
+    import json as _json
+    p = _P(__file__).resolve().parents[1] / "data" / "calendar" / "upcoming.json"
+    if not p.is_file():
+        return {"generated_at": None, "horizon_days": horizon_days,
+                "tickers": [], "warning": "upcoming.json not present — "
+                "run scripts/build_earnings_calendar.py"}
+    payload = _json.loads(p.read_text())
+    tickers = payload.get("tickers") or []
+    if family:
+        fams = {f.strip().lower() for f in family.split(",") if f.strip()}
+        tickers = [t for t in tickers if t.get("template_family", "").lower() in fams]
+    if country:
+        ccs = {c.strip().upper() for c in country.split(",") if c.strip()}
+        tickers = [t for t in tickers if t.get("exchange_country", "").upper() in ccs]
+    # Add a recent_deck_exists flag — analyst sees at a glance whether
+    # there's already a deck on disk for this ticker.
+    try:
+        from src.config import report_output_dir
+        out_dir = report_output_dir()
+        existing = {p.stem.split("_", 1)[0] for p in out_dir.glob("*.pptx")} if out_dir else set()
+        for t in tickers:
+            t["recent_deck_exists"] = (t["ticker"] in existing)
+    except Exception:
+        pass
+    return {
+        "generated_at": payload.get("generated_at"),
+        "horizon_days": payload.get("horizon_days", horizon_days),
+        "tickers": tickers,
+    }
+
+
+@app.get("/api/v2/universe")
+def v2_universe(family: str | None = None, country: str | None = None,
+                  canonical_only: int = 1, limit: int = 100):
+    """List tickers from the 500-ticker universe registry.
+
+    Defaults to canonical-only (hides cross-listing siblings) and the
+    top 100 by USD market cap. Use this for the "browse" view in the
+    dashboard, or for picking a ticker that isn't in upcoming.json.
+    """
+    from src.services.ticker_registry import _registry_index
+    recs = list(_registry_index().values())
+    if canonical_only:
+        recs = [r for r in recs if r.get("is_canonical", True)]
+    if family:
+        fams = {f.strip().lower() for f in family.split(",") if f.strip()}
+        recs = [r for r in recs if (r.get("template_family") or "").lower() in fams]
+    if country:
+        ccs = {c.strip().upper() for c in country.split(",") if c.strip()}
+        recs = [r for r in recs if (r.get("exchange_country") or "").upper() in ccs]
+    recs.sort(key=lambda r: -(r.get("market_cap_usd") or 0))
+    # Trim payload — return only fields the dashboard renders.
+    out = [{
+        "ticker": r["ticker"],
+        "company_name": r["company_name"],
+        "exchange_country": r.get("exchange_country", ""),
+        "sector": r.get("sector", ""),
+        "industry": r.get("industry", ""),
+        "template_family": r.get("template_family", "other"),
+        "currency": r.get("currency", ""),
+        "market_cap_usd": r.get("market_cap_usd"),
+        "is_depositary_receipt": r.get("is_depositary_receipt", False),
+        "underlying_ticker": r.get("underlying_ticker"),
+    } for r in recs[:limit]]
+    return {"total": len(recs), "returned": len(out), "tickers": out}
+
+
+@app.get("/api/v2/ticker/{ticker}")
+def v2_ticker_info(ticker: str):
+    """Return the full registry record for a single ticker.
+    Useful for the dashboard's per-ticker detail view and for the
+    deck-generation modal's pre-confirmation."""
+    from src.services.ticker_registry import get_ticker_info
+    return get_ticker_info(ticker)
+
+
+@app.get("/api/v2/decks")
+def v2_recent_decks(limit: int = 30):
+    """List recently generated decks from the outputs/ folder.
+
+    Returns newest-first. Each record carries the filename, ticker
+    (parsed from the filename prefix), file size, mtime, and a
+    presigned-style relative download URL. The deck library view.
+    """
+    from pathlib import Path as _P
+    from src.config import report_output_dir
+    out_dir = report_output_dir()
+    if not out_dir or not _P(out_dir).is_dir():
+        return {"decks": []}
+    files = sorted(_P(out_dir).glob("*.pptx"),
+                    key=lambda p: p.stat().st_mtime, reverse=True)
+    decks = []
+    for f in files[:limit]:
+        st = f.stat()
+        ticker = f.stem.split("_", 1)[0]
+        prov = f.with_suffix(".provenance.xlsx")
+        decks.append({
+            "filename": f.name,
+            "ticker": ticker,
+            "size_kb": int(st.st_size / 1024),
+            "mtime": _dt.utcfromtimestamp(st.st_mtime).isoformat() + "Z",
+            "has_provenance": prov.is_file(),
+        })
+    return {"decks": decks}
+
+
 @app.get("/api/reports")
 def list_reports():
     """List pipeline runs for frontend reports table."""

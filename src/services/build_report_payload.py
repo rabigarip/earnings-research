@@ -276,14 +276,35 @@ def _compute_memo(
     """
     out: dict = {}
 
-    # Company context (consumed by LLM evidence brief and sector-specific prompts)
-    out["company_name"] = getattr(company, "company_name", "")
+    # Company context (consumed by LLM evidence brief and sector-specific prompts).
+    # Read the static ticker registry (data/tickers.json) for canonical
+    # sector / template_family / currency_unit_scale / peer_set /
+    # depositary-receipt routing. The registry overrides whatever the
+    # `company` object carried — the registry was hand-curated for the
+    # 500-ticker universe and is the source of truth.
+    from src.services.ticker_registry import get_ticker_info as _get_tinfo
+    _tinfo = _get_tinfo(getattr(company, "ticker", "") or "")
+    out["company_name"] = getattr(company, "company_name", "") or _tinfo.get("company_name", "")
     out["ticker"] = getattr(company, "ticker", "")
-    out["is_bank"] = getattr(company, "is_bank", False)
-    out["industry"] = getattr(company, "industry", "")
-    out["sector"] = getattr(company, "sector", "")
-    out["currency"] = (getattr(company, "currency", None) or "").strip()
-    out["country"] = getattr(company, "country", "")
+    # Bank flag now derived from template_family. Existing callers that
+    # set company.is_bank manually still work — registry wins only when
+    # the underlying `company` doesn't already carry it.
+    _registry_is_bank = (_tinfo.get("template_family") == "bank")
+    out["is_bank"] = getattr(company, "is_bank", None)
+    if out["is_bank"] is None:
+        out["is_bank"] = _registry_is_bank
+    out["industry"] = getattr(company, "industry", "") or _tinfo.get("industry", "")
+    out["sector"] = getattr(company, "sector", "") or _tinfo.get("sector", "")
+    out["currency"] = ((getattr(company, "currency", None) or _tinfo.get("currency", "")) or "").strip()
+    out["country"] = getattr(company, "country", "") or _tinfo.get("exchange_country", "")
+    # New fields from the registry — downstream consumers pick them up.
+    out["template_family"] = _tinfo.get("template_family", "other")
+    out["currency_unit_scale"] = _tinfo.get("currency_unit_scale", 1)
+    out["registry_peer_set"] = _tinfo.get("peer_set", []) or []
+    out["is_depositary_receipt"] = _tinfo.get("is_depositary_receipt", False)
+    out["underlying_ticker"] = _tinfo.get("underlying_ticker")
+    out["fiscal_year_end_month"] = _tinfo.get("fiscal_year_end_month", 12)
+    out["bloomberg_ticker"] = (_tinfo.get("providers") or {}).get("bloomberg_ticker")
 
     # Price sanity check: suppress MS consensus if price diverges >3x from Yahoo
     # (detects wrong-entity contamination, e.g. Riyad Bank data on Al Rajhi page)

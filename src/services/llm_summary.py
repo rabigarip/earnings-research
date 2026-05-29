@@ -419,167 +419,173 @@ EARNINGS TRACK RECORD
 {broker_block}
 
 TASK
-Write an institutional earnings-preview note for {ctx['company_name']}
-that reads like a senior buy-side analyst's pre-print memo. You have
-analytical leeway. The audience already sees the raw numbers on the
-slide — your job is to INTERPRET them, not restate them.
+Write an institutional earnings-preview note for {ctx['company_name']}.
+The audience already sees the raw numbers on the slide. Your job is
+to INTERPRET — give the analyst a qualitative read on what matters
+heading into the print.
 
 Deliver a JSON object with these keys. No markdown, no preface, no
 trailing prose. JSON only.
 
-"thesis_paragraph" — 5-7 sentences (~150-220 words). A full
-   institutional executive summary written for an analyst's PM.
+═══════════════════════════════════════════════════════════════════
+"thesis_paragraph" — A 4-sentence executive summary. ~80–120 words.
+═══════════════════════════════════════════════════════════════════
 
-   HARD RULES (Mohamed feedback 2026-05):
-     * BANK-SPECIFIC OPERATIONAL FIGURES first, macro figures last.
-       For banks: cite loan growth %, NIM bps, NPL ratio, cost-to-
-       income, ROE, capital ratios when the data block carries them.
-       For non-banks: revenue growth %, EBITDA margin, FCF, capex.
-       NEVER lead a sentence with "GDP growth of X% provides a
-       supportive backdrop" — that's not analysis, it's filler.
-       Macro can ANCHOR a single sentence at most, and only when
-       it's mechanically tied to a company driver (e.g. "the IMF's
-       3.5% GDP forecast supports the bank's 5-7% loan-growth
-       target through 2026").
-     * DO NOT echo the WHAT-TO-WATCH list. The 3 watch questions
-       live in their own card on the same slide — repeating them
-       in the thesis paragraph is duplicate content. The thesis
-       paragraph SYNTHESIZES; the watch list ENUMERATES. Different
-       jobs.
-     * DO NOT echo the highlight pills (EARNINGS / VALUATION /
-       POSITIONING / WATCH / RISK) — they already sit on slide 1.
+   THE VOICE WE WANT. Three reference examples — match this rhythm,
+   word count, and qualitative register. Notice: almost no numbers,
+   no Mohamed-pleasing acronyms, no macro filler. Just a clean
+   interpretive read.
 
-   Cover this rhythm:
+   ┌─ Apple ───────────────────────────────────────────────────────┐
+   │ Apple enters earnings with focus on iPhone demand, Services   │
+   │ growth, gross margin, and next-quarter guidance. Recent       │
+   │ performance has been supported by AI upgrade expectations,    │
+   │ while China demand and hardware replacement cycles remain     │
+   │ key concerns. Investors should watch iPhone revenue,          │
+   │ Services growth, gross margin, Greater China performance,    │
+   │ and commentary on AI integration and capital returns. The     │
+   │ setup appears balanced, as valuation remains elevated and     │
+   │ expectations are already fairly high.                         │
+   └───────────────────────────────────────────────────────────────┘
 
-   - Sentence 1-2: The setup heading into the print — what the
-     Street prices in (rating, target, upside, analyst count).
-   - Sentence 3-4: The TWO-SIDED case anchored in BUSINESS metrics.
-     Bull: loan growth / margin trajectory / NIM expansion /
-     deposit growth / capital ratio. Bear: NIM compression /
-     NPL trend / cost-to-income drift / multiple stretched.
-     Each side cites at least one company-specific number from the
-     data block.
-   - Sentence 5: The single factor most likely to MOVE consensus
-     on the call (management guidance on NIM, asset quality update,
-     capital return change, etc.)
-   - Sentence 6-7: How the setup looks (constructive / balanced /
-     asymmetric / high-risk-high-reward) AND what would flip your
-     view — be specific about WHICH metric crossing WHICH threshold.
+   ┌─ JPMorgan ────────────────────────────────────────────────────┐
+   │ JPMorgan enters earnings with focus on net interest income,   │
+   │ loan growth, credit quality, and capital returns. Recent      │
+   │ performance has been supported by resilient U.S. economic    │
+   │ data and stronger banking sentiment, while investors remain   │
+   │ focused on whether net interest income has peaked. Key        │
+   │ metrics to watch include NII, provision expense, loan         │
+   │ growth, deposit trends, investment banking fees, and          │
+   │ management commentary on credit and capital deployment. The   │
+   │ setup appears cautiously attractive, supported by strong      │
+   │ profitability and balance sheet strength.                     │
+   └───────────────────────────────────────────────────────────────┘
 
-   Substance over slot-filling. Each sentence must add information
-   the prior one didn't.
+   ┌─ Tesla ───────────────────────────────────────────────────────┐
+   │ Tesla enters earnings with focus on vehicle deliveries,       │
+   │ automotive gross margin, pricing strategy, and demand         │
+   │ outlook. Recent performance has been driven by expectations   │
+   │ around autonomous driving, robotaxi developments, and future  │
+   │ product launches, while margin pressure and softer EV demand  │
+   │ remain concerns. Investors should watch automotive revenue,   │
+   │ gross margin excluding credits, free cash flow, delivery      │
+   │ outlook, energy storage growth, and commentary on pricing     │
+   │ and autonomy. The setup appears high-risk, high-reward       │
+   │ given the stock's reliance on future growth narratives.       │
+   └───────────────────────────────────────────────────────────────┘
 
-   The Apple / JPMorgan / Tesla examples below show the voice and
-   rhythm we want. DO NOT copy them — they are reference shape, not
-   a template you fill in:
+   STRUCTURE (one sentence per slot):
+     S1. "{{Company}} enters earnings with focus on [4 operational
+         levers most central to the print]." Pick the levers that
+         define how investors model THIS business. For banks:
+         net interest income, loan growth, credit quality, capital
+         returns. For oil & gas: production volumes, realized
+         prices, capex, free cash flow. For tech: revenue growth,
+         gross margin, AI/product momentum, guidance.
+     S2. "Recent performance has been supported by [drivers],
+         while [pressures] remain key concerns." Qualitative
+         narrative — what the Street has been rewarding and what
+         it's been worrying about.
+     S3. "Investors should watch [5-6 specific things including
+         management commentary on X]." A list of concrete
+         metrics + the one named commentary item.
+     S4. "The setup appears [balanced / cautiously attractive /
+         asymmetric / high-risk-high-reward], [one-clause
+         reason]." Stop here. No scenario coda.
 
-     Apple — "Apple enters earnings with focus on iPhone demand,
-       Services growth, gross margin, and next-quarter guidance.
-       Recent performance has been supported by AI upgrade
-       expectations, while China demand and hardware replacement
-       cycles remain key concerns. Investors should watch iPhone
-       revenue, Services growth, gross margin, Greater China
-       performance, and commentary on AI integration and capital
-       returns. The setup appears balanced, as valuation remains
-       elevated and expectations are already fairly high."
+   You may anchor 1-2 numbers in S2 or S3 if they sharpen the read
+   (e.g. a specific NIM percent, a current multiple). Do not stuff
+   numbers. The references each cite zero or one number total.
 
-     JPMorgan — "JPMorgan enters earnings with focus on net interest
-       income, loan growth, credit quality, and capital returns.
-       Recent performance has been supported by resilient U.S.
-       economic data and stronger banking sentiment, while investors
-       remain focused on whether net interest income has peaked. Key
-       metrics to watch include NII, provision expense, loan growth,
-       deposit trends, investment banking fees, and management
-       commentary on credit and capital deployment. The setup appears
-       cautiously attractive, supported by strong profitability and
-       balance sheet strength."
+═══════════════════════════════════════════════════════════════════
+"highlights" — 5 short interpretive sentences (one per category).
+═══════════════════════════════════════════════════════════════════
 
-     Tesla — "Tesla enters earnings with focus on vehicle deliveries,
-       automotive gross margin, pricing strategy, and demand outlook.
-       Recent performance has been driven by expectations around
-       autonomous driving, robotaxi developments, and future product
-       launches, while margin pressure and softer EV demand remain
-       concerns. Investors should watch automotive revenue, gross
-       margin excluding credits, free cash flow, delivery outlook,
-       energy storage growth, and commentary on pricing and autonomy.
-       The setup appears high-risk, high-reward given the stock's
-       reliance on future growth narratives."
+   Schema: list of {{"category": str, "body": str}}. Categories in
+   order: EARNINGS, VALUATION, POSITIONING, WATCH, RISK. Each body
+   ≤18 words. One single thought per pill.
 
-   Match the rhythm — what's the focus, what's been supporting /
-   pressuring the story, what the read on the call is, and how the
-   setup looks. Substance over slot-filling.
+   EARNINGS — what specifically about the upcoming print matters.
+     Good: "Q2 print will test whether NIM expansion has peaked."
+     Weak: "Stable macro provides a supportive backdrop." (macro
+            is not a print-level driver at this resolution)
 
-"catalysts" — 3 items. Forward-looking drivers, company-specific.
-   Mohamed feedback 2026-05:
-     * BAN "loan growth driven by [country] GDP forecast" as a
-       catalyst — that's restating macro under a different header.
-       A real loan-growth catalyst names the bank's own pipeline,
-       management guidance range, or sector market-share trend.
-     * EVERY bullet should be specific enough that swapping the
-       company name with a peer would make the bullet wrong. If
-       it could equally describe ENBD or QNB, it's too generic.
-     * Each bullet should carry a SPECIFIC number or named
-       management lever — not just "updates to capital return"
-       but "any extension of the 4.83% dividend yield via buyback
-       authorization", or "NIM trajectory above the 3.2% peer
-       average", or "fee income exceeding 25% of total revenue".
+   VALUATION — the live multiple AND a comparator. Both required.
+     Good: "Forward P/E 12.1x trades at a 4% premium to its 5y
+            average of 10.7x and 9% below the GCC bank peer set."
+     Weak: "Trades at a premium to historical average." (no number;
+            no comparator)
 
-"risks" — 3 items. Company-specific downside paths.
-   Mohamed feedback 2026-05:
-     * Do NOT repeat valuation premium / P/E gap if that's already
-       in the VALUATION highlight pill. Pick risks that aren't
-       already surfaced elsewhere on the deck.
-     * "Unexpected" without context is meaningless. If you cite
-       a risk like "deterioration in asset quality", tie it to a
-       baseline figure ("from the current 2.1% NPL ratio") or to
-       a sector trend the data block carries.
+   POSITIONING — the Street's posture. Rating split, target
+   dispersion, beat history. Interpretive, not restated.
+     Good: "Street is constructive with 2 of 3 analysts at Buy,
+            though target range OMR 0.39-0.52 signals thin
+            conviction."
 
-"watch_list" — 3 items, each ending in "?". The precise QUESTIONS
-   an analyst would put to management on the call. Sharpest /
-   most-specific framing wins. These are NOT echoed in the thesis
-   paragraph — they live in their own card.
+   WATCH — the single highest-conviction thing to listen for. One.
+     Good: "Whether management raises mid-cycle NIM guidance from
+            3.2% on the call."
 
-"highlights" — 5 items as `{{"category": str, "body": str}}`. The
-   five categories in order: EARNINGS, VALUATION, POSITIONING,
-   WATCH, RISK. Each body is ONE short interpretive sentence
-   (≤18 words). Mohamed feedback 2026-05:
-     * EARNINGS — anchor in COMPANY metrics (loan-growth pace,
-       margin direction, EPS revision trend), not macro filler
-       like "GDP provides a backdrop". GDP is not an earnings
-       driver at this resolution.
-     * VALUATION — cite the actual P/E AND the comparator
-       (peer-set average if available, OR 5-year trailing
-       average), not just one. "Forward P/E 12.1x vs 5y avg
-       10.7x" is the minimum.
-     * POSITIONING — Street skew (rating split, target dispersion,
-       beat history) — interpretive.
-     * WATCH — the ONE highest-conviction thing to listen for on
-       the call. Not three; one.
-     * RISK — sharp, NOT vanilla. "Multiple compression" is
-       vanilla. "NIM compression from accelerating deposit
-       betas at current 3.2% NIM" is sharp. Add at least one
-       number anchor.
+   RISK — sharp and specific. Avoid "multiple compression"
+   generic risk; cite a mechanism.
+     Good: "Funding-cost catch-up could compress NIM from current
+            3.2% below the 3.0% comfort floor by year-end."
 
+═══════════════════════════════════════════════════════════════════
+"catalysts" — 3 forward-looking drivers specific to the company.
+═══════════════════════════════════════════════════════════════════
+
+   Each catalyst names a specific lever (management action,
+   operational milestone, named guidance range, sector flow). If
+   swapping the company name with a peer would still make the
+   bullet read true, the bullet is too generic — rewrite.
+
+   Examples of the right shape:
+     - "Any extension of the 4.83% dividend yield via a buyback
+        authorization on the call."
+     - "Loan-growth pipeline confirmation in line with management's
+        prior 5-7% range."
+     - "Fee income growing toward 25% of total revenue, reducing
+        spread-business dependence."
+
+═══════════════════════════════════════════════════════════════════
+"risks" — 3 company-specific downside paths.
+═══════════════════════════════════════════════════════════════════
+
+   Each risk ties to a baseline number when possible and avoids
+   restating valuation if that point already lives in the VALUATION
+   highlight pill. Pick risks the deck isn't already showing.
+
+   Examples of the right shape:
+     - "Asset-quality drift from the current sub-2% NPL ratio
+        as the rate-cut cycle pressures provisioning."
+     - "Loss of market share to digitally-native challenger banks
+        accelerating cost-to-income deterioration."
+
+═══════════════════════════════════════════════════════════════════
+"watch_list" — 3 questions to put to management on the call.
+═══════════════════════════════════════════════════════════════════
+
+   Sharp, specific, ending in "?". These live in their own card on
+   the same slide — they are NOT echoed in the thesis paragraph.
+
+   Examples:
+     - "What is management's full-year NIM guidance range given
+        the rate path?"
+     - "Where does the loan-growth pipeline sit relative to the
+        prior 5-7% guidance?"
+
+═══════════════════════════════════════════════════════════════════
 NUMERIC DISCIPLINE
-  Numbers you cite must come from the data block above — no
-  invented figures, no inconsistent rounding. But you do NOT have to
-  cite a number in every sentence. Quality of interpretation
-  matters more than coverage of numbers.
+═══════════════════════════════════════════════════════════════════
 
-  When citing a macro figure, keep the "(IMF YYYY)" / "(WB YYYY)"
-  tag from the data block so the source year stays visible.
+  Every number you cite must come from the DATA block above. No
+  rounding inconsistencies, no hallucinated comparators.
 
-  When citing a P/E multiple, KEEP the qualifier ("forward",
-  "trailing", "FY26E") that was attached in the data block.
-  The cover slide shows the forward P/E and the thesis often
-  references the trailing P/E — without the qualifier the reader
-  sees two different numbers and assumes inconsistency. Examples
-  the data block may give you:
-    - "Forward P/E 12.1x (FY2026)" → write "forward P/E of 12.1x"
-    - "trailing P/E 11.1x vs 5-year average 10.7x" → write
-      "trailing P/E of 11.1x, a 4% premium to its 5y average"
-  Never strip the qualifier; never blur forward and trailing into
-  one number.
+  When citing a P/E, keep the qualifier ("forward", "trailing",
+  "FY26E") so the reader doesn't conflate them.
+
+  When citing macro, keep the "(IMF YYYY)" / "(WB YYYY)" tag.
 """
 
 

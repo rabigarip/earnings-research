@@ -278,8 +278,7 @@
       "2290.SR",
       "2223.SR",
       "4200.SR",
-      "2310.SR",
-      "2250.SR"
+      "2381.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -2930,11 +2929,11 @@
     "peer_set": [
       "2010.SR",
       "2020.SR",
+      "2310.SR",
       "1322.SR",
+      "2350.SR",
       "2230.SR",
-      "3030.SR",
-      "3020.SR",
-      "3040.SR"
+      "2330.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -4473,11 +4472,11 @@
     "peer_set": [
       "1211.SR",
       "2020.SR",
+      "2310.SR",
       "1322.SR",
+      "2350.SR",
       "2230.SR",
-      "3030.SR",
-      "3020.SR",
-      "3040.SR"
+      "2330.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -9970,11 +9969,11 @@
     "peer_set": [
       "1211.SR",
       "2010.SR",
+      "2310.SR",
       "1322.SR",
+      "2350.SR",
       "2230.SR",
-      "3030.SR",
-      "3020.SR",
-      "3040.SR"
+      "2330.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -10013,8 +10012,7 @@
       "2290.SR",
       "2223.SR",
       "4200.SR",
-      "2310.SR",
-      "2250.SR"
+      "2381.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -10793,7 +10791,7 @@
     "currency_unit_scale": 1,
     "reporting_currency": "SAR",
     "sector": "Energy",
-    "industry": "Integrated Oil & Gas",
+    "industry": "Oil & Gas Refining",
     "template_family": "energy",
     "market_cap_local": 19424706560.0,
     "market_cap_usd": 5179921749.33,
@@ -10809,8 +10807,7 @@
       "2290.SR",
       "2223.SR",
       "4200.SR",
-      "2310.SR",
-      "2250.SR"
+      "2381.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -10969,8 +10966,7 @@
       "2380.SR",
       "2223.SR",
       "4200.SR",
-      "2310.SR",
-      "2250.SR"
+      "2381.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -11288,8 +11284,7 @@
       "2380.SR",
       "2290.SR",
       "4200.SR",
-      "2310.SR",
-      "2250.SR"
+      "2381.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -11488,8 +11483,7 @@
       "2380.SR",
       "2290.SR",
       "2223.SR",
-      "2310.SR",
-      "2250.SR"
+      "2381.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -11591,9 +11585,9 @@
     "currency": "SAR",
     "currency_unit_scale": 1,
     "reporting_currency": "SAR",
-    "sector": "Energy",
-    "industry": "Integrated Oil & Gas",
-    "template_family": "energy",
+    "sector": "Materials",
+    "industry": "Chemicals",
+    "template_family": "materials",
     "market_cap_local": 10655332352.0,
     "market_cap_usd": 2841421960.53,
     "is_canonical": true,
@@ -11603,13 +11597,13 @@
     "underlying_ticker": null,
     "dr_fundamentals_source": null,
     "peer_set": [
-      "2222.SR",
-      "5110.SR",
-      "2380.SR",
-      "2290.SR",
-      "2223.SR",
-      "4200.SR",
-      "2250.SR"
+      "1211.SR",
+      "2010.SR",
+      "2020.SR",
+      "1322.SR",
+      "2350.SR",
+      "2230.SR",
+      "2330.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -11909,9 +11903,9 @@
     "currency": "SAR",
     "currency_unit_scale": 1,
     "reporting_currency": "SAR",
-    "sector": "Energy",
-    "industry": "Integrated Oil & Gas",
-    "template_family": "energy",
+    "sector": "Industrials",
+    "industry": "Capital Goods",
+    "template_family": "industrial",
     "market_cap_local": 8423319552.0,
     "market_cap_usd": 2246218547.2,
     "is_canonical": true,
@@ -11921,13 +11915,13 @@
     "underlying_ticker": null,
     "dr_fundamentals_source": null,
     "peer_set": [
-      "2222.SR",
-      "5110.SR",
-      "2380.SR",
-      "2290.SR",
-      "2223.SR",
-      "4200.SR",
-      "2310.SR"
+      "IQCD.QA",
+      "4280.SR",
+      "4030.SR",
+      "QGTS.QA",
+      "ERES.QA",
+      "2382.SR",
+      "4142.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -11964,10 +11958,10 @@
       "1211.SR",
       "2010.SR",
       "2020.SR",
+      "2310.SR",
+      "2350.SR",
       "2230.SR",
-      "3030.SR",
-      "3020.SR",
-      "3040.SR"
+      "2330.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -12086,8 +12080,7 @@
       "2380.SR",
       "2290.SR",
       "2223.SR",
-      "4200.SR",
-      "2310.SR"
+      "4200.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -12148,9 +12141,9 @@
     "currency": "SAR",
     "currency_unit_scale": 1,
     "reporting_currency": "SAR",
-    "sector": "Energy",
-    "industry": "Integrated Oil & Gas",
-    "template_family": "energy",
+    "sector": "Materials",
+    "industry": "Chemicals",
+    "template_family": "materials",
     "market_cap_local": 7424999936.0,
     "market_cap_usd": 1979999982.93,
     "is_canonical": true,
@@ -12160,13 +12153,13 @@
     "underlying_ticker": null,
     "dr_fundamentals_source": null,
     "peer_set": [
-      "2222.SR",
-      "5110.SR",
-      "2380.SR",
-      "2290.SR",
-      "2223.SR",
-      "4200.SR",
-      "2310.SR"
+      "1211.SR",
+      "2010.SR",
+      "2020.SR",
+      "2310.SR",
+      "1322.SR",
+      "2230.SR",
+      "2330.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -12682,10 +12675,10 @@
       "1211.SR",
       "2010.SR",
       "2020.SR",
+      "2310.SR",
       "1322.SR",
-      "3030.SR",
-      "3020.SR",
-      "3040.SR"
+      "2350.SR",
+      "2330.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -12746,9 +12739,9 @@
     "currency": "SAR",
     "currency_unit_scale": 1,
     "reporting_currency": "SAR",
-    "sector": "Energy",
-    "industry": "Integrated Oil & Gas",
-    "template_family": "energy",
+    "sector": "Materials",
+    "industry": "Chemicals",
+    "template_family": "materials",
     "market_cap_local": 5792800256.0,
     "market_cap_usd": 1544746734.93,
     "is_canonical": true,
@@ -12758,13 +12751,13 @@
     "underlying_ticker": null,
     "dr_fundamentals_source": null,
     "peer_set": [
-      "2222.SR",
-      "5110.SR",
-      "2380.SR",
-      "2290.SR",
-      "2223.SR",
-      "4200.SR",
-      "2310.SR"
+      "1211.SR",
+      "2010.SR",
+      "2020.SR",
+      "2310.SR",
+      "1322.SR",
+      "2350.SR",
+      "2230.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -13001,10 +12994,10 @@
       "1211.SR",
       "2010.SR",
       "2020.SR",
+      "2310.SR",
       "1322.SR",
-      "2230.SR",
-      "3020.SR",
-      "3040.SR"
+      "2350.SR",
+      "2230.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -13121,10 +13114,10 @@
       "1211.SR",
       "2010.SR",
       "2020.SR",
+      "2310.SR",
       "1322.SR",
-      "2230.SR",
-      "3030.SR",
-      "3040.SR"
+      "2350.SR",
+      "2230.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -13236,10 +13229,10 @@
       "1211.SR",
       "2010.SR",
       "2020.SR",
+      "2310.SR",
       "1322.SR",
-      "2230.SR",
-      "3030.SR",
-      "3020.SR"
+      "2350.SR",
+      "2230.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -14073,10 +14066,10 @@
       "1211.SR",
       "2010.SR",
       "2020.SR",
+      "2310.SR",
       "1322.SR",
-      "2230.SR",
-      "3030.SR",
-      "3020.SR"
+      "2350.SR",
+      "2230.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -14271,10 +14264,10 @@
       "1211.SR",
       "2010.SR",
       "2020.SR",
+      "2310.SR",
       "1322.SR",
-      "2230.SR",
-      "3030.SR",
-      "3020.SR"
+      "2350.SR",
+      "2230.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -14351,10 +14344,10 @@
       "1211.SR",
       "2010.SR",
       "2020.SR",
+      "2310.SR",
       "1322.SR",
-      "2230.SR",
-      "3030.SR",
-      "3020.SR"
+      "2350.SR",
+      "2230.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -14710,10 +14703,10 @@
       "1211.SR",
       "2010.SR",
       "2020.SR",
+      "2310.SR",
       "1322.SR",
-      "2230.SR",
-      "3030.SR",
-      "3020.SR"
+      "2350.SR",
+      "2230.SR"
     ],
     "providers": {
       "yfinance": "partial",
@@ -14785,10 +14778,10 @@
       "1211.SR",
       "2010.SR",
       "2020.SR",
+      "2310.SR",
       "1322.SR",
-      "2230.SR",
-      "3030.SR",
-      "3020.SR"
+      "2350.SR",
+      "2230.SR"
     ],
     "providers": {
       "yfinance": "partial",

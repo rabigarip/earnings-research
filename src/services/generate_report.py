@@ -195,8 +195,20 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
     try:
         from src.storage.db import load_company
         from src.services.fetch_peers import fetch_peer_rows
+        from src.services.ticker_registry import registry_peer_set
         company_row = load_company(ticker) or {}
         peer_tickers = company_row.get("peer_group") or []
+        # Fall back to the registry's default peer set when the per-ticker
+        # company row doesn't carry an explicit list. Registry peers are
+        # auto-generated (top-7 by USD market cap within same template
+        # family + same region) so they're a reasonable default for any
+        # ticker in the 500-name universe.
+        if not peer_tickers:
+            peer_tickers = registry_peer_set(ticker)
+            if peer_tickers:
+                import logging
+                logging.getLogger(__name__).info(
+                    "Using registry peer set for %s: %s", ticker, peer_tickers)
         if peer_tickers:
             peer_rows = fetch_peer_rows(peer_tickers)
     except Exception as exc:

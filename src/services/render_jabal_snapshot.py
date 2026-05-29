@@ -710,12 +710,35 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
     if not currency and cv.get("current_price"):
         currency = cv["current_price"].canonical_source[:3].upper()  # fallback
 
+    # Sub-unit currency normalisation. The South African JSE quotes
+    # in ZAc (cents — 1/100 ZAR); registry carries a currency_unit_scale
+    # of 100 so the displayed price reads as Rand rather than cents.
+    # Other markets quote in base unit so scale=1 is a no-op.
+    try:
+        from src.services.ticker_registry import get_ticker_info as _gti
+        _ts = _gti(ticker)
+        unit_scale = float(_ts.get("currency_unit_scale") or 1)
+        # When scale > 1, divide displayed numerics and relabel currency
+        # to the base unit (ZAc → ZAR, GBp → GBP, ILA → ILS).
+        if unit_scale and unit_scale != 1:
+            _BASE_CCY = {"ZAc": "ZAR", "GBp": "GBP", "ILA": "ILS", "ILa": "ILS"}
+            currency = _BASE_CCY.get(currency, currency)
+    except Exception:
+        unit_scale = 1
+
+    def _scale(x):
+        if not isinstance(x, (int, float)): return x
+        try:
+            return float(x) / unit_scale
+        except (TypeError, ZeroDivisionError):
+            return x
+
     # Format helpers
     def _money(x):
         if x is None:
             return "—"
         try:
-            return f"{currency} {float(x):,.2f}" if currency else f"{float(x):,.2f}"
+            return f"{currency} {_scale(float(x)):,.2f}" if currency else f"{_scale(float(x)):,.2f}"
         except (TypeError, ValueError):
             return "—"
 

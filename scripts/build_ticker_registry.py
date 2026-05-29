@@ -107,8 +107,10 @@ SECTOR_PATTERNS = [
     # Asset / wealth management / securities / exchanges
     (r"\b(asset management|asset mgmt|wealth|securities|capital markets|brokers?|brokerage|exchanges|clearing|tadawul|nse|bse)",
         ("Financials", "Capital Markets")),
-    # Oil & gas
-    (r"\b(petroleum|petrochem|oil and|oil &|oil company|natural gas|gas company|energy company|petrochina|aramco|exxon|chevron|cnooc|sasol|sinopec|reliance industries|ongc|iocl|indian oil|coal india|yanbu national|saudi industrial investment)",
+    # Oil & gas (deliberately excludes 'petrochem' — that string matches
+    # 'petrochemical', a chemicals-industry indicator. Specific energy
+    # names are listed explicitly: PetroChina, Aramco, Sinopec, etc.)
+    (r"\b(petroleum|oil and|oil &|oil company|natural gas|gas company|energy company|petrochina|aramco|exxon|chevron|cnooc|sasol|sinopec|reliance industries|ongc|iocl|indian oil|coal india|yanbu national)",
         ("Energy", "Integrated Oil & Gas")),
     # Refining / downstream
     (r"\b(refining|refinery|luberef|rabigh)", ("Energy", "Oil & Gas Refining")),

@@ -164,6 +164,11 @@ def main() -> int:
     ap.add_argument("--tickers", help="Comma-separated ticker list")
     ap.add_argument("--panel", action="store_true",
                     help="Refresh only the 10-ticker production panel")
+    ap.add_argument("--active-set", action="store_true",
+                    help="Refresh only tickers in data/calendar/upcoming.json "
+                         "(set by the daily calendar GHA). Default mode for the "
+                         "daily refresh cron — avoids hammering MS for tickers "
+                         "no one is generating decks for today.")
     ap.add_argument("--delay", type=float, default=3.0,
                     help="Seconds between page fetches (default 3.0)")
     args = ap.parse_args()
@@ -175,6 +180,31 @@ def main() -> int:
         targets = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
     elif args.panel:
         targets = sorted(_PANEL & {(c.get("ticker") or "").upper() for c in companies})
+    elif args.active_set:
+        # Read data/calendar/upcoming.json — the narrow active set produced
+        # by the daily build_earnings_calendar GHA. Only refresh tickers
+        # whose earnings are within the 14-day horizon. The pre-existing
+        # full set (170 tickers) was wasteful — most of them had no
+        # upcoming earnings event, so the snapshots aged in place anyway.
+        calendar_path = Path(__file__).resolve().parents[1] / "data" / "calendar" / "upcoming.json"
+        if not calendar_path.is_file():
+            print(f"--active-set requested but {calendar_path} missing. "
+                  "Run scripts/build_earnings_calendar.py first.", file=sys.stderr)
+            return 2
+        try:
+            cal = json.loads(calendar_path.read_text())
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"Failed to parse {calendar_path}: {exc}", file=sys.stderr)
+            return 2
+        active_tickers = {t["ticker"].upper() for t in (cal.get("tickers") or [])
+                           if isinstance(t, dict) and t.get("ticker")}
+        # Intersect with tickers we have MS slugs for — calendar may include
+        # names whose MS coverage we haven't curated yet.
+        targets = sorted(active_tickers & {(c.get("ticker") or "").upper()
+                                            for c in companies
+                                            if (c.get("marketscreener_id") or "").strip()})
+        print(f"[active-set] {len(active_tickers)} tickers in 14-day horizon, "
+              f"{len(targets)} have curated MS slugs — refreshing those.")
     else:
         targets = sorted(
             (c.get("ticker") or "").upper()
