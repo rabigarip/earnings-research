@@ -30,6 +30,9 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
+# Allow `python scripts/populate_disclosed.py …` to import from src/.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger(__name__)
 
@@ -54,13 +57,67 @@ def _bkmb_url(yyyy: int, qq: int) -> Optional[str]:
     month_for_q = {1: "03", 2: "06", 3: "09", 4: "12"}.get(qq)
     if not month_for_q: return None
     yy = str(yyyy)[-2:]
-    return f"https://www.bankmuscat.om/en/investorrelations/QuarterlyReports/MSM_{month_for_q}{yy}.pdf"
+    return (f"https://www.bankmuscat.om/en/investorrelations/"
+            f"QuarterlyReports/MSM_{month_for_q}{yy}.pdf")
 
+
+def _nbo_url(yyyy: int, qq: int) -> Optional[str]:
+    """National Bank of Oman: similar MSM-style pattern, NBO-prefixed.
+    Pattern discovered from public IR-portal sample. Update if format
+    changes (rare — Omani banks have very stable IR portals)."""
+    month_for_q = {1: "03", 2: "06", 3: "09", 4: "12"}.get(qq)
+    if not month_for_q: return None
+    yy = str(yyyy)[-2:]
+    return (f"https://www.nbo.om/SiteAssets/Investor%20Relations/"
+            f"QuarterlyReports/NBO_{month_for_q}{yy}.pdf")
+
+
+def _bkdb_url(yyyy: int, qq: int) -> Optional[str]:
+    """Bank Dhofar: PDFs hosted at bankdhofar.com/InvestorRelations.
+    File naming is BD_QQ_YYYY.pdf for quarterly interim statements."""
+    return (f"https://www.bankdhofar.com/InvestorRelations/Financials/"
+            f"BD_Q{qq}_{yyyy}.pdf")
+
+
+# Saudi Tadawul tickers — the Saudi Exchange publishes IFRS financial
+# statements through Tadawul Disclosures. Each company has a stable
+# IR portal URL with English-locale interim PDFs. Patterns below are
+# best-guess templates; analyst should verify each.
+
+def _sabic_agrinutrients_url(yyyy: int, qq: int) -> Optional[str]:
+    """SABIC Agri-Nutrients (2020.SR). IR portal hosts quarterly PDFs
+    under /sites/default/files/<lang>/<yyyy>/Q<q>-<yyyy>-English.pdf.
+    Pattern requires verification on first use; the framework downloads
+    + validates the PDF magic header, so a bad URL fails gracefully."""
+    return (f"https://san.sabic.com/sites/default/files/2024-03/"
+            f"Q{qq}-{yyyy}-English.pdf")
+
+
+def _aramco_url(yyyy: int, qq: int) -> Optional[str]:
+    """Saudi Aramco (2222.SR). IR portal hosts interim statements at a
+    stable URL keyed by year + quarter."""
+    return (f"https://www.aramco.com/-/media/downloads/quarterly-results/"
+            f"q{qq}-{yyyy}-interim-condensed-consolidated-financial-statements.pdf")
+
+
+# Map: ticker → URL-builder function. Each takes (yyyy, qq) and returns
+# the URL string or None when that period isn't published yet (e.g.,
+# FY reports out in early March). Tested URLs are HIGH-confidence;
+# inferred URLs are MEDIUM-confidence — the populate script downloads
+# the file and validates the PDF magic header, so a wrong URL produces
+# a clean failure rather than a corrupted JSON.
 
 KNOWN_IR_PATTERNS: dict[str, callable] = {
-    "BKMB.OM": _bkmb_url,
-    # Add more tickers here as their IR portals are discovered.
-    # Each pattern is one small function — keeps onboarding ~5 min.
+    "BKMB.OM": _bkmb_url,           # HIGH confidence — tested
+    "NBO.OM": _nbo_url,              # MEDIUM — pattern inferred
+    "BKDB.OM": _bkdb_url,            # MEDIUM — pattern inferred
+    "2020.SR": _sabic_agrinutrients_url,  # MEDIUM
+    "2222.SR": _aramco_url,          # MEDIUM
+    # Add more tickers here as their IR portals are confirmed.
+    # Onboarding workflow: (1) find a sample PDF URL on the IR portal,
+    # (2) identify how year+quarter map to the URL, (3) add a small
+    # function above, (4) test with: `python scripts/populate_disclosed.py
+    # <TICKER>`. The PDF magic-header check guards against bad URLs.
 }
 
 
@@ -177,11 +234,78 @@ def populate_ticker(ticker: str, n_recent_quarters: int = 6) -> int:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("ticker", help="Ticker to populate (e.g. BKMB.OM)")
+    ap.add_argument("ticker", nargs="?",
+                    help="Ticker to populate (e.g. BKMB.OM). "
+                         "Omit when using --all-known or --upcoming.")
     ap.add_argument("--quarters", type=int, default=6,
                     help="How many recent quarters to attempt (default 6)")
+    ap.add_argument("--all-known", action="store_true",
+                    help="Populate every ticker in KNOWN_IR_PATTERNS. "
+                         "Used by the daily disclosed-refresh cron.")
+    ap.add_argument("--upcoming", action="store_true",
+                    help="Populate every known-pattern ticker that is also "
+                         "in data/calendar/upcoming.json (the active set). "
+                         "Highest-value daily mode.")
+    ap.add_argument("--stale-only", action="store_true",
+                    help="In bulk modes, skip tickers whose disclosed file "
+                         "is already fresh (days_since_period_end < 60).")
     args = ap.parse_args()
-    return populate_ticker(args.ticker, args.quarters)
+
+    if args.all_known:
+        targets = list(KNOWN_IR_PATTERNS.keys())
+    elif args.upcoming:
+        calendar_path = ROOT / "data" / "calendar" / "upcoming.json"
+        if not calendar_path.is_file():
+            log.error("--upcoming requires data/calendar/upcoming.json. "
+                      "Run scripts/build_earnings_calendar.py first.")
+            return 1
+        try:
+            cal = json.loads(calendar_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            log.error("Failed to read calendar: %s", exc)
+            return 1
+        active = {t["ticker"] for t in (cal.get("tickers") or [])
+                   if isinstance(t, dict)}
+        targets = [t for t in KNOWN_IR_PATTERNS if t in active]
+        if not targets:
+            log.info("No upcoming-set tickers have known IR patterns.")
+            return 0
+    elif args.ticker:
+        targets = [args.ticker]
+    else:
+        ap.error("Provide a ticker, --all-known, or --upcoming")
+        return 1
+
+    if args.stale_only:
+        from src.services.disclosed_status import assess
+        fresh_threshold = 60
+        skipped = []
+        keep = []
+        for t in targets:
+            cov = assess(t)
+            if cov.file_exists and cov.days_since_period_end is not None \
+                and cov.days_since_period_end < fresh_threshold:
+                skipped.append((t, cov.most_recent_period,
+                                cov.days_since_period_end))
+            else:
+                keep.append(t)
+        for t, period, days in skipped:
+            log.info("Skipping %s — fresh disclosed (period=%s, %dd old)",
+                     t, period, days)
+        targets = keep
+
+    if not targets:
+        log.info("Nothing to populate after filtering.")
+        return 0
+
+    log.info("Populating %d ticker(s): %s", len(targets), ", ".join(targets))
+    exit_codes = []
+    for t in targets:
+        log.info("=== %s ===", t)
+        rc = populate_ticker(t, args.quarters)
+        exit_codes.append(rc)
+    # Successful if at least one ticker succeeded.
+    return 0 if any(c == 0 for c in exit_codes) else max(exit_codes)
 
 
 if __name__ == "__main__":

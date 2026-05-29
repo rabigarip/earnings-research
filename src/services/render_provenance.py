@@ -390,7 +390,46 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
                     f"Standalone-quarter value from {doc}",
                 ])
 
-    # 5. MS annual forecasts — emit FY year × metric rows when present.
+    # 4b. Disclosed-pipeline coverage assessment. One row that tells
+    #     the analyst HOW MUCH of the disclosed track we have for this
+    #     ticker — recent quarters captured, freshness, completeness.
+    try:
+        from src.services.disclosed_status import assess as _disc_assess
+        _cov = _disc_assess(ticker)
+        if _cov.file_exists:
+            rows.append([
+                "Slide 3", "Disclosed Coverage",
+                f"Coverage summary",
+                (f"{_cov.n_quarters} quarters; latest "
+                  f"{_cov.most_recent_period} "
+                  f"({_cov.days_since_period_end}d old); "
+                  f"completeness {_cov.coverage_pct:.0f}%"),
+                f"Company IR",
+                "(see Earnings History — Disclosed section above)",
+                _cov.most_recent_period or "", "",
+                ("; ".join(_cov.issues) if _cov.issues
+                  else "No issues"),
+            ])
+    except Exception as _exc:
+        pass
+
+    # 4c. Validation findings. Tier-1 (pre-LLM source-data) findings
+    #     come from `memo_data["validation_report"]`; tier-2 (post-LLM
+    #     numeric trace) comes from `llm["validation_tier2"]`. Both
+    #     emit one row per finding so the analyst can audit which
+    #     numbers the validator flagged.
+    if memo_data and isinstance(memo_data.get("validation_report"), dict):
+        for f in memo_data["validation_report"].get("findings", []) or []:
+            rows.append([
+                "All Slides", "Validation · Tier 1 (pre-LLM)",
+                f"{f.get('metric', '?')}",
+                (f.get("message") or "")[:120],
+                "Derived",
+                "src/services/validation_layer.py", "", "",
+                f.get("suggested_action") or "",
+            ])
+
+    # 4d. MS annual forecasts — emit FY year × metric rows when present.
     #    These back the annual-fallback table on slide 2 and the forward
     #    P/E bars on slide 3.
     annual = None
@@ -473,6 +512,38 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
                     _source_url("gemini", ticker),
                     "", as_of, f"context_hash={ctx_hash}",
                 ])
+
+        # Tier-2 validation findings (post-LLM numeric-trace).
+        v2 = llm.get("validation_tier2") or {}
+        for f in (v2.get("findings") or []):
+            rows.append([
+                "Slide 2", "Validation · Tier 2 (post-LLM)",
+                f.get("metric", "?"),
+                (f.get("message") or "")[:120],
+                "Derived",
+                "src/services/validation_layer.py", "", as_of,
+                f.get("suggested_action") or "",
+            ])
+
+        # Voice eval — score the thesis paragraph against the references.
+        try:
+            from src.services.voice_eval import evaluate as _voice_eval
+            thesis_text = (llm.get("thesis_paragraph") or "").strip()
+            if thesis_text:
+                vres = _voice_eval(ticker, thesis_text)
+                rows.append([
+                    "Slide 2", "Voice Eval",
+                    "Composite score (vs Apple/JPM/Tesla refs)",
+                    f"{vres.composite_score:.3f} ({vres.grade})",
+                    "Derived",
+                    "src/services/voice_eval.py", "", as_of,
+                    f"struct={vres.structural_score:.2f} · "
+                    f"lex={vres.lexical_score:.2f} · "
+                    f"style={vres.style_score:.2f}"
+                    + (" · " + "; ".join(vres.notes[:2]) if vres.notes else ""),
+                ])
+        except Exception as _exc:
+            pass
 
     # Sort by slide then section for a clean read.
     def _slide_sort(r):

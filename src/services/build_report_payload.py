@@ -870,6 +870,43 @@ def _compute_memo(
         out["avg_4q_revenue_growth"] = getattr(derived, "avg_4q_revenue_growth", None)
         out["avg_4q_ni_growth"] = getattr(derived, "avg_4q_ni_growth", None)
 
+    # ─── TIER-1 VALIDATION (pre-LLM) ───────────────────────────────
+    # Surface plausibility issues with the consensus values we're about
+    # to feed downstream. Findings are RECORDED, not blocking — the
+    # deck still ships, the provenance.xlsx + dashboard surface them.
+    try:
+        from src.services.validation_layer import run_tier_1
+        _trailing = []
+        for fp in (quarterly or [])[:4]:
+            _trailing.append({
+                "revenue": getattr(fp, "revenue", None),
+                "eps": getattr(fp, "eps", None),
+                "ebitda": getattr(fp, "ebitda", None),
+                "ni": getattr(fp, "net_income", None),
+            })
+        _consensus = {
+            "revenue": out.get("next_quarter_consensus_revenue"),
+            "eps": out.get("next_quarter_consensus_eps"),
+            "ebitda": out.get("next_quarter_consensus_ebitda"),
+            "ni": out.get("next_quarter_consensus_ni"),
+        }
+        _macro_block = {
+            "gdp_growth_year": (out.get("imf_gdp_growth_year")
+                                  or out.get("macro_year")),
+            "inflation_year": out.get("imf_inflation_year"),
+        }
+        v_report = run_tier_1(
+            getattr(company, "ticker", "?"),
+            next_q_consensus=_consensus,
+            trailing_actuals=_trailing,
+            macro=_macro_block,
+        )
+        out["validation_report"] = v_report.as_dict()
+    except Exception as exc:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "Tier-1 validation skipped: %s", exc)
+
     return out
 
 

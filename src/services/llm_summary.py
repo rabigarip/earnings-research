@@ -906,5 +906,24 @@ def generate_summary(ticker: str, *, force_refresh: bool = False) -> Optional[di
     # number we can't trace back to the context. Voice and bullet count
     # are the model's leeway — only hallucinated numbers are policed.
     payload = _validate_llm_output(payload, ctx)
+
+    # TIER-2 STRUCTURED VALIDATION — produces ValidationFinding records
+    # alongside the scrubbed payload. The numeric-trace path above
+    # silently rewrites the prose; tier-2 KEEPS a record of which
+    # tokens were unmatched so the provenance.xlsx audit trail can
+    # surface them to the analyst.
+    try:
+        from src.services.validation_layer import run_tier_2
+        anchors = _allowed_numbers(ctx)
+        v_rep = run_tier_2(
+            ticker,
+            thesis_paragraph=payload.get("thesis_paragraph"),
+            allowed_numbers=anchors,
+        )
+        if v_rep.findings:
+            payload["validation_tier2"] = v_rep.as_dict()
+    except Exception as exc:
+        log.debug("Tier-2 validation skipped: %s", exc)
+
     _write_cache(path, payload)
     return payload

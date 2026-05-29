@@ -305,6 +305,59 @@ def v2_ticker_info(ticker: str):
     return get_ticker_info(ticker)
 
 
+@app.get("/api/v2/disclosed_status")
+def v2_disclosed_status(tickers: str | None = None):
+    """Per-ticker disclosed-pipeline coverage.
+
+    `tickers` is a comma-separated list. When omitted, returns coverage
+    for every ticker in KNOWN_IR_PATTERNS (the universe we can populate
+    automatically). Empty entries mean we haven't pulled IR PDFs yet.
+
+    Frontend uses this to render a coverage matrix in the dashboard:
+    which tickers have disclosed actuals, how recent, how complete.
+    """
+    from src.services.disclosed_status import assess_universe
+    # Resolve the ticker list.
+    if tickers:
+        target_list = [t.strip() for t in tickers.split(",") if t.strip()]
+    else:
+        try:
+            from scripts.populate_disclosed import KNOWN_IR_PATTERNS
+            target_list = sorted(KNOWN_IR_PATTERNS.keys())
+        except Exception:
+            target_list = []
+    covers = assess_universe(target_list)
+    return {
+        "tickers": [c.as_dict() for c in covers],
+        "n_total": len(covers),
+        "n_with_data": sum(1 for c in covers if c.file_exists),
+        "n_complete": sum(1 for c in covers if c.fields_complete),
+    }
+
+
+@app.get("/api/v2/voice_eval_latest")
+def v2_voice_eval_latest():
+    """Return the most-recent voice-eval JSON snapshot.
+
+    Read from data/voice_eval/{date}.json. Useful for the dashboard
+    to surface voice-drift over time without re-scoring on every page
+    load. If no snapshot exists yet, returns an empty result."""
+    from pathlib import Path as _P
+    import json as _json
+    eval_dir = _P(__file__).resolve().parents[1] / "data" / "voice_eval"
+    if not eval_dir.is_dir():
+        return {"results": {}, "aggregate": {}, "snapshot_date": None}
+    snapshots = sorted(eval_dir.glob("*.json"), reverse=True)
+    if not snapshots:
+        return {"results": {}, "aggregate": {}, "snapshot_date": None}
+    try:
+        payload = _json.loads(snapshots[0].read_text())
+        payload["snapshot_date"] = snapshots[0].stem
+        return payload
+    except (OSError, _json.JSONDecodeError):
+        return {"results": {}, "aggregate": {}, "snapshot_date": None}
+
+
 @app.get("/api/v2/decks")
 def v2_recent_decks(limit: int = 30):
     """List recently generated decks from the outputs/ folder.

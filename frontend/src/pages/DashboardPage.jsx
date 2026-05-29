@@ -188,6 +188,84 @@ function UniverseTable({ tickers, loading }) {
   );
 }
 
+function CoverageMatrix({ items, loading }) {
+  if (loading) return <div className="text-slate-400 text-sm">Loading…</div>;
+  if (!items.length) return <div className="text-slate-400 text-sm">No disclosed pipelines configured.</div>;
+  return (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="text-xs uppercase text-slate-500 border-b border-slate-800">
+          <th className="text-left py-2">Ticker</th>
+          <th className="text-left">Latest</th>
+          <th className="text-right">Quarters</th>
+          <th className="text-right">Coverage</th>
+          <th className="text-right">Age (days)</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {items.map((t) => {
+          const stale = t.days_since_period_end != null && t.days_since_period_end > 90;
+          return (
+            <tr key={t.ticker} className="border-b border-slate-900">
+              <td className="py-2 font-mono text-slate-100 text-xs">{t.ticker}</td>
+              <td className="text-slate-300 text-xs">{t.most_recent_period || "—"}</td>
+              <td className="text-right text-slate-400 text-xs">{t.n_quarters}</td>
+              <td className={`text-right text-xs ${t.coverage_pct >= 90 ? "text-emerald-300" : t.coverage_pct >= 50 ? "text-amber-300" : "text-rose-300"}`}>
+                {t.coverage_pct}%
+              </td>
+              <td className={`text-right text-xs ${stale ? "text-rose-300" : "text-slate-400"}`}>
+                {t.days_since_period_end != null ? t.days_since_period_end : "—"}
+              </td>
+              <td className="text-right">
+                {t.file_exists
+                  ? <span className="text-xs text-emerald-400">✓</span>
+                  : <span className="text-xs text-slate-600">—</span>}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function VoiceEvalCard({ snapshot, loading }) {
+  if (loading) return <div className="text-slate-400 text-sm">Loading…</div>;
+  const agg = snapshot?.aggregate || {};
+  const results = snapshot?.results || {};
+  if (!agg.n_decks) return <div className="text-slate-400 text-sm">No voice eval data yet.</div>;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-4 text-xs">
+        <span className="text-slate-400">Snapshot:</span>
+        <span className="text-slate-200">{snapshot.snapshot_date}</span>
+        <span className="text-slate-400">|</span>
+        <span className="text-slate-400">Avg composite:</span>
+        <span className="text-slate-100 font-mono">{(agg.avg_composite ?? 0).toFixed(3)}</span>
+      </div>
+      <div className="flex gap-3 text-xs">
+        <span className="px-2 py-0.5 rounded bg-emerald-900 text-emerald-100">{agg.n_matches} matches</span>
+        <span className="px-2 py-0.5 rounded bg-amber-900 text-amber-100">{agg.n_close} close</span>
+        <span className="px-2 py-0.5 rounded bg-rose-900 text-rose-100">{agg.n_diverges} diverges</span>
+      </div>
+      <ul className="text-xs space-y-1">
+        {Object.entries(results).map(([ticker, r]) => {
+          const grade = r.grade;
+          const color = grade === "matches" ? "text-emerald-300"
+                       : grade === "close" ? "text-amber-300" : "text-rose-300";
+          return (
+            <li key={ticker} className="flex items-center justify-between px-2 py-1 hover:bg-slate-900/50 rounded">
+              <span className="font-mono text-slate-200">{ticker}</span>
+              <span className={`${color} font-mono`}>{r.composite_score.toFixed(3)} · {grade}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [upcoming, setUpcoming] = useState({ tickers: [], generated_at: null });
   const [upcomingLoading, setUpcomingLoading] = useState(true);
@@ -195,6 +273,10 @@ export default function DashboardPage() {
   const [decksLoading, setDecksLoading] = useState(true);
   const [universe, setUniverse] = useState([]);
   const [universeLoading, setUniverseLoading] = useState(true);
+  const [coverage, setCoverage] = useState([]);
+  const [coverageLoading, setCoverageLoading] = useState(true);
+  const [voiceEval, setVoiceEval] = useState(null);
+  const [voiceLoading, setVoiceLoading] = useState(true);
   const [family, setFamily] = useState("");
 
   useEffect(() => {
@@ -219,6 +301,20 @@ export default function DashboardPage() {
       .then((d) => { setUniverse(d.tickers || []); setUniverseLoading(false); })
       .catch(() => setUniverseLoading(false));
   }, [family]);
+
+  useEffect(() => {
+    fetch("/api/v2/disclosed_status")
+      .then((r) => r.json())
+      .then((d) => { setCoverage(d.tickers || []); setCoverageLoading(false); })
+      .catch(() => setCoverageLoading(false));
+  }, []);
+
+  useEffect(() => {
+    fetch("/api/v2/voice_eval_latest")
+      .then((r) => r.json())
+      .then((d) => { setVoiceEval(d); setVoiceLoading(false); })
+      .catch(() => setVoiceLoading(false));
+  }, []);
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
@@ -262,6 +358,25 @@ export default function DashboardPage() {
           <h2 className="text-sm uppercase text-slate-400 font-semibold mb-3">Universe · top 50 by market cap</h2>
           <div className="bg-slate-900/30 border border-slate-800 rounded p-4 max-h-[600px] overflow-y-auto">
             <UniverseTable tickers={universe} loading={universeLoading} />
+          </div>
+        </section>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section>
+          <h2 className="text-sm uppercase text-slate-400 font-semibold mb-3">
+            Disclosed coverage <span className="text-xs text-slate-500 normal-case">(per-ticker IR pipelines)</span>
+          </h2>
+          <div className="bg-slate-900/30 border border-slate-800 rounded p-4">
+            <CoverageMatrix items={coverage} loading={coverageLoading} />
+          </div>
+        </section>
+        <section>
+          <h2 className="text-sm uppercase text-slate-400 font-semibold mb-3">
+            Voice eval <span className="text-xs text-slate-500 normal-case">(vs Apple/JPM/Tesla references)</span>
+          </h2>
+          <div className="bg-slate-900/30 border border-slate-800 rounded p-4">
+            <VoiceEvalCard snapshot={voiceEval} loading={voiceLoading} />
           </div>
         </section>
       </div>
