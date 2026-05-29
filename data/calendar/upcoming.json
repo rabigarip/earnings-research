@@ -1,0 +1,66 @@
+{
+  "generated_at": "2026-05-29T10:38:53+00:00",
+  "horizon_days": 14,
+  "tickers": [
+    {
+      "ticker": "ASIANPAINT.BO",
+      "company_name": "Asian Paints Limited",
+      "template_family": "materials",
+      "exchange_country": "IN",
+      "earnings_date": "2026-05-29",
+      "earnings_date_source": "yfinance",
+      "days_until": 0,
+      "next_quarter_label": "Q4 FY26",
+      "fiscal_year_end_month": 3,
+      "market_cap_usd": 25659904220.74
+    },
+    {
+      "ticker": "INDIGO.NS",
+      "company_name": "InterGlobe Aviation Limited",
+      "template_family": "industrial",
+      "exchange_country": "IN",
+      "earnings_date": "2026-05-29",
+      "earnings_date_source": "yfinance",
+      "days_until": 0,
+      "next_quarter_label": "Q4 FY26",
+      "fiscal_year_end_month": 3,
+      "market_cap_usd": 19743645352.62
+    },
+    {
+      "ticker": "3690.HK",
+      "company_name": "Meituan",
+      "template_family": "tech",
+      "exchange_country": "HK",
+      "earnings_date": "2026-06-01",
+      "earnings_date_source": "yfinance",
+      "days_until": 3,
+      "next_quarter_label": "Q1 2026",
+      "fiscal_year_end_month": 12,
+      "market_cap_usd": 59539998627.98
+    },
+    {
+      "ticker": "9961.HK",
+      "company_name": "Trip.com Group Limited",
+      "template_family": "tech",
+      "exchange_country": "HK",
+      "earnings_date": "2026-06-01",
+      "earnings_date_source": "yfinance",
+      "days_until": 3,
+      "next_quarter_label": "Q1 2026",
+      "fiscal_year_end_month": 12,
+      "market_cap_usd": 33997449891.66
+    },
+    {
+      "ticker": "M&M.NS",
+      "company_name": "Mahindra & Mahindra Limited",
+      "template_family": "industrial",
+      "exchange_country": "IN",
+      "earnings_date": "2026-06-03",
+      "earnings_date_source": "yfinance",
+      "days_until": 5,
+      "next_quarter_label": "Q4 FY26",
+      "fiscal_year_end_month": 3,
+      "market_cap_usd": 44060946898.01
+    }
+  ]
+}
