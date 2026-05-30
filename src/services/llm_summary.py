@@ -169,6 +169,27 @@ def build_context(ticker: str) -> dict:
     if mcap_source == "marketscreener" and isinstance(raw_mcap, (int, float)):
         raw_mcap = raw_mcap * 1_000_000
 
+    # Peer / industry P/E median — the comparator the VALUATION pill
+    # should cite ("vs the GCC bank peer median near 9.0x"). Computed from
+    # the SAME registry peer set the slide-3 table uses, so the deck and
+    # the prose agree. Best-effort: thin coverage / network failure leaves
+    # it None and the prompt degrades to the own-history comparator rather
+    # than falling back to the bare template.
+    peer_pe_median = None
+    try:
+        from src.services.ticker_registry import registry_peer_set
+        from src.services.fetch_peers import fetch_peer_rows
+        import statistics as _stats
+        _peers = registry_peer_set(ticker) or []
+        if _peers:
+            _rows = fetch_peer_rows(_peers) or []
+            _pes = [r.get("pe") for r in _rows
+                    if isinstance(r.get("pe"), (int, float)) and r.get("pe") > 0]
+            if len(_pes) >= 3:
+                peer_pe_median = round(_stats.median(_pes), 1)
+    except Exception:
+        peer_pe_median = None
+
     # Normalise FY year labels (strip an existing "FY" prefix so the prompt
     # doesn't end up with "FYFY2026").
     def _norm_fy(v):
@@ -178,6 +199,7 @@ def build_context(ticker: str) -> dict:
         return s
 
     return {
+        "peer_pe_median": peer_pe_median,
         "ticker": ticker,
         "company_name": profile.get("name") or ticker,
         "sector": profile.get("sector") or "—",
@@ -316,6 +338,17 @@ def _prompt(ctx: dict) -> str:
             f"trailing P/E {rec:.1f}x vs 5-year average {avg:.1f}x "
             f"({delta_pct:+.0f}% relative)"
         )
+    # Peer/industry comparator — the preferred anchor for the VALUATION pill.
+    if isinstance(ctx.get("peer_pe_median"), (int, float)):
+        ppm = ctx["peer_pe_median"]
+        rec = ctx.get("pe_recent")
+        if isinstance(rec, (int, float)) and ppm:
+            prem = (rec / ppm - 1.0) * 100
+            pe_parts.append(
+                f"peer/industry median P/E {ppm:.1f}x "
+                f"(subject {prem:+.0f}% vs peers)")
+        else:
+            pe_parts.append(f"peer/industry median P/E {ppm:.1f}x")
     pe_line = "; ".join(pe_parts) + "." if pe_parts else ""
 
     # Short commodity tags (e.g. "hh" for Henry Hub) get truncated by the
@@ -484,16 +517,18 @@ trailing prose. JSON only.
          prices, capex, free cash flow. For tech: revenue growth,
          gross margin, AI/product momentum, guidance.
      S2. "Recent performance has been supported by [drivers],
-         while [pressures] remain key concerns." Qualitative
-         narrative — what the Street has been rewarding and what
-         it's been worrying about.
+         while [pressures] remain key concerns." REQUIRED — this is
+         the meatiest interpretive sentence; never skip it. Qualitative
+         narrative on what the Street has been rewarding and worrying
+         about. Do not collapse the paragraph to two sentences.
      S3. "The setup appears [balanced / cautiously attractive /
          asymmetric / high-risk-high-reward], [one-clause
          reason]." Stop here. No scenario coda.
 
-   DO NOT write an "Investors should watch …" / "Key metrics to watch …"
-   sentence. Those questions live in their own "What to Watch" card on
-   the same slide; repeating them here is redundant. Three sentences only.
+   Exactly THREE full sentences (~70-110 words). DO NOT write an
+   "Investors should watch …" / "Key metrics to watch …" sentence —
+   those questions live in their own "What to Watch" card on the same
+   slide; repeating them here is redundant.
 
    You may anchor 1-2 numbers in S2 if they sharpen the read (e.g. a
    specific NIM percent, a current multiple). Do not stuff numbers. The
@@ -515,15 +550,17 @@ trailing prose. JSON only.
      Weak: "Loan growth amid 1.6% GDP growth." (macro is backdrop,
             not the driver; says nothing about the print)
 
-   VALUATION — lead with the LIVE multiple, then compare it to PEERS /
-   the industry (the comparator the reader actually weighs). A 5-year
-   own-average may be added as a secondary clause but never stand alone.
+   VALUATION — ALWAYS lead with the LIVE multiple (the number on the
+   slide). Then add a comparator: prefer the peer/industry median when
+   the data block gives one ("peer/industry median P/E"); if it doesn't,
+   the 5-year own-average is an acceptable comparator. Hard rule: a
+   comparator NEVER stands alone — the live multiple must be present.
      Good: "Trades at 11.1x trailing earnings, a ~20% premium to the
             GCC bank peer median near 9.0x."
-     Also good: "Forward P/E 12.1x — in line with peers but a 4%
-            premium to its own 5y average of 10.7x."
-     Weak: "Trades at a premium to its 5-year average." (own-history
-            only; no live multiple, no peer anchor)
+     Also good (no peer data): "Forward P/E 12.1x, a 4% premium to its
+            own 5-year average of 10.7x."
+     Weak: "Trades at a premium to its 5-year average." (no live
+            multiple — comparator standing alone)
 
    POSITIONING — the Street's posture. Rating split, target
    dispersion, beat history. Interpretive, not restated.
@@ -556,8 +593,10 @@ trailing prose. JSON only.
    too generic — rewrite.
 
    Rules:
-     - Do NOT use GDP / macro as the driver of a catalyst (e.g. "loan
-       growth supported by GDP" is filler). Anchor on a company lever.
+     - Do NOT mention "macro backdrop", GDP, or inflation in a catalyst
+       at all — not as a driver, not as a benchmark. Anchor entirely on
+       a company lever (e.g. "loan growth that outpaces the prior 5-7%
+       guidance", NOT "outpaces the macro backdrop").
      - Carry a baseline figure when one exists (a yield, a guidance
        range, a ratio) so the reader can size the move.
      - No vague nouns like "updates", "developments", "progress" — say
@@ -582,9 +621,12 @@ trailing prose. JSON only.
    if it already lives in the VALUATION pill.
 
    Rules:
-     - Never use the bare word "unexpected"/"unforeseen" as the risk —
-       say what the event is and either a magnitude or whether it's a
-       one-off vs structural channel.
+     - BANNED filler phrasings: "unexpected", "unforeseen",
+       "higher-than-expected", "lower-than-expected",
+       "slower-than-expected", "better-than-expected". They say nothing.
+       Replace with a concrete magnitude/threshold (e.g. "cost-of-risk
+       rising above 50bp") or a named trigger (a specific exposure, a
+       repricing channel, a one-off charge).
      - Don't repeat the same worry (e.g. "slower loan growth") across
        multiple bullets or across slides; if it's already on the deck,
        pick a different downside path.
