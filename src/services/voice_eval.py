@@ -136,7 +136,10 @@ def _structural(text: str, res: VoiceEvalResult) -> None:
     sentences = [s.strip() for s in _SENT_RE.split(text.strip()) if s.strip()]
     res.sentence_count = len(sentences)
 
-    res.has_opening_marker = "enters earnings with focus on" in text.lower()
+    # Opener may now carry the quarter, e.g. "enters Q2 2026 earnings with
+    # focus on" — match with an optional period token between the words.
+    res.has_opening_marker = bool(
+        re.search(r"enters(?:\s+[\w/]+){0,4}\s+earnings with focus on", text.lower()))
     drivers_phrases = ("supported by", "driven by", "recent performance has been")
     res.has_drivers_marker = any(p in text.lower() for p in drivers_phrases)
     watch_phrases = ("investors should watch", "key metrics to watch",
@@ -166,24 +169,28 @@ def _structural(text: str, res: VoiceEvalResult) -> None:
         far = min(abs(res.sentence_count - _REF_SENTENCE_BAND[0]),
                    abs(res.sentence_count - _REF_SENTENCE_BAND[1]))
         sc_score = max(0.0, 1.0 - far / 3)
+    # The exec summary is now THREE sentences — opener (S1), drivers (S2),
+    # setup verdict (S3). The "watch" sentence was intentionally removed
+    # (those questions live in their own card), so it is NOT a required
+    # marker; if it shows up, that's a fault (duplication), not a credit.
     marker_bits = (
-        res.has_opening_marker, res.has_drivers_marker,
-        res.has_watch_marker, res.has_setup_marker,
+        res.has_opening_marker, res.has_drivers_marker, res.has_setup_marker,
     )
-    marker_score = sum(1 for b in marker_bits if b) / 4
+    marker_score = sum(1 for b in marker_bits if b) / 3
 
     res.structural_score = round(
         0.30 * wc_score + 0.20 * sc_score + 0.50 * marker_score, 3,
     )
     if not res.has_opening_marker:
         res.notes.append(
-            "Missing opener 'enters earnings with focus on …' — S1 marker")
+            "Missing opener 'enters … earnings with focus on …' — S1 marker")
     if not res.has_drivers_marker:
         res.notes.append("Missing drivers marker (S2)")
-    if not res.has_watch_marker:
-        res.notes.append("Missing watch-list marker (S3)")
+    if res.has_watch_marker:
+        res.notes.append("Unwanted watch sentence in exec summary "
+                          "(belongs in the What-to-Watch card)")
     if not res.has_setup_marker:
-        res.notes.append("Missing setup-verdict marker (S4)")
+        res.notes.append("Missing setup-verdict marker (S3)")
 
 
 def _lexical(text: str, res: VoiceEvalResult) -> None:

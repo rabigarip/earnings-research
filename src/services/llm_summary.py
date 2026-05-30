@@ -169,6 +169,29 @@ def build_context(ticker: str) -> dict:
     if mcap_source == "marketscreener" and isinstance(raw_mcap, (int, float)):
         raw_mcap = raw_mcap * 1_000_000
 
+    # Disclosed quarterly actuals (company IR) — grounds {latest_actuals}
+    # and the NII / fee-income trend the senior-analyst prompt leans on.
+    # NIM, cost of risk, loan/deposit and capital are NOT in the disclosed
+    # feed yet, so those stay absent and the prompt marks them "not
+    # disclosed" (the model must stay qualitative on them, never invent).
+    disclosed_quarters = []
+    try:
+        from src.services.disclosed_loader import load_disclosed
+        _dl = load_disclosed(ticker) or {}
+        for q in (_dl.get("quarterly") or [])[-4:]:
+            if not isinstance(q, dict):
+                continue
+            disclosed_quarters.append({
+                "period": q.get("period"),
+                "nii": q.get("net_interest_income") or q.get("net_interest_islamic_combined"),
+                "fees": q.get("fee_income_net"),
+                "operating_income": q.get("operating_income"),
+                "net_income": q.get("net_income"),
+                "eps": q.get("eps") or q.get("eps_actual"),
+            })
+    except Exception:
+        disclosed_quarters = []
+
     # Peer / industry P/E median — the comparator the VALUATION pill
     # should cite ("vs the GCC bank peer median near 9.0x"). Computed from
     # the SAME registry peer set the slide-3 table uses, so the deck and
@@ -200,6 +223,7 @@ def build_context(ticker: str) -> dict:
 
     return {
         "peer_pe_median": peer_pe_median,
+        "disclosed_quarters": disclosed_quarters,
         "ticker": ticker,
         "company_name": profile.get("name") or ticker,
         "sector": profile.get("sector") or "—",
@@ -284,16 +308,24 @@ def build_context(ticker: str) -> dict:
 # ── Prompt ───────────────────────────────────────────────────────
 
 _SYSTEM = (
-    "You are a senior buy-side analyst at Jabal Asset Management writing the "
-    "Investment Thesis paragraph of an institutional earnings-preview note. "
-    "Your voice is declarative and direct, like a sell-side morning note: "
-    "short sentences, no hedging adverbs, no marketing language. "
-    "Every numeric claim MUST cite a value from the data block — never invent, "
-    "round inconsistently, or extrapolate beyond what is supplied. "
-    "Forbidden phrasing: 'we believe', 'appears to', 'suggests', 'could "
-    "potentially', 'may benefit', 'remains well-positioned', 'attractive "
-    "entry point', 'compelling valuation'. If a fact is not in the data, do "
-    "not state it. If you have no number for a claim, drop the claim."
+    "You are a senior sell-side equity research analyst writing an "
+    "institutional earnings-preview note. Audience: portfolio managers, not "
+    "retail. Voice: concise, balanced, skeptical, declarative — a morning "
+    "research note. "
+    "Every point must explain a MECHANISM: what changes, why it matters, and "
+    "how it flows through to earnings, valuation, or the share-price reaction. "
+    "For banks, use the right vocabulary where the data supports it — NII, "
+    "NIM, deposit costs, loan growth, fee income, impairments, cost of risk, "
+    "capital generation, ROE, funding mix, asset quality, dividends — but "
+    "never attach a NUMBER to a metric the data block doesn't provide. "
+    "BANNED unless tied to a specific metric in the data: 'strong "
+    "fundamentals', 'positive outlook', 'solid performance', 'robust growth', "
+    "'well-positioned', 'attractive valuation', 'we believe', 'appears to', "
+    "'suggests', 'could potentially', 'may benefit'. "
+    "Do not repeat an idea across sections. Do not sound promotional. Do not "
+    "overstate confidence. Every number must come from the DATA block — never "
+    "invent numbers, dates, estimates, or management guidance. If a fact is "
+    "not in the data, do not state it."
 )
 
 
@@ -350,6 +382,31 @@ def _prompt(ctx: dict) -> str:
         else:
             pe_parts.append(f"peer/industry median P/E {ppm:.1f}x")
     pe_line = "; ".join(pe_parts) + "." if pe_parts else ""
+
+    # LATEST ACTUALS — company-disclosed quarterly trend ({latest_actuals}).
+    # Grounds NII / fee-income / EPS direction. Values are raw currency; show
+    # in millions for readability (EPS per-share).
+    _act_lines = []
+    for q in (ctx.get("disclosed_quarters") or []):
+        seg = []
+        if isinstance(q.get("nii"), (int, float)):        seg.append(f"NII {q['nii']/1e6:.1f}m")
+        if isinstance(q.get("fees"), (int, float)):       seg.append(f"fees {q['fees']/1e6:.1f}m")
+        if isinstance(q.get("net_income"), (int, float)): seg.append(f"NI {q['net_income']/1e6:.1f}m")
+        if isinstance(q.get("eps"), (int, float)):        seg.append(f"EPS {q['eps']:.3f}")
+        if seg:
+            _act_lines.append(f"  {q.get('period','?')}: " + ", ".join(seg))
+    actuals_block = (
+        f"LATEST ACTUALS (company-disclosed / IR; {cur} millions unless noted)\n"
+        + "\n".join(_act_lines)
+    ) if _act_lines else ""
+
+    # Inputs we do NOT have — the model must stay qualitative on these and
+    # never attach a figure (per "do not invent").
+    not_disclosed_block = (
+        "NOT IN AVAILABLE DATA (discuss qualitatively, never cite a number for "
+        "these): NIM, cost of risk / impairments, NPL / asset quality, loan & "
+        "deposit balances, capital ratios, buyback / capital-return plans."
+    )
 
     # Short commodity tags (e.g. "hh" for Henry Hub) get truncated by the
     # LLM into garbage strings — pre-expand to human-readable labels so
@@ -441,6 +498,8 @@ CONSENSUS (source: {ctx.get('consensus_source') or '—'}, {n_an} analysts)
 VALUATION CONTEXT
   {pe_line}
 
+{actuals_block}
+
 EARNINGS TRACK RECORD
   {beats_line}
   {' '.join(surprise_lines)}
@@ -451,17 +510,25 @@ EARNINGS TRACK RECORD
 
 {broker_block}
 
+{not_disclosed_block}
+
 TASK
 Write an institutional earnings-preview note for {ctx['company_name']}.
 The audience already sees the raw numbers on the slide. Your job is
 to INTERPRET — give the analyst a qualitative read on what matters
-heading into the print.
+heading into the print. Anchor every claim to a MECHANISM and, where a
+number exists in the data above, cite it; stay qualitative on anything
+in the "NOT IN AVAILABLE DATA" line.
 
 Deliver a JSON object with these keys. No markdown, no preface, no
 trailing prose. JSON only.
 
 ═══════════════════════════════════════════════════════════════════
-"thesis_paragraph" — A 4-sentence executive summary. ~80–120 words.
+"thesis_paragraph" — Executive Summary. THREE sentences, 80–110 words.
+Start with "{{Company}} enters [the upcoming quarter] earnings with focus
+on …". Cover the main operating drivers, recent support factors, the key
+investor concern, and the overall setup judgment. Do NOT include a
+"what to watch" sentence (those are a separate card).
 ═══════════════════════════════════════════════════════════════════
 
    THE VOICE WE WANT. Three reference examples — match this rhythm,
@@ -539,8 +606,10 @@ trailing prose. JSON only.
 ═══════════════════════════════════════════════════════════════════
 
    Schema: list of {{"category": str, "body": str}}. Categories in
-   order: EARNINGS, VALUATION, POSITIONING, WATCH, RISK. Each body
-   ≤18 words. One single thought per pill.
+   order: EARNINGS, VALUATION, POSITIONING, WATCH, RISK. Each body is
+   ONE sentence, ≤22 words. Each must frame an INVESTOR DEBATE (not a
+   generic observation) and turn on a mechanism — what changes and why
+   it matters for this name. No repetition across the five.
 
    EARNINGS — the company-specific operational lever this print will
    test. NEVER frame it around GDP / inflation / "macro backdrop" —
@@ -586,11 +655,14 @@ trailing prose. JSON only.
 "catalysts" — 3 forward-looking drivers specific to the company.
 ═══════════════════════════════════════════════════════════════════
 
-   Each catalyst names a specific lever (management action,
-   operational milestone, named guidance range, sector flow) AND, where
-   the data block supports it, anchors to a number. If swapping the
-   company name with a peer would still make the bullet read true, it's
-   too generic — rewrite.
+   What could make investors MORE POSITIVE after the print. Each bullet
+   is ≤24 words and MUST carry an explicit cause→effect (the trigger AND
+   the read-through to earnings, capital, valuation, or the share price).
+   For banks, draw from: loan growth, NII/NIM, fee income, credit costs,
+   dividend sustainability, capital generation, valuation re-rating.
+   Anchor to a number where the data supports it. If swapping the company
+   name with a peer would still make the bullet read true, it's too
+   generic — rewrite.
 
    Rules:
      - Do NOT mention "macro backdrop", GDP, or inflation in a catalyst
@@ -615,10 +687,15 @@ trailing prose. JSON only.
 "risks" — 3 company-specific downside paths.
 ═══════════════════════════════════════════════════════════════════
 
-   The 3 risks must each be DISTINCT — different channels, no overlap
-   with one another or with the RISK highlight pill on slide 1. Each
-   ties to a baseline number or named trigger. Do NOT restate valuation
-   if it already lives in the VALUATION pill.
+   What could cause a NEGATIVE share-price reaction after the print.
+   Each bullet is ≤26 words and MUST explain BOTH the mechanism AND the
+   impact (on earnings, capital generation, valuation, or investor
+   confidence). For banks, draw from: NIM compression, funding costs,
+   credit-cost normalization, slower loan growth, weak fee income, asset
+   quality, dividend risk. Avoid generic macro risk unless directly
+   linked to this bank's earnings. The 3 must be DISTINCT channels, no
+   overlap with one another or with the slide-1 RISK pill, and must not
+   restate valuation if that already lives in the VALUATION pill.
 
    Rules:
      - BANNED filler phrasings: "unexpected", "unforeseen",
