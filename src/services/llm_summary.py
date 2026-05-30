@@ -814,6 +814,18 @@ def _allowed_numbers(ctx: dict) -> set[float]:
         _add(delta)
         _add(-delta)
 
+    # Derived: subject P/E premium/discount to the PEER median — the
+    # comparator the VALUATION highlight is now told to cite. Without this
+    # the validator dropped any "X% premium to peers" pill, forcing the
+    # template fallback. Allow both forward and trailing vs the peer median.
+    peer_med = ctx.get("peer_pe_median")
+    if isinstance(peer_med, (int, float)) and peer_med:
+        for own in (pe_recent, ctx.get("pe_fy1")):
+            if isinstance(own, (int, float)):
+                d = (own / peer_med - 1.0) * 100
+                _add(d)
+                _add(-d)
+
     # Derived: target upside/downside (already in ctx as upside_pct, but
     # also surface the absolute pct for downside framing).
     up = ctx.get("upside_pct")
@@ -951,7 +963,10 @@ def _validate_llm_output(payload: dict, ctx: dict) -> dict:
             continue
         if not _validate_sentence(body, allowed):
             continue
-        if len(body.split()) > 20:
+        # Word cap MUST match the prompt's "≤22 words" — an earlier 20-word
+        # cap silently dropped valid 21-22 word highlights, which is why the
+        # slide-1 pills fell back to the deterministic datapoint template.
+        if len(body.split()) > 22:
             continue
         hl_kept.append(it)
     cleaned["highlights"] = hl_kept
