@@ -770,6 +770,17 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
     if llm:
         as_of = (llm.get("as_of") or "").replace("T", " ")[:19]
         ctx_hash = llm.get("context_hash") or ""
+        # Tier-3 QA flags: generic filler / datapoint restatement / banned
+        # hedges / length / cross-section repetition. One row per finding so
+        # the analyst can see (and the prompt owner can tune) quality issues.
+        for q in (llm.get("qa_findings") or []):
+            rows.append([
+                "Slide 1+2", "QA · Tier 3 (style review)",
+                str(q).split(":", 1)[0],
+                str(q),
+                "Derived", "src/services/llm_summary.py (qa_review)",
+                "", as_of, "Non-blocking style flag — review prompt/output",
+            ])
         thesis = (llm.get("thesis_paragraph") or "").strip()
         if thesis:
             rows.append([

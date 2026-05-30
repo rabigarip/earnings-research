@@ -175,6 +175,7 @@ def build_context(ticker: str) -> dict:
     # feed yet, so those stay absent and the prompt marks them "not
     # disclosed" (the model must stay qualitative on them, never invent).
     disclosed_quarters = []
+    bank_fy = None
     try:
         from src.services.disclosed_loader import load_disclosed
         _dl = load_disclosed(ticker) or {}
@@ -189,6 +190,12 @@ def build_context(ticker: str) -> dict:
                 "net_income": q.get("net_income"),
                 "eps": q.get("eps") or q.get("eps_actual"),
             })
+        # Full-year IR metrics (loans/deposits/CAR/ROE/growth) — these
+        # quantify what would otherwise be in the "NOT IN AVAILABLE DATA"
+        # block, letting the bank prompts cite real balance-sheet trends.
+        _fy = _dl.get("fy_highlights")
+        if isinstance(_fy, dict):
+            bank_fy = _fy
     except Exception:
         disclosed_quarters = []
 
@@ -224,6 +231,7 @@ def build_context(ticker: str) -> dict:
     return {
         "peer_pe_median": peer_pe_median,
         "disclosed_quarters": disclosed_quarters,
+        "bank_fy": bank_fy,
         "ticker": ticker,
         "company_name": profile.get("name") or ticker,
         "sector": profile.get("sector") or "—",
@@ -400,12 +408,44 @@ def _prompt(ctx: dict) -> str:
         + "\n".join(_act_lines)
     ) if _act_lines else ""
 
-    # Inputs we do NOT have — the model must stay qualitative on these and
-    # never attach a figure (per "do not invent").
+    # Full-year IR metrics (loans/deposits/CAR/ROE/growth) — quantifies the
+    # bank balance sheet the quarters don't carry.
+    fy = ctx.get("bank_fy") or {}
+    fy_block = ""
+    have = set()
+    if isinstance(fy, dict) and fy:
+        fl = []
+        def _fy(label, key, unit="", grow=None):
+            v = fy.get(key)
+            if isinstance(v, (int, float)):
+                g = fy.get(grow) if grow else None
+                gs = f" ({g:+.1f}% YoY)" if isinstance(g, (int, float)) else ""
+                fl.append(f"  {label}: {v:g}{unit}{gs}")
+                return True
+            return False
+        if _fy("Net profit", "net_profit_rO_mn", f" {cur}m", "net_profit_growth_pct"): have.add("profit")
+        if _fy("NII (conv.+Islamic)", "nii_combined_rO_mn", f" {cur}m", "nii_growth_pct"): have.add("nii")
+        if _fy("Non-interest income", "non_interest_income_rO_mn", f" {cur}m", "non_interest_income_growth_pct"): have.add("fees")
+        if _fy("Net loans", "net_loans_rO_mn", f" {cur}m", "loan_growth_pct"): have.add("loans")
+        if _fy("Customer deposits", "customer_deposits_rO_mn", f" {cur}m", "deposit_growth_pct"): have.add("deposits")
+        if _fy("Capital adequacy (CAR)", "car_pct", "%"): have.add("capital")
+        if _fy("ROE", "roe_pct", "%"): have.add("roe")
+        if fl:
+            fy_block = (f"FULL-YEAR {fy.get('period','FY')} (company-disclosed / IR)\n"
+                        + "\n".join(fl))
+
+    # Inputs we still do NOT have — drop any the FY block now covers so the
+    # model isn't told a metric is unavailable when it actually is.
+    _missing = []
+    if "nii" not in have: _missing.append("NIM (spread %)")
+    else: _missing.append("NIM (spread %)")  # NIM % itself is still not disclosed
+    if "loans" not in have: _missing.append("loan & deposit balances")
+    if "capital" not in have: _missing.append("capital ratios")
+    _missing += ["cost of risk / impairment charge", "NPL / asset-quality ratios",
+                 "buyback / capital-return plans"]
     not_disclosed_block = (
         "NOT IN AVAILABLE DATA (discuss qualitatively, never cite a number for "
-        "these): NIM, cost of risk / impairments, NPL / asset quality, loan & "
-        "deposit balances, capital ratios, buyback / capital-return plans."
+        "these): " + ", ".join(dict.fromkeys(_missing)) + "."
     )
 
     # Short commodity tags (e.g. "hh" for Henry Hub) get truncated by the
@@ -499,6 +539,8 @@ VALUATION CONTEXT
   {pe_line}
 
 {actuals_block}
+
+{fy_block}
 
 EARNINGS TRACK RECORD
   {beats_line}
@@ -991,6 +1033,103 @@ def _validate_llm_output(payload: dict, ctx: dict) -> dict:
     return cleaned
 
 
+# ── Tier-3 QA review (deterministic, non-destructive) ────────────
+#
+# Runs AFTER the number-trace validator. It does not delete content
+# (deleting a weak highlight only forces the datapoint template, which is
+# worse) — it FLAGS quality problems so they surface in logs and the
+# provenance audit. Catches the mechanical violations the analyst review
+# called out: generic filler, datapoint restatement, banned hedges,
+# length overflow, and the same idea repeated across sections.
+
+_BANNED_PHRASES = (
+    "strong fundamentals", "solid fundamentals", "solid performance",
+    "strong performance", "positive outlook", "stable results",
+    "growth momentum", "robust growth", "well-positioned", "well positioned",
+    "attractive valuation", "compelling valuation", "healthy",
+    "we believe", "appears to", "higher-than-expected", "lower-than-expected",
+    "slower-than-expected", "better-than-expected", "unexpected",
+)
+# Fragments that only appear in the deterministic _derive_highlights
+# template — their presence means the LLM pill was dropped and we fell
+# back to a datapoint restatement.
+_TEMPLATE_FRAGMENTS = (
+    "supports income mandate fit", "anchor for re-rate / de-rate debate",
+    "(buy/hold/sell) — view dispersion", "entry-point context",
+    "institutional-grade liquidity", "index-eligible scale",
+    "consensus build-up tracked", "refer to the 52-week band",
+)
+_WORD_CAPS = {"highlights": 22, "catalysts": 24, "risks": 26}
+
+
+def qa_review(payload: dict) -> list[str]:
+    """Return a list of human-readable QA findings (empty = clean)."""
+    findings: list[str] = []
+
+    def _scan_banned(label: str, text: str):
+        low = text.lower()
+        for ph in _BANNED_PHRASES:
+            if ph in low:
+                findings.append(f"{label}: banned phrase '{ph}'")
+
+    # Executive summary: banned phrases + 80-110 word band.
+    thesis = (payload.get("thesis_paragraph") or "").strip()
+    if thesis:
+        _scan_banned("exec_summary", thesis)
+        wc = len(thesis.split())
+        if not (75 <= wc <= 115):
+            findings.append(f"exec_summary: {wc} words (target 80-110)")
+
+    # Highlights: template fallback, banned phrases, datapoint restatement, length.
+    for it in (payload.get("highlights") or []):
+        if not isinstance(it, dict):
+            continue
+        body = (it.get("body") or "").strip()
+        cat = (it.get("category") or "?").strip()
+        if not body:
+            continue
+        low = body.lower()
+        _scan_banned(f"highlight[{cat}]", body)
+        for frag in _TEMPLATE_FRAGMENTS:
+            if frag in low:
+                findings.append(f"highlight[{cat}]: datapoint/template restatement ('{frag}')")
+        if len(body.split()) > _WORD_CAPS["highlights"]:
+            findings.append(f"highlight[{cat}]: {len(body.split())} words (>22)")
+
+    # Catalysts / risks: banned phrases + length + (risks) require a mechanism cue.
+    for key in ("catalysts", "risks"):
+        for i, it in enumerate(payload.get(key) or [], 1):
+            if not isinstance(it, str) or not it.strip():
+                continue
+            _scan_banned(f"{key}[{i}]", it)
+            if len(it.split()) > _WORD_CAPS[key]:
+                findings.append(f"{key}[{i}]: {len(it.split())} words (>{_WORD_CAPS[key]})")
+
+    # Cross-section repetition: distinctive 3-word phrases shared across sections.
+    buckets: dict[str, str] = {
+        "exec": thesis,
+        "highlights": " ".join((it.get("body") or "") for it in (payload.get("highlights") or []) if isinstance(it, dict)),
+        "catalysts": " ".join(payload.get("catalysts") or []),
+        "risks": " ".join(payload.get("risks") or []),
+        "watch": " ".join(payload.get("watch_list") or []),
+    }
+    _STOP = {"the", "and", "with", "from", "that", "this", "into", "over",
+             "for", "are", "has", "have", "its", "a", "an", "of", "to", "in",
+             "on", "as", "is", "at", "by", "or", "if"}
+    def _trigrams(t: str) -> set:
+        ws = [w for w in _re.findall(r"[a-z']+", t.lower()) if w not in _STOP and len(w) > 2]
+        return {" ".join(ws[i:i+3]) for i in range(len(ws) - 2)}
+    seen: dict[str, str] = {}
+    for name, txt in buckets.items():
+        for tg in _trigrams(txt):
+            if tg in seen and seen[tg] != name:
+                findings.append(f"repetition: '{tg}' in both {seen[tg]} and {name}")
+            else:
+                seen.setdefault(tg, name)
+
+    return findings
+
+
 # ── Cache ────────────────────────────────────────────────────────
 
 def _cache_key(ctx: dict) -> str:
@@ -1106,6 +1245,18 @@ def generate_summary(ticker: str, *, force_refresh: bool = False) -> Optional[di
             payload["validation_tier2"] = v_rep.as_dict()
     except Exception as exc:
         log.debug("Tier-2 validation skipped: %s", exc)
+
+    # TIER-3 QA REVIEW — deterministic quality flags (generic filler,
+    # datapoint/template restatement, banned hedges, length, repetition).
+    # Non-destructive: recorded for the audit trail, not deleted.
+    try:
+        qa = qa_review(payload)
+        if qa:
+            payload["qa_findings"] = qa
+            log.warning("[qa] %s: %d quality flag(s): %s",
+                        ticker, len(qa), "; ".join(qa[:6]))
+    except Exception as exc:
+        log.debug("QA review skipped: %s", exc)
 
     _write_cache(path, payload)
     return payload

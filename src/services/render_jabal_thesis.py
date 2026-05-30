@@ -1304,8 +1304,11 @@ def _build_annual_rows(*, ms_annual_forecasts: dict | None,
     # given name, so we never render a "0 / 0 / 0" line.
     metric_specs = []
     if is_bank:
+        # For a bank, MS "net sales" IS total operating income (NII +
+        # non-interest income) — not "revenue" in the industrial sense.
+        # Label it accordingly so the deck reads correctly to a bank analyst.
         metric_specs = [
-            (f"Revenue ({unit_suffix})", "net_sales", _money),
+            (f"Total income ({unit_suffix})", "net_sales", _money),
             (f"EBIT ({unit_suffix})", "ebit", _money),
             (f"Pre-tax ({unit_suffix})", "ebt", _money),
             (f"Net Income ({unit_suffix})", "net_income", _money),
