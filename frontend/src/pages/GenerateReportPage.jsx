@@ -172,22 +172,47 @@ export default function GenerateReportPage() {
       // Pass filename through so download works even if DB persist failed.
       const dlFilename = created?.report?.filename;
 
-      setStatus("Downloading report...");
-      const dlParams = new URLSearchParams({ t: String(Date.now()) });
-      if (dlFilename) dlParams.set("filename", dlFilename);
-      const dlRes = await fetch(`${API_BASE}/api/reports/${runId}/download?${dlParams.toString()}`);
-      if (!dlRes.ok) {
-        const err = await dlRes.json().catch(() => ({}));
-        const msg = toErrorText(
-          formatApiErrorDetail(err?.detail) || "Failed to download report",
+      setStatus("Downloading report bundle (deck + provenance)...");
+      // BUNDLE endpoint — returns a .zip with both .pptx + .provenance.xlsx
+      // in a single response. Atomic vs the prior two-click flow that
+      // could lose the .xlsx if Render's container restarted between
+      // clicks (free-tier ephemeral /tmp).
+      const bundleRes = await fetch(
+        `${API_BASE}/api/reports/${runId}/bundle?t=${Date.now()}`,
+      );
+      if (!bundleRes.ok) {
+        // Fall back to legacy per-file downloads when bundle endpoint
+        // is missing (deploy lag between backend + frontend).
+        const dlParams = new URLSearchParams({ t: String(Date.now()) });
+        if (dlFilename) dlParams.set("filename", dlFilename);
+        const dlRes = await fetch(
+          `${API_BASE}/api/reports/${runId}/download?${dlParams.toString()}`,
         );
-        throw new Error(msg);
+        if (!dlRes.ok) {
+          const err = await dlRes.json().catch(() => ({}));
+          throw new Error(
+            toErrorText(formatApiErrorDetail(err?.detail) || "Download failed"),
+          );
+        }
+        const blob = await dlRes.blob();
+        const filename = extractFilename(
+          dlRes.headers.get("content-disposition"),
+          `${tk}_preview.pptx`,
+        );
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 100);
+        setStatus(`Done. Downloaded ${filename} (provenance unavailable — bundle endpoint missing)`);
+        setLastReport({ runId, filename: dlFilename || filename, ticker: tk });
+        return;
       }
 
-      const blob = await dlRes.blob();
+      const blob = await bundleRes.blob();
       const filename = extractFilename(
-        dlRes.headers.get("content-disposition"),
-        `${tk}_preview.pptx`,
+        bundleRes.headers.get("content-disposition"),
+        `${tk}_bundle.zip`,
       );
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -196,12 +221,9 @@ export default function GenerateReportPage() {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      // Defer revoke so Safari actually starts the download.
       setTimeout(() => URL.revokeObjectURL(url), 100);
-      setStatus(`Done. Downloaded ${filename}`);
-      // Stash the run-id + filename so the user can grab the
-      // provenance sidecar (data-trace .xlsx) without re-running.
-      setLastReport({ runId, filename: dlFilename || filename, ticker: tk });
+      setStatus(`Done. Downloaded ${filename} (deck + provenance.xlsx)`);
+      setLastReport({ runId, filename: dlFilename, ticker: tk });
     } catch (e) {
       setError(errorToUserMessage(e));
       setStatus("");

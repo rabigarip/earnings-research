@@ -4559,7 +4559,7 @@
       "6030.HK"
     ],
     "providers": {
-      "yfinance": "partial",
+      "yfinance": "unsupported",
       "marketscreener": "supported",
       "investing": "supported",
       "bloomberg_ticker": null
@@ -10411,7 +10411,7 @@
       "QIBK.QA"
     ],
     "providers": {
-      "yfinance": "partial",
+      "yfinance": "unsupported",
       "marketscreener": "supported",
       "investing": "supported",
       "bloomberg_ticker": "BKMB OM Equity"

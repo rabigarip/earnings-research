@@ -631,11 +631,26 @@ def main() -> int:
 
 
 def _yf_support(exchange: str, iso2: str) -> str:
-    """Yahoo Finance coverage heuristic by exchange. Some Chinese A-share
-    coverage exists but is partial; Saudi/Qatar/Kuwait/Oman are spotty."""
-    if exchange in ("SHH", "SHZ"):  # Shanghai / Shenzhen A-shares
+    """Yahoo Finance coverage heuristic by exchange.
+
+    Verified gaps:
+      * Oman MSX (.OM)         — `BKMB.OM` returns HTTP 404 from yfinance.
+                                  Confirmed no Yahoo coverage; mark as
+                                  "unsupported" to skip the live_quote
+                                  attempt and the 1-2s fetch latency.
+      * Kuwait KSE (.KW)       — similar; few tickers covered.
+      * Shanghai/Shenzhen A-shares — yfinance has some coverage but
+        many tickers 404 individually. "partial" is the honest tag.
+      * Saudi (.SR) / Qatar (.QA) / UAE (.AE) — coverage is hit-and-
+        miss per ticker; pipeline attempts the call and falls through
+        on failure. Marking these "partial" so the live_quote gate
+        still tries them (some big names like 2222.SR work).
+    """
+    if exchange in ("SHH", "SHZ"):
         return "partial"
-    if iso2 in ("SA", "QA", "KW", "OM", "AE"):
+    if iso2 in ("OM", "KW", "BH"):
+        return "unsupported"
+    if iso2 in ("SA", "QA", "AE"):
         return "partial"
     return "supported"
 

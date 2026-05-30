@@ -447,6 +447,62 @@ def get_report(run_id: str):
     return row
 
 
+@app.get("/api/reports/{run_id}/bundle")
+def download_report_bundle(run_id: str):
+    """Atomic download — returns a .zip containing BOTH the .pptx deck
+    AND the .provenance.xlsx sidecar in a single response.
+
+    Why: Render's free tier wipes /tmp when the container restarts (idle
+    timeout, redeploy, OOM). The previous flow asked the analyst to
+    click two separate download buttons — pptx first, xlsx second. If
+    the container restarted between clicks (common with idle timeout
+    ~15 min on free tier), the second download 404'd with "File no
+    longer available". Bundling eliminates the race entirely: one
+    response, both files, no chance to miss one.
+
+    Resolution: run_id → DB → memo_filename (.pptx) → derive .xlsx by
+    suffix swap. When the xlsx is missing for some reason (rare), the
+    zip still contains the pptx — better than failing outright.
+    """
+    import io as _io
+    import zipfile as _zipfile
+    from fastapi.responses import StreamingResponse
+    from src.storage.db import load_run
+    from src.config import report_output_dir
+
+    out_dir = report_output_dir()
+    run = load_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404,
+                              detail="Report run not found in DB")
+    pptx_filename = (run.get("memo_path") or "").strip()
+    if not pptx_filename or ".." in pptx_filename:
+        raise HTTPException(status_code=404,
+                              detail="No report file for this run")
+    pptx_path = out_dir / pptx_filename
+    if not pptx_path.is_file():
+        raise HTTPException(status_code=404,
+                              detail=f"Deck not found on disk: {pptx_filename}")
+    xlsx_filename = pptx_filename[:-len(".pptx")] + ".provenance.xlsx" \
+                     if pptx_filename.lower().endswith(".pptx") else None
+    xlsx_path = (out_dir / xlsx_filename) if xlsx_filename else None
+
+    buf = _io.BytesIO()
+    with _zipfile.ZipFile(buf, "w", _zipfile.ZIP_DEFLATED) as zf:
+        zf.write(pptx_path, arcname=pptx_filename)
+        if xlsx_path and xlsx_path.is_file():
+            zf.write(xlsx_path, arcname=xlsx_filename)
+    buf.seek(0)
+    bundle_name = pptx_filename[:-len(".pptx")] + "_bundle.zip" \
+                    if pptx_filename.lower().endswith(".pptx") \
+                    else f"{run_id}_bundle.zip"
+    return StreamingResponse(
+        buf, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{bundle_name}"',
+                  "Cache-Control": "no-store, no-cache, must-revalidate"},
+    )
+
+
 @app.get("/api/reports/{run_id}/download")
 def download_report(run_id: str, filename: str | None = None, type: str | None = None):
     """Download an artefact from this run.
