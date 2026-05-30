@@ -543,11 +543,14 @@ def _derive_highlights(*, cv: dict, currency: str, current_price,
     if isinstance(rs, dict):
         rating_label = _pretty_rating(rs.get("consensus"))
     if rating_label and n_analysts:
-        rows.append(("EARNINGS", f"Consensus {rating_label} from {n_analysts} analysts covering."))
+        rows.append(("EARNINGS",
+            f"A {rating_label} consensus across {n_analysts} analysts sets a high bar the print must clear to hold the multiple."))
     elif n_analysts:
-        rows.append(("EARNINGS", f"{n_analysts} analysts covering — view dispersion still narrow."))
+        rows.append(("EARNINGS",
+            f"With {n_analysts} analysts covering, the print must validate the earnings trajectory already priced in."))
     else:
-        rows.append(("EARNINGS", "Awaiting next print; consensus build-up tracked across runs."))
+        rows.append(("EARNINGS",
+            "The print tests whether the recent earnings trajectory can be sustained into the next quarter."))
 
     # VALUATION — P/E (FY est) is the most universally available figure.
     if isinstance(pe_fwd, (int, float)) and pe_fwd > 0:

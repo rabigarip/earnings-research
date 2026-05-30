@@ -205,20 +205,25 @@ def build_context(ticker: str) -> dict:
     # the prose agree. Best-effort: thin coverage / network failure leaves
     # it None and the prompt degrades to the own-history comparator rather
     # than falling back to the bare template.
-    peer_pe_median = None
+    # Peer P/E for the VALUATION pill — computed IDENTICALLY to the slide-3
+    # peer table's "Peer Average" so the prose and the table never disagree:
+    # same peer set (curated peer_group first, else registry) and the same
+    # MEAN statistic (_peer_avg_row uses a mean, not a median).
+    peer_pe_avg = None
     try:
         from src.services.ticker_registry import registry_peer_set
         from src.services.fetch_peers import fetch_peer_rows
-        import statistics as _stats
-        _peers = registry_peer_set(ticker) or []
+        from src.storage.db import load_company as _lc_peer
+        _crow = _lc_peer(ticker) or {}
+        _peers = _crow.get("peer_group") or registry_peer_set(ticker) or []
         if _peers:
             _rows = fetch_peer_rows(_peers) or []
             _pes = [r.get("pe") for r in _rows
                     if isinstance(r.get("pe"), (int, float)) and r.get("pe") > 0]
             if len(_pes) >= 3:
-                peer_pe_median = round(_stats.median(_pes), 1)
+                peer_pe_avg = round(sum(_pes) / len(_pes), 1)
     except Exception:
-        peer_pe_median = None
+        peer_pe_avg = None
 
     # Normalise FY year labels (strip an existing "FY" prefix so the prompt
     # doesn't end up with "FYFY2026").
@@ -229,7 +234,7 @@ def build_context(ticker: str) -> dict:
         return s
 
     return {
-        "peer_pe_median": peer_pe_median,
+        "peer_pe_avg": peer_pe_avg,
         "disclosed_quarters": disclosed_quarters,
         "bank_fy": bank_fy,
         "ticker": ticker,
@@ -378,17 +383,18 @@ def _prompt(ctx: dict) -> str:
             f"trailing P/E {rec:.1f}x vs 5-year average {avg:.1f}x "
             f"({delta_pct:+.0f}% relative)"
         )
-    # Peer/industry comparator — the preferred anchor for the VALUATION pill.
-    if isinstance(ctx.get("peer_pe_median"), (int, float)):
-        ppm = ctx["peer_pe_median"]
+    # Peer comparator — the preferred anchor for the VALUATION pill. This is
+    # the SAME peer-set average shown on slide 3, so prose and table agree.
+    if isinstance(ctx.get("peer_pe_avg"), (int, float)):
+        ppm = ctx["peer_pe_avg"]
         rec = ctx.get("pe_recent")
         if isinstance(rec, (int, float)) and ppm:
             prem = (rec / ppm - 1.0) * 100
             pe_parts.append(
-                f"peer/industry median P/E {ppm:.1f}x "
+                f"peer-set average P/E {ppm:.1f}x "
                 f"(subject {prem:+.0f}% vs peers)")
         else:
-            pe_parts.append(f"peer/industry median P/E {ppm:.1f}x")
+            pe_parts.append(f"peer-set average P/E {ppm:.1f}x")
     pe_line = "; ".join(pe_parts) + "." if pe_parts else ""
 
     # LATEST ACTUALS — company-disclosed quarterly trend ({latest_actuals}).
@@ -656,18 +662,20 @@ investor concern, and the overall setup judgment. Do NOT include a
    EARNINGS — the company-specific operational lever this print will
    test. NEVER frame it around GDP / inflation / "macro backdrop" —
    that reads as filler and isn't a print-level driver. Name the lever.
+   KEEP IT TIGHT: ≤18 words (this pill tends to run long and get cut).
      Good: "Q2 print will test whether loan growth holds the prior
             5-7% pace as deposit competition bites."
      Weak: "Loan growth amid 1.6% GDP growth." (macro is backdrop,
             not the driver; says nothing about the print)
 
    VALUATION — ALWAYS lead with the LIVE multiple (the number on the
-   slide). Then add a comparator: prefer the peer/industry median when
-   the data block gives one ("peer/industry median P/E"); if it doesn't,
-   the 5-year own-average is an acceptable comparator. Hard rule: a
+   slide). Then add a comparator: prefer the PEER-SET AVERAGE when the
+   data block gives one ("peer-set average P/E" — the SAME figure shown
+   on the slide-3 peer table; cite it as "peer average", never "median");
+   if it doesn't, the 5-year own-average is acceptable. Hard rule: a
    comparator NEVER stands alone — the live multiple must be present.
-     Good: "Trades at 11.1x trailing earnings, a ~20% premium to the
-            GCC bank peer median near 9.0x."
+     Good: "Trades at 11.1x trailing earnings, a ~14% premium to the
+            GCC bank peer average near 9.7x."
      Also good (no peer data): "Forward P/E 12.1x, a 4% premium to its
             own 5-year average of 10.7x."
      Weak: "Trades at a premium to its 5-year average." (no live
@@ -860,7 +868,7 @@ def _allowed_numbers(ctx: dict) -> set[float]:
     # comparator the VALUATION highlight is now told to cite. Without this
     # the validator dropped any "X% premium to peers" pill, forcing the
     # template fallback. Allow both forward and trailing vs the peer median.
-    peer_med = ctx.get("peer_pe_median")
+    peer_med = ctx.get("peer_pe_avg")
     if isinstance(peer_med, (int, float)) and peer_med:
         for own in (pe_recent, ctx.get("pe_fy1")):
             if isinstance(own, (int, float)):
@@ -1058,6 +1066,11 @@ _TEMPLATE_FRAGMENTS = (
     "(buy/hold/sell) — view dispersion", "entry-point context",
     "institutional-grade liquidity", "index-eligible scale",
     "consensus build-up tracked", "refer to the 52-week band",
+    # EARNINGS-pill template fallbacks (LLM version was dropped).
+    "sets a high bar the print must clear",
+    "must validate the earnings trajectory already priced in",
+    "tests whether the recent earnings trajectory can be sustained",
+    "analysts covering",
 )
 _WORD_CAPS = {"highlights": 22, "catalysts": 24, "risks": 26}
 
