@@ -113,6 +113,20 @@ def _fmt_mcap_usd(v) -> str:
     return f"${v:,.0f}"
 
 
+def _fmt_mcap_labeled(v, currency: str) -> str:
+    """Market cap labeled with its OWN currency so the peer column isn't a
+    misleading mix of unlabeled magnitudes (e.g. OMR 3.1B sitting next to a
+    bare '109.0B' that is actually AED). USD keeps the '$'; everything else
+    is prefixed with its ISO code (AED / QAR / SAR / OMR …)."""
+    base = _fmt_mcap_usd(v)
+    if base == "—":
+        return "—"
+    cur = (currency or "").upper()
+    if cur == "USD" or not cur:
+        return base
+    return f"{cur} {base.replace('$', '')}"
+
+
 def _peer_row_from_investing(ticker: str) -> dict | None:
     """Build a peer-table row from Investing.com using the same three-layer
     fallback as probe_investing (24h cache → live network → repo-tracked
@@ -162,7 +176,7 @@ def _peer_row_from_investing(ticker: str) -> dict | None:
         or ticker
     currency = (price_block.get("currency") or "").upper()
     mcap = fund.get("marketCapRaw")
-    mcap_fmt = _fmt_mcap_usd(mcap) if currency == "USD" else _fmt_mcap_usd(mcap).replace("$", "")
+    mcap_fmt = _fmt_mcap_labeled(mcap, currency)
     pe = fund.get("ratio") if isinstance(fund.get("ratio"), (int, float)) else None
     pe_fmt = f"{pe:.1f}x" if pe else "—"
     div = fund.get("yield")
@@ -226,11 +240,11 @@ def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
         name = info.get("longName") or info.get("shortName") or tt
         mcap_usd = info.get("marketCap")
         # Note: marketCap from Yahoo is in the listed currency, not USD —
-        # converting properly would need an FX layer. The reference deck
-        # uses listed-currency caps too (SAR for Saudi, etc.), so we render
-        # the number as-is and drop the $ when currency isn't USD.
+        # converting properly would need an FX layer. We render the number
+        # in its own listing currency and LABEL it (AED / SAR / …) so the
+        # peer column isn't a misleading mix of unlabeled magnitudes.
         currency = (info.get("currency") or "").upper()
-        mcap_fmt = _fmt_mcap_usd(mcap_usd) if currency == "USD" else _fmt_mcap_usd(mcap_usd).replace("$", "")
+        mcap_fmt = _fmt_mcap_labeled(mcap_usd, currency)
         pe = info.get("trailingPE") or info.get("forwardPE")
         pe_val = float(pe) if isinstance(pe, (int, float)) and pe > 0 else None
         pe_fmt = f"{pe_val:.1f}x" if pe_val else "—"

@@ -238,6 +238,55 @@ def _equity_price_changes(state: dict) -> dict:
     return (eq.get("priceChanges") or {}) if isinstance(eq, dict) else {}
 
 
+def _equity_dividends(state: dict) -> list[dict]:
+    """Investing's declared-dividend history: a list of
+    {div_amount, split_adj_div_amount, div_date, div_payment_type, yield}.
+    Newest-first. Used to compute a trailing-12-month yield from ACTUAL
+    declared cash dividends rather than Investing's rounded `dividend`
+    field or its internally-inconsistent `yield` field."""
+    ds = state.get("dividendsStore") or {}
+    ed = ds.get("equityDividends") if isinstance(ds, dict) else None
+    return ed if isinstance(ed, list) else []
+
+
+def _trailing_12m_declared_dividend(state: dict) -> Optional[float]:
+    """Sum of actual declared cash dividends whose ex-date falls in the
+    trailing 12 months. Split-adjusted amounts preferred. Returns None
+    when no dated dividend is available.
+
+    This is the institutional trailing-dividend definition (TTM cash
+    dividends ÷ price). For annual payers (e.g. BKMB.OM) it's the single
+    most-recent declared dividend; for semi/quarterly payers it sums the
+    last year's distributions."""
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    rows = _equity_dividends(state)
+    if not rows:
+        return None
+    now = _dt.now(_tz.utc)
+    cutoff = now - _td(days=366)
+    total = 0.0
+    found = False
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        amt = r.get("split_adj_div_amount")
+        if not isinstance(amt, (int, float)):
+            amt = r.get("div_amount")
+        if not isinstance(amt, (int, float)) or amt <= 0:
+            continue
+        d = (r.get("div_date") or "")[:10]
+        try:
+            ex = _dt.fromisoformat(d).replace(tzinfo=_tz.utc)
+        except Exception:
+            continue
+        # Only count dividends that have already gone ex (declared) and
+        # fall inside the trailing-12-month window.
+        if cutoff <= ex <= now:
+            total += float(amt)
+            found = True
+    return total if found else None
+
+
 def _company_profile(state: dict) -> dict:
     cp = state.get("companyProfileStore") or {}
     return (cp.get("profile") or {}) if isinstance(cp, dict) else {}
@@ -448,14 +497,26 @@ class InvestingProvider(Provider):
         fundamental = _equity_fundamental(state)
         price_block = _equity_price(state)
 
-        # Sanity-check Investing's reported yield against its own
-        # dividend/price math. For some tickers (verified on BKMB.OM,
-        # 2026-05) Investing reports yield = 6.90% while their dividend
-        # 0.02 / price 0.414 = 4.83% — the raw `yield` field is wrong.
-        # Use the dividend/price computation as the primary value when
-        # both `dividend` and `last` price are available; fall back to the
-        # raw yield field otherwise.
         last = price_block.get("last")
+
+        # PRIMARY: trailing-12-month ACTUAL DECLARED cash dividends ÷ price.
+        # This is the standard institutional trailing-yield definition and
+        # the most defensible number when sources disagree. Investing's own
+        # `yield` field is internally inconsistent (e.g. BKMB.OM 2026-05:
+        # reports 6.90% while its dividend 0.02 / price 0.414 = 4.83%), and
+        # its `dividend` field is rounded (0.02 vs the actual declared 0.018).
+        # Using the dated dividend history avoids both distortions.
+        ttm_div = _trailing_12m_declared_dividend(state)
+        if (isinstance(last, (int, float)) and last > 0
+            and isinstance(ttm_div, (int, float)) and ttm_div > 0):
+            ttm_yield = ttm_div / last * 100
+            return ttm_yield, "%", "", persist_raw(
+                self.name, ticker, "dividend_yield",
+                {**fundamental, "ttm_declared_dividend": ttm_div,
+                 "ttm_yield_computed": ttm_yield,
+                 "method": "trailing_12m_declared_dividend_over_price"})
+
+        # FALLBACK 1: Investing's `dividend` field ÷ price (rounded run-rate).
         dividend = fundamental.get("dividend")
         if (isinstance(last, (int, float)) and last > 0
             and isinstance(dividend, (int, float)) and dividend > 0):

@@ -1263,8 +1263,12 @@ def _build_annual_rows(*, ms_annual_forecasts: dict | None,
         return f"{scaled:,.2f}"
 
     def _eps_fmt(v):
+        # Adaptive precision: sub-1.0 EPS (most GCC banks — BKMB FY26E ≈
+        # 0.035) needs 3 decimals, otherwise the whole forecast strip
+        # rounds to "0.03 / 0.04 / 0.04" and hides the trajectory the IC
+        # reader is looking for. Larger EPS keeps 2 decimals.
         if not isinstance(v, (int, float)): return None
-        return f"{v:,.2f}"
+        return f"{v:,.3f}" if abs(v) < 1 else f"{v:,.2f}"
 
     def _yoy(num, den):
         if not (isinstance(num, (int, float))

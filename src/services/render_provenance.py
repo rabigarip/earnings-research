@@ -179,6 +179,7 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
                             memo_data: Optional[dict] = None,
                             payload: Any = None,
                             peer_rows: Optional[list[dict]] = None,
+                            historical_override: Optional[dict] = None,
                             ) -> Optional[Path]:
     """Walk canonical_store + memo + macro for `ticker` and write an
     .xlsx audit sheet to `out_path`. Returns the path on success, None
@@ -281,6 +282,14 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
     cv_target = (cv.get("target_price").value if cv.get("target_price") else None)
     cv_target_mean = (cv_target.get("mean") if isinstance(cv_target, dict) else None)
     cv_hist = (cv.get("historical_prices").value if cv.get("historical_prices") else None)
+    # The historical price series often arrives via historical_override
+    # (Investing.com path for yfinance-blocked GCC names) and is NEVER
+    # persisted to canonical_store. Without this fallback the provenance
+    # silently omitted the 52-week range and all six Recent Performance
+    # buckets — the analyst saw them on the deck but couldn't trace them.
+    if not (isinstance(cv_hist, dict) and cv_hist.get("close_series")) \
+       and isinstance(historical_override, dict) and historical_override.get("close_series"):
+        cv_hist = historical_override
 
     # UPSIDE TO TARGET — derived computation, no canonical row.
     if (isinstance(cv_current_price, (int, float)) and cv_current_price > 0
@@ -302,17 +311,37 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
                 if isinstance(pt, dict) and isinstance(pt.get("close"), (int, float))]
         if vals:
             hi = max(vals); lo = min(vals)
-            hist_src = (cv.get("historical_prices").canonical_source if cv.get("historical_prices") else "")
+            # Source attribution: when the values came from the Investing
+            # override (because canonical historical_prices was absent OR
+            # held an unusable proxy like the iShares EEM series), attribute
+            # to Investing — NOT the stale canonical cell. Otherwise the
+            # perf/52wk rows would falsely cite "ishares" for BKMB prices.
+            _hp_cell = cv.get("historical_prices")
+            _using_override = (cv_hist is historical_override)
+            hist_src = ("investing" if _using_override
+                        else (_hp_cell.canonical_source if _hp_cell else "investing"))
             hist_src_url = _source_url(hist_src, ticker)
-            hist_fetched = (cv.get("historical_prices").last_refreshed_at.strftime("%Y-%m-%d %H:%M UTC")
-                              if cv.get("historical_prices") else "")
+            # True as-of = last dated close in the series (NOT read time).
+            _last_date = ""
+            try:
+                _last_date = max(str(pt.get("date") or "")[:10]
+                                  for pt in cv_hist["close_series"]
+                                  if isinstance(pt, dict) and pt.get("date"))
+            except (ValueError, TypeError):
+                _last_date = ""
+            hist_fetched = ("" if _using_override
+                            else (_hp_cell.last_refreshed_at.strftime("%Y-%m-%d %H:%M UTC")
+                                  if _hp_cell else ""))
+            _series_note = (f"Derived from close series; latest close {_last_date}"
+                             if _last_date else "Derived from close series")
             rows.append(["Slide 1", "Key Data", "52-week high",
                           f"{hi:,.4f}" if hi < 1 else f"{hi:,.2f}",
-                          hist_src, hist_src_url, "", hist_fetched,
-                          "Derived from 380-day close series"])
+                          hist_src, hist_src_url, _last_date, hist_fetched,
+                          _series_note])
             rows.append(["Slide 1", "Key Data", "52-week low",
                           f"{lo:,.4f}" if lo < 1 else f"{lo:,.2f}",
-                          hist_src, hist_src_url, "", hist_fetched, ""])
+                          hist_src, hist_src_url, _last_date, hist_fetched,
+                          _series_note])
             # Recent Performance buckets (1D/1W/1M/3M/6M/YTD). Derived
             # from the same close series — emit one row each.
             from datetime import datetime as _dtP, timezone as _tzP
@@ -380,9 +409,53 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
             "", "", "Next reporting date per source feed",
         ])
 
-    # FORWARD P/E (FY26E) — the headline scalar on slide 1, computed
-    # from current_price ÷ EPS_fy1. Live-quote-aware: when the live
-    # path overwrote current_price, the displayed P/E reflects that.
+    # P/E — the slide-1 chip shows a FORWARD P/E; the peer table and
+    # highlights cite a TRAILING P/E. Both must be traceable, and because
+    # sources disagree on P/E (Investing's EPS-implied trailing vs MS's
+    # published multiples), the note records the source explicitly.
+    import re as _rePE
+    _cur_year_pe = datetime.now().year
+
+    def _pe_from_hist(want_forward: bool):
+        """Pick a P/E off the MS valuation_historical series — the nearest
+        FUTURE fiscal year (forward) or the nearest PAST/current year
+        (trailing). Returns (pe, year, source) or (None, None, '')."""
+        vh = cv.get("valuation_historical")
+        d = vh.value if (vh and isinstance(vh.value, dict)) else {}
+        periods = d.get("periods") or []
+        pes = d.get("pe") or []
+        if len(periods) != len(pes):
+            return None, None, ""
+        # Forward = nearest FUTURE/current FY (the FY26E multiple).
+        # Trailing = most recent COMPLETED FY (strictly past); this is the
+        # ~11.1x the peer table / exec summary cite, distinct from forward.
+        best = None
+        for p, pe in zip(periods, pes):
+            m = _rePE.search(r"(\d{4})", str(p) or "")
+            if not m or not isinstance(pe, (int, float)) or pe <= 0:
+                continue
+            yr = int(m.group(1))
+            if want_forward:
+                if yr < _cur_year_pe:
+                    continue
+                rank = (yr - _cur_year_pe)           # smallest future first
+            else:
+                if yr >= _cur_year_pe:
+                    continue
+                rank = (_cur_year_pe - yr)            # most recent past first
+            if best is None or rank < best[2]:
+                best = (pe, yr, rank)
+        # Trailing fallback: if no strictly-past FY exists, accept current FY.
+        if best is None and not want_forward:
+            for p, pe in zip(periods, pes):
+                m = _rePE.search(r"(\d{4})", str(p) or "")
+                if m and isinstance(pe, (int, float)) and pe > 0 and int(m.group(1)) == _cur_year_pe:
+                    best = (pe, _cur_year_pe, 0); break
+        if best is None:
+            return None, None, ""
+        return best[0], best[1], (vh.canonical_source if vh else "marketscreener")
+
+    # Forward P/E: valuation_forward.pe_fy1 first, else MS historical series.
     val_fwd = cv.get("valuation_forward")
     fwd = val_fwd.value if (val_fwd and isinstance(val_fwd.value, dict)) else {}
     pe_fy1 = fwd.get("pe_fy1") if isinstance(fwd, dict) else None
@@ -394,7 +467,27 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
             (val_fwd.canonical_source if val_fwd else "—"),
             _source_url(val_fwd.canonical_source if val_fwd else "", ticker),
             f"FY{fy1_year}", "",
-            "Forward P/E from valuation_forward bundle",
+            "Forward P/E from valuation_forward bundle (price ÷ FY1 EPS)",
+        ])
+    else:
+        _pe_f, _yr_f, _src_f = _pe_from_hist(want_forward=True)
+        if _pe_f is not None:
+            rows.append([
+                "Slide 1", "Key Data", f"P/E (FY{str(_yr_f)[-2:]}E)",
+                f"{_pe_f:.2f}x", _src_f, _source_url(_src_f, ticker),
+                f"FY{_yr_f}", "",
+                "Forward P/E from MarketScreener valuation series",
+            ])
+
+    # Trailing P/E (peer table + highlights anchor): nearest past/current
+    # FY off the MS historical series. Documents the 11.1x-class number.
+    _pe_t, _yr_t, _src_t = _pe_from_hist(want_forward=False)
+    if _pe_t is not None:
+        rows.append([
+            "Slide 3", "Peer Comparables", "Subject trailing P/E",
+            f"{_pe_t:.2f}x", _src_t, _source_url(_src_t, ticker),
+            f"FY{_yr_t}", "",
+            "Trailing P/E from MarketScreener valuation series",
         ])
 
     # 1d. LIVE QUOTE RECORD — when the pipeline pre-refreshed volatile

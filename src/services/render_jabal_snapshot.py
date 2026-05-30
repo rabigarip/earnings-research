@@ -642,7 +642,33 @@ def _derive_highlights(*, cv: dict, currency: str, current_price,
 
 # ── Data adapter: canonical_store → SnapshotData ──────────────
 
-def _compute_freshness_banner(cv: dict, live_quote_record: dict | None) -> str:
+def _price_asof_from_history(hist_prices: dict | None) -> "datetime | None":
+    """The true as-of date of the price = the last dated close in the
+    historical series. This is dated source data we can trust, unlike the
+    canonical store's last_refreshed_at (= read time). Returns an aware
+    UTC datetime, or None when no dated series is available."""
+    if not isinstance(hist_prices, dict):
+        return None
+    series = hist_prices.get("close_series") or []
+    if not isinstance(series, list) or not series:
+        return None
+    from datetime import datetime as _dt, timezone as _tz
+    last_date = None
+    for pt in series:
+        d = pt.get("date") if isinstance(pt, dict) else None
+        if not d:
+            continue
+        try:
+            parsed = _dt.fromisoformat(str(d)[:10]).replace(tzinfo=_tz.utc)
+        except Exception:
+            continue
+        if last_date is None or parsed > last_date:
+            last_date = parsed
+    return last_date
+
+
+def _compute_freshness_banner(cv: dict, live_quote_record: dict | None,
+                                price_asof: "datetime | None" = None) -> str:
     """Build the one-line freshness summary that drops above the slide-1
     footer. Tells the analyst at a glance which fields are intraday-live,
     which are daily-snapshot, and which are macro-cadence — so they
@@ -650,14 +676,36 @@ def _compute_freshness_banner(cv: dict, live_quote_record: dict | None) -> str:
 
     Tiers we surface:
       * Live (yfinance, < 15 min)  — when live_quote_record is present
-      * Daily snapshot age         — max age of investing/MS-sourced cells
+      * Daily snapshot age         — TRUE age of the price data
       * Macro                       — IMF/WB reporting year (always slow)
+
+    `price_asof` is the actual as-of date of the price data (the last
+    close in the historical series). It MUST be used in preference to the
+    canonical store's `last_refreshed_at`, which records when the pipeline
+    *read* the (possibly cached/stale) snapshot — not when the underlying
+    data is from. Using last_refreshed_at made the banner claim "0h old"
+    on a 16-day-old Render snapshot; the deck's own rule is "data ≤1 day
+    old or the deck says so", so the age shown here must be the real one.
     """
+    from datetime import datetime as _dtf, timezone as _tzf
+
+    def _age_phrase(asof) -> str:
+        """Render a true age as 'Nh old' / 'Nd old' from an aware datetime."""
+        try:
+            if asof.tzinfo is None:
+                asof = asof.replace(tzinfo=_tzf.utc)
+            age_h = int((_dtf.now(_tzf.utc) - asof).total_seconds() / 3600)
+            age_h = max(0, age_h)
+            if age_h < 24:
+                return f"Price snapshot {age_h}h old"
+            return f"Price snapshot {age_h // 24}d old"
+        except Exception:
+            return ""
+
     parts: list[str] = []
     if live_quote_record and live_quote_record.get("ok"):
         fetched = live_quote_record.get("fetched_at", "")
         try:
-            from datetime import datetime as _dtf, timezone as _tzf
             t_fetched = _dtf.fromisoformat(fetched.replace("Z", "+00:00"))
             now = _dtf.now(_tzf.utc)
             mins = max(0, int((now - t_fetched).total_seconds() / 60))
@@ -665,20 +713,19 @@ def _compute_freshness_banner(cv: dict, live_quote_record: dict | None) -> str:
         except Exception:
             parts.append("Price live")
     else:
-        # No live quote — surface the snapshot age of current_price as
-        # the "price freshness" proxy.
-        cp = cv.get("current_price")
-        if cp and cp.last_refreshed_at:
-            from datetime import datetime as _dtf, timezone as _tzf
-            try:
-                age_h = int((_dtf.now(_tzf.utc) - cp.last_refreshed_at)
-                            .total_seconds() / 3600)
-                if age_h < 24:
-                    parts.append(f"Price snapshot {age_h}h old")
-                else:
-                    parts.append(f"Price snapshot {age_h // 24}d old")
-            except Exception:
-                pass
+        # No live quote — surface the TRUE snapshot age. Prefer the price
+        # data's real as-of date (last close in the historical series);
+        # fall back to last_refreshed_at only when no dated price is
+        # available (which at least won't *under*-state age in practice).
+        phrase = ""
+        if price_asof is not None:
+            phrase = _age_phrase(price_asof)
+        if not phrase:
+            cp = cv.get("current_price")
+            if cp and cp.last_refreshed_at:
+                phrase = _age_phrase(cp.last_refreshed_at)
+        if phrase:
+            parts.append(phrase)
 
     # Daily-snapshot tier (target, dividend yield, rating split).
     snapshot_ages_h: list[int] = []
@@ -1074,5 +1121,12 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
         sources_line=_sources_line(cv),
         analyst_name=analyst_name,
         gen_date=datetime.utcnow().strftime("%d %b %Y"),
-        freshness_banner=_compute_freshness_banner(cv, live_quote_record),
+        # Price as-of: prefer the Investing historical series (same data
+        # vintage as the displayed Investing equity price) over whatever is
+        # in canonical historical_prices, which may be an iShares EEM proxy
+        # that is fresh-dated but UNRELATED to this stock's price age.
+        freshness_banner=_compute_freshness_banner(
+            cv, live_quote_record,
+            price_asof=(_price_asof_from_history(historical_override)
+                        or _price_asof_from_history(hist_prices))),
     )

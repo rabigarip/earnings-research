@@ -271,7 +271,8 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
         write_provenance_xlsx(ticker, provenance_path,
                                 memo_data=memo_data,
                                 payload=payload,
-                                peer_rows=peer_rows or None)
+                                peer_rows=peer_rows or None,
+                                historical_override=historical_override)
     except Exception as _exc:
         import logging as _logging
         _logging.getLogger(__name__).warning(
