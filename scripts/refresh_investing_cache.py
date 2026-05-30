@@ -108,6 +108,11 @@ def main() -> int:
     else:
         tickers = sorted(_SLUGS.keys())
 
+    if not tickers:
+        print("No tickers to refresh (empty active set / none with curated "
+              "slugs) — nothing to do.")
+        return 0
+
     print(f"Refreshing Investing.com snapshots for {len(tickers)} tickers...")
     print(f"Output: data/investing/<slug>__<kind>.json\n")
 
