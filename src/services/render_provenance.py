@@ -33,21 +33,27 @@ from src.services.canonical_store import (
 _FIELD_MAP: dict[str, tuple[str, str, str]] = {
     # field name              (slide, section, human label)
     "company_profile":        ("Slide 1", "Header", "Company profile"),
-    "quote":                  ("Slide 1", "Header", "Quote"),
+    "quote":                  ("Slide 1", "Key Data", "Quote (price + market cap bundle)"),
+    "current_price":          ("Slide 1", "Key Data", "Last close"),
+    "market_cap":             ("Slide 1", "Key Data", "Market cap"),
+    "dividend_yield":         ("Slide 1", "Key Data", "Dividend yield (TTM)"),
+    "target_price":           ("Slide 1", "Analyst Consensus", "Average target price"),
     "rating_split":           ("Slide 1", "Analyst Consensus", "Rating split (buy/hold/sell)"),
     "consensus_target":       ("Slide 1", "Analyst Consensus", "Average target price"),
-    "valuation_forward":      ("Slide 1", "Key Data / Slide 2 Table",
+    "valuation_forward":      ("Slide 1", "Key Data + Slide 2 Table",
                                 "Forward P/E + Q+1 forecasts"),
+    "fifty_two_week_high":    ("Slide 1", "Key Data", "52-week high"),
+    "fifty_two_week_low":     ("Slide 1", "Key Data", "52-week low"),
     "valuation_historical":   ("Slide 3", "P/E Chart", "Historical P/E series"),
-    "historical_prices":      ("Slide 3", "52-Week Price Chart",
+    "historical_prices":      ("Slide 1", "52-Week Price + Recent Performance",
                                 "Daily closes + 52w range + performance buckets"),
     "income_statement_quarterly": ("Slide 3", "Earnings History Chart",
                                      "Per-quarter actual vs estimate surprise track"),
     "income_statement_annual":    ("Slide 2", "Estimates Table (history)",
                                      "Annual revenue / EBITDA / NI history"),
     "broker_actions":         ("Slide 2", "Catalysts (track-record anchor)", "Recent broker actions"),
-    "dividends_payments":     ("Slide 1", "Key Data", "Dividend yield"),
-    "earnings_calendar":      ("Slide 1", "Header", "Next earnings date"),
+    "dividends_payments":     ("Slide 1", "Key Data", "Dividend yield + payment history"),
+    "earnings_calendar":      ("Slide 1", "Key Data", "Earnings date"),
 }
 
 
@@ -265,6 +271,192 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
                     rows.append([slide, section, f"{label} · {p} Revenue act/est",
                                    f"{ra:,.0f} / {re_:,.0f}", src, src_url, str(p),
                                    fetched_at, ""])
+
+    # 1c. Slide-1 derived & live-refreshed fields. The deck shows
+    #     numbers that DON'T live in canonical_store as scalars
+    #     (UPSIDE TO TARGET, the 6 Recent Performance buckets, etc.).
+    #     The analyst opening the .xlsx expects to see every visible
+    #     number traced. This section makes that contract complete.
+    cv_current_price = (cv.get("current_price").value if cv.get("current_price") else None)
+    cv_target = (cv.get("target_price").value if cv.get("target_price") else None)
+    cv_target_mean = (cv_target.get("mean") if isinstance(cv_target, dict) else None)
+    cv_hist = (cv.get("historical_prices").value if cv.get("historical_prices") else None)
+
+    # UPSIDE TO TARGET — derived computation, no canonical row.
+    if (isinstance(cv_current_price, (int, float)) and cv_current_price > 0
+        and isinstance(cv_target_mean, (int, float))):
+        upside = (cv_target_mean - cv_current_price) / cv_current_price * 100.0
+        rows.append([
+            "Slide 1", "Analyst Consensus", "Upside to target",
+            f"{upside:+.2f}%", "Derived",
+            f"(target_mean {cv_target_mean:.4f} − last_close {cv_current_price:.4f}) "
+            f"/ last_close × 100",
+            "", "", "Computed at render time",
+        ])
+
+    # 52-WEEK HIGH / LOW — extracted from historical_prices daily series,
+    # not stored as separate scalars. Emit rows for the actual numbers
+    # rendered on slide 1's range bar.
+    if isinstance(cv_hist, dict) and isinstance(cv_hist.get("close_series"), list):
+        vals = [float(pt["close"]) for pt in cv_hist["close_series"]
+                if isinstance(pt, dict) and isinstance(pt.get("close"), (int, float))]
+        if vals:
+            hi = max(vals); lo = min(vals)
+            hist_src = (cv.get("historical_prices").canonical_source if cv.get("historical_prices") else "")
+            hist_src_url = _source_url(hist_src, ticker)
+            hist_fetched = (cv.get("historical_prices").last_refreshed_at.strftime("%Y-%m-%d %H:%M UTC")
+                              if cv.get("historical_prices") else "")
+            rows.append(["Slide 1", "Key Data", "52-week high",
+                          f"{hi:,.4f}" if hi < 1 else f"{hi:,.2f}",
+                          hist_src, hist_src_url, "", hist_fetched,
+                          "Derived from 380-day close series"])
+            rows.append(["Slide 1", "Key Data", "52-week low",
+                          f"{lo:,.4f}" if lo < 1 else f"{lo:,.2f}",
+                          hist_src, hist_src_url, "", hist_fetched, ""])
+            # Recent Performance buckets (1D/1W/1M/3M/6M/YTD). Derived
+            # from the same close series — emit one row each.
+            from datetime import datetime as _dtP, timezone as _tzP
+            from datetime import timedelta as _tdP
+            try:
+                pts = [(_dtP.strptime(pt["date"], "%Y-%m-%d").date(), float(pt["close"]))
+                        for pt in cv_hist["close_series"]
+                        if pt.get("date") and isinstance(pt.get("close"), (int, float))]
+                pts.sort()
+                if pts:
+                    last_d, last_v = pts[-1]
+                    def _ret_pct(days: int) -> tuple[str, float] | None:
+                        target_d = last_d - _tdP(days=days)
+                        # Find the closest <= target_d.
+                        prior = [(d, v) for d, v in pts if d <= target_d]
+                        if not prior: return None
+                        anchor = prior[-1]
+                        if anchor[1] == 0: return None
+                        return (anchor[0].isoformat(),
+                                (last_v - anchor[1]) / anchor[1] * 100.0)
+                    def _ytd_ret() -> tuple[str, float] | None:
+                        jan1 = _dtP(last_d.year, 1, 1).date()
+                        prior = [(d, v) for d, v in pts if d >= jan1]
+                        if not prior or prior[0][1] == 0: return None
+                        return (prior[0][0].isoformat(),
+                                (last_v - prior[0][1]) / prior[0][1] * 100.0)
+                    buckets = [
+                        ("1 Day", _ret_pct(1)),
+                        ("1 Week", _ret_pct(7)),
+                        ("1 Month", _ret_pct(30)),
+                        ("3 Months", _ret_pct(91)),
+                        ("6 Months", _ret_pct(182)),
+                        ("YTD", _ytd_ret()),
+                    ]
+                    for label, result in buckets:
+                        if result is None: continue
+                        anchor_date, ret = result
+                        rows.append([
+                            "Slide 1", "Recent Performance", label,
+                            f"{ret:+.2f}%",
+                            hist_src, hist_src_url, "", hist_fetched,
+                            f"vs close on {anchor_date}",
+                        ])
+            except (ValueError, TypeError):
+                pass
+
+    # EARNINGS DATE — pulled from memo_data or company / calendar
+    # observations; surface explicitly as a slide-1 cell.
+    earnings_date_val = None
+    earnings_date_src = ""
+    if memo_data and memo_data.get("next_q_report_date"):
+        earnings_date_val = memo_data["next_q_report_date"]
+        earnings_date_src = (memo_data.get("next_q_report_date_source")
+                              or "earnings_calendar")
+    elif cv.get("earnings_calendar") and isinstance(cv["earnings_calendar"].value, dict):
+        ec_val = cv["earnings_calendar"].value
+        earnings_date_val = ec_val.get("next_earnings_date") or ec_val.get("date")
+        earnings_date_src = cv["earnings_calendar"].canonical_source
+    if earnings_date_val:
+        rows.append([
+            "Slide 1", "Key Data", "Earnings date",
+            str(earnings_date_val),
+            earnings_date_src or "—",
+            _source_url(earnings_date_src, ticker),
+            "", "", "Next reporting date per source feed",
+        ])
+
+    # FORWARD P/E (FY26E) — the headline scalar on slide 1, computed
+    # from current_price ÷ EPS_fy1. Live-quote-aware: when the live
+    # path overwrote current_price, the displayed P/E reflects that.
+    val_fwd = cv.get("valuation_forward")
+    fwd = val_fwd.value if (val_fwd and isinstance(val_fwd.value, dict)) else {}
+    pe_fy1 = fwd.get("pe_fy1") if isinstance(fwd, dict) else None
+    fy1_year = fwd.get("fy1_year") if isinstance(fwd, dict) else None
+    if isinstance(pe_fy1, (int, float)) and fy1_year:
+        rows.append([
+            "Slide 1", "Key Data", f"P/E (FY{str(fy1_year)[-2:]}E)",
+            f"{pe_fy1:.2f}x",
+            (val_fwd.canonical_source if val_fwd else "—"),
+            _source_url(val_fwd.canonical_source if val_fwd else "", ticker),
+            f"FY{fy1_year}", "",
+            "Forward P/E from valuation_forward bundle",
+        ])
+
+    # 1d. LIVE QUOTE RECORD — when the pipeline pre-refreshed volatile
+    # fields via yfinance live, surface the freshness anchor so the
+    # analyst knows which numbers are intraday-current vs cached.
+    lq_rec = (memo_data or {}).get("live_quote_record") if memo_data else None
+    if isinstance(lq_rec, dict) and lq_rec.get("ok"):
+        fetched = lq_rec.get("fetched_at", "")
+        fields_str = ", ".join(lq_rec.get("fields") or [])
+        rows.append([
+            "Slide 1", "Data Freshness", "Live quote (yfinance)",
+            f"Refreshed: {', '.join(lq_rec.get('fields') or []) or '—'}",
+            "yfinance-live",
+            "https://finance.yahoo.com",
+            "", fetched,
+            f"Live price={lq_rec.get('price')} · "
+            f"mcap={lq_rec.get('market_cap')} · "
+            f"52w {lq_rec.get('fifty_two_week_low')}-{lq_rec.get('fifty_two_week_high')}",
+        ])
+
+    # 1e. BLOOMBERG OPT-IN MANIFEST — when the analyst has enabled
+    # Bloomberg for this ticker, document that explicitly. When
+    # NOT enabled, document that too (so the analyst knows the deck
+    # ran on free-source data only — no silent override).
+    try:
+        from pathlib import Path as _PB
+        import json as _jsonB
+        manifest_path = _PB("data/bloomberg") / f"{ticker}.manifest.json"
+        if manifest_path.is_file():
+            try:
+                m = _jsonB.loads(manifest_path.read_text())
+                if m.get("enabled"):
+                    rows.append([
+                        "All Slides", "Source Overrides",
+                        "Bloomberg consensus override",
+                        "ENABLED",
+                        "Bloomberg upload (analyst-confirmed)",
+                        str(manifest_path),
+                        "", m.get("uploaded_at", ""),
+                        f"Source file: {m.get('source_filename', '?')}",
+                    ])
+                else:
+                    rows.append([
+                        "All Slides", "Source Overrides",
+                        "Bloomberg consensus override",
+                        "DISABLED",
+                        "Bloomberg upload present but disabled",
+                        str(manifest_path), "", "",
+                        "Toggle via /api/v2/bloomberg/manifest/{ticker}/toggle",
+                    ])
+            except Exception:
+                pass
+        else:
+            rows.append([
+                "All Slides", "Source Overrides",
+                "Bloomberg consensus override",
+                "NOT CONFIGURED",
+                "Free-source data only", "", "", "",
+                "Analyst can upload a Bloomberg FA xlsx to enable",
+            ])
+    except Exception:
+        pass
 
     # 2. Memo-derived fields — every Q+1 consensus that fed slide 2 plus
     #    derived YoY / QoQ deltas. Full coverage: revenue, EPS, EBITDA,

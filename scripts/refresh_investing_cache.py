@@ -68,15 +68,43 @@ def _fetch_and_track(ticker: str) -> dict[str, bool]:
     return out
 
 
+def _active_set_from_calendar() -> list[str]:
+    """Return tickers whose earnings fall in the calendar horizon."""
+    import json as _json
+    from pathlib import Path as _P
+    cal_path = _P(__file__).resolve().parents[1] / "data" / "calendar" / "upcoming.json"
+    if not cal_path.is_file():
+        print(f"WARN: calendar missing: {cal_path}", file=sys.stderr)
+        return []
+    try:
+        cal = _json.loads(cal_path.read_text())
+    except (OSError, _json.JSONDecodeError) as exc:
+        print(f"WARN: calendar parse failed: {exc}", file=sys.stderr)
+        return []
+    return sorted({t["ticker"] for t in (cal.get("tickers") or [])
+                    if isinstance(t, dict) and t.get("ticker")})
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tickers", help="Comma-separated; defaults to every slug in _SLUGS")
+    ap.add_argument("--active-set", action="store_true",
+                    help="Refresh only tickers in data/calendar/upcoming.json. "
+                         "Cuts the daily-refresh footprint from ~17 tickers "
+                         "to ~5 (whoever is about to report). The default "
+                         "mode for the daily Investing-refresh GHA cron.")
     ap.add_argument("--delay", type=float, default=1.5,
                     help="Seconds between tickers (be polite to Cloudflare)")
     args = ap.parse_args()
 
     if args.tickers:
         tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+    elif args.active_set:
+        active = _active_set_from_calendar()
+        # Intersect with tickers we have slugs for.
+        tickers = sorted(set(active) & set(_SLUGS.keys()))
+        print(f"[active-set] {len(active)} tickers in calendar horizon, "
+              f"{len(tickers)} have curated Investing slugs.")
     else:
         tickers = sorted(_SLUGS.keys())
 

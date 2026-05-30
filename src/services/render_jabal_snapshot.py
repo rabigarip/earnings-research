@@ -64,7 +64,7 @@ def _normalize_date(s: str) -> str:
 # ── Low-level primitives ────────────────────────────────────
 
 def _text(slide, left, top, width, height, text, *,
-          font=FONT_UI, size=SZ_BODY, bold=False, color=BLACK,
+          font=FONT_UI, size=SZ_BODY, bold=False, italic=False, color=BLACK,
           align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP, all_caps=False,
           letter_spacing=None):
     """Insert a text box with one paragraph + one run. Returns the shape."""
@@ -81,6 +81,7 @@ def _text(slide, left, top, width, height, text, *,
     r.font.name = font
     r.font.size = size
     r.font.bold = bold
+    r.font.italic = italic
     r.font.color.rgb = color
     if letter_spacing is not None:
         # python-pptx doesn't expose spc directly via property; set on xml
@@ -295,8 +296,15 @@ def _highlights_row(slide, top: float, items: list[tuple[str, str]]):
 
 
 def _footer(slide, page_num: int, total_pages: int, sources: str,
-             analyst_name: str, gen_date: str):
+             analyst_name: str, gen_date: str, freshness_banner: str = ""):
     top = 12.47
+    # When a freshness banner is provided, drop it just above the footer
+    # rule so the analyst sees data-age at a glance without opening the
+    # provenance xlsx.
+    if freshness_banner:
+        _text(slide, MARGIN_L, top - 0.20, CONTENT_W, 0.18,
+              freshness_banner,
+              size=SZ_FOOTER, color=GRAY, italic=True)
     _hrule(slide, MARGIN_L, top, CONTENT_W)
     _text(slide, MARGIN_L, top + 0.07, CONTENT_W, 0.18,
           f"Source: {sources}  |  Generated {gen_date}  |  Analyst: {analyst_name}",
@@ -349,6 +357,11 @@ class SnapshotData:
     gen_date: str
     pe_fy_est_label: str = "P/E (FY EST)"  # e.g. "P/E (FY26E)" when year known
     total_pages: int = 3
+    # Data-freshness banner — one short line above the footer that tells
+    # the analyst at a glance how recent each tier of data is. Set by
+    # build_snapshot_data based on canonical_store cell timestamps +
+    # the live-quote record (if applied).
+    freshness_banner: str = ""
 
 
 def render_snapshot_slide(prs, data: SnapshotData):
@@ -394,7 +407,8 @@ def render_snapshot_slide(prs, data: SnapshotData):
                 data.range_current, data.currency)
     _highlights_row(slide, 7.62, data.highlights)
     _footer(slide, 1, data.total_pages, data.sources_line,
-             data.analyst_name, data.gen_date)
+             data.analyst_name, data.gen_date,
+             freshness_banner=getattr(data, "freshness_banner", ""))
     return slide
 
 
@@ -628,12 +642,86 @@ def _derive_highlights(*, cv: dict, currency: str, current_price,
 
 # ── Data adapter: canonical_store → SnapshotData ──────────────
 
+def _compute_freshness_banner(cv: dict, live_quote_record: dict | None) -> str:
+    """Build the one-line freshness summary that drops above the slide-1
+    footer. Tells the analyst at a glance which fields are intraday-live,
+    which are daily-snapshot, and which are macro-cadence — so they
+    never wonder how stale the deck is.
+
+    Tiers we surface:
+      * Live (yfinance, < 15 min)  — when live_quote_record is present
+      * Daily snapshot age         — max age of investing/MS-sourced cells
+      * Macro                       — IMF/WB reporting year (always slow)
+    """
+    parts: list[str] = []
+    if live_quote_record and live_quote_record.get("ok"):
+        fetched = live_quote_record.get("fetched_at", "")
+        try:
+            from datetime import datetime as _dtf, timezone as _tzf
+            t_fetched = _dtf.fromisoformat(fetched.replace("Z", "+00:00"))
+            now = _dtf.now(_tzf.utc)
+            mins = max(0, int((now - t_fetched).total_seconds() / 60))
+            parts.append(f"Price live ({mins}m ago)")
+        except Exception:
+            parts.append("Price live")
+    else:
+        # No live quote — surface the snapshot age of current_price as
+        # the "price freshness" proxy.
+        cp = cv.get("current_price")
+        if cp and cp.last_refreshed_at:
+            from datetime import datetime as _dtf, timezone as _tzf
+            try:
+                age_h = int((_dtf.now(_tzf.utc) - cp.last_refreshed_at)
+                            .total_seconds() / 3600)
+                if age_h < 24:
+                    parts.append(f"Price snapshot {age_h}h old")
+                else:
+                    parts.append(f"Price snapshot {age_h // 24}d old")
+            except Exception:
+                pass
+
+    # Daily-snapshot tier (target, dividend yield, rating split).
+    snapshot_ages_h: list[int] = []
+    from datetime import datetime as _dtf2, timezone as _tzf2
+    for field in ("target_price", "dividend_yield", "rating_split",
+                   "valuation_forward", "valuation_historical"):
+        c = cv.get(field)
+        if c and c.last_refreshed_at:
+            try:
+                snapshot_ages_h.append(int(
+                    (_dtf2.now(_tzf2.utc) - c.last_refreshed_at).total_seconds() / 3600))
+            except Exception:
+                pass
+    if snapshot_ages_h:
+        max_age_h = max(snapshot_ages_h)
+        if max_age_h < 24:
+            parts.append(f"Forecasts < 1d old")
+        elif max_age_h < 48:
+            parts.append(f"Forecasts ~1d old")
+        else:
+            parts.append(f"Forecasts {max_age_h // 24}d old")
+
+    # Macro tier — always slow, IMF/WB.
+    prof = cv.get("company_profile")
+    macro_year = ""
+    if prof and isinstance(prof.value, dict):
+        macro_year = str(prof.value.get("macro_year")
+                          or prof.value.get("gdp_growth_fcst_year") or "")
+    if macro_year:
+        parts.append(f"Macro IMF {macro_year}")
+
+    if not parts:
+        return ""
+    return "Data freshness:  " + "  ·  ".join(parts)
+
+
 def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
                           period_label: str = "Q2 2026 Earnings Preview",
                           report_date: str = "TBA",
                           highlights: Optional[list[tuple[str, str]]] = None,
                           ms_price_performance: Optional[dict] = None,
                           historical_override: Optional[dict] = None,
+                          live_quote_record: Optional[dict] = None,
                           ) -> SnapshotData:
     """Translate canonical_store rows into the slide's input dataclass.
     Defensive against missing fields: every renderer-visible string has
@@ -986,4 +1074,5 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
         sources_line=_sources_line(cv),
         analyst_name=analyst_name,
         gen_date=datetime.utcnow().strftime("%d %b %Y"),
+        freshness_banner=_compute_freshness_banner(cv, live_quote_record),
     )

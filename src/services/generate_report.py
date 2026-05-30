@@ -229,7 +229,8 @@ def _write_jabal_preview(payload: ReportPayload, out_path: Path,
     snap      = build_snapshot_data(ticker, period_label=period_label,
                                        report_date=report_date,
                                        ms_price_performance=getattr(payload, "ms_price_performance", None),
-                                       historical_override=historical_override)
+                                       historical_override=historical_override,
+                                       live_quote_record=(memo_data or {}).get("live_quote_record"))
     # Slide-2 heading must agree with slide-1 period_label. Strip the
     # trailing "Earnings Preview" / "Earnings Update" suffix and replace
     # with "Earnings Expectations" so the cover and the estimates section

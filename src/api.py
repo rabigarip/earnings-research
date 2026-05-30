@@ -305,6 +305,45 @@ def v2_ticker_info(ticker: str):
     return get_ticker_info(ticker)
 
 
+@app.get("/api/v2/bloomberg/manifest/{ticker}")
+def v2_bloomberg_manifest_get(ticker: str):
+    """Return whether Bloomberg is enabled for a ticker (manifest read)."""
+    from pathlib import Path as _P
+    import json as _json
+    p = _P("data/bloomberg") / f"{ticker}.manifest.json"
+    if not p.is_file():
+        return {"ticker": ticker, "enabled": False, "manifest_present": False}
+    try:
+        m = _json.loads(p.read_text())
+        return {"ticker": ticker, "enabled": bool(m.get("enabled")),
+                "manifest_present": True, "manifest": m}
+    except Exception as exc:
+        return {"ticker": ticker, "enabled": False, "manifest_present": True,
+                "error": str(exc)}
+
+
+@app.post("/api/v2/bloomberg/manifest/{ticker}/toggle")
+def v2_bloomberg_manifest_toggle(ticker: str, enabled: bool):
+    """Enable / disable Bloomberg override for a ticker without re-uploading."""
+    from pathlib import Path as _P
+    import json as _json
+    from datetime import datetime as _dt2, timezone as _tz2
+    p = _P("data/bloomberg") / f"{ticker}.manifest.json"
+    if not p.is_file():
+        if enabled:
+            raise HTTPException(status_code=404,
+                                  detail=f"No Bloomberg file for {ticker} — upload one first.")
+        return {"ticker": ticker, "enabled": False, "manifest_present": False}
+    try:
+        m = _json.loads(p.read_text())
+    except Exception:
+        m = {"ticker": ticker}
+    m["enabled"] = bool(enabled)
+    m["toggled_at"] = _dt2.now(_tz2.utc).isoformat(timespec="seconds")
+    p.write_text(_json.dumps(m, indent=2))
+    return {"ticker": ticker, "enabled": bool(enabled), "manifest_present": True}
+
+
 @app.get("/api/v2/disclosed_status")
 def v2_disclosed_status(tickers: str | None = None):
     """Per-ticker disclosed-pipeline coverage.
@@ -979,6 +1018,26 @@ async def bloomberg_upload(file: UploadFile = File(...)):
     target = ROOT_DIR / "data" / "bloomberg" / "consensus.csv"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(text, encoding="utf-8")
+
+    # OPT-IN: write a per-ticker manifest that enables Bloomberg as the
+    # canonical source. Without this manifest the pipeline ignores any
+    # data/bloomberg/{ticker}_*.xlsx files on disk and uses free-source
+    # data — the analyst explicitly opts in here when they upload.
+    import json as _json
+    from datetime import datetime as _dt2, timezone as _tz2
+    for t in tickers_seen:
+        manifest_path = ROOT_DIR / "data" / "bloomberg" / f"{t}.manifest.json"
+        manifest_path.write_text(_json.dumps({
+            "ticker": t,
+            "enabled": True,
+            "uploaded_at": _dt2.now(_tz2.utc).isoformat(timespec="seconds"),
+            "source_filename": file.filename,
+            "note": ("Bloomberg consensus is enabled for this ticker. The "
+                      "deck will prefer Bloomberg values over free-source "
+                      "estimates and provenance.xlsx will document the "
+                      "Bloomberg path. Toggle off by deleting this file "
+                      "or setting enabled=false."),
+        }, indent=2))
 
     # Refresh + re-render. Run in subprocess so the API request returns
     # promptly; the cron path is the canonical way to refresh, this is the

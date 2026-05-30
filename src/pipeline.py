@@ -57,21 +57,43 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> tuple[str, list[StepR
         return run_id, results
     company = r.data
 
-    # ── 2b. Bloomberg manual export (optional) ────────────────
-    # No-op when data/bloomberg/<TICKER>_*.xlsx files are absent.
+    # ── 2b. Bloomberg manual export (OPT-IN only) ─────────────
+    # Trust model: Bloomberg data is silent-override-dangerous, so we
+    # never auto-load just because a .xlsx exists on disk. The analyst
+    # must explicitly enable it via:
+    #   data/bloomberg/<TICKER>.manifest.json with {"enabled": true, ...}
+    # which is written by the dashboard's "Use Bloomberg upload" toggle.
+    # When disabled, the deck uses free-source data (Investing / MS /
+    # Yahoo / IMF) and the provenance.xlsx documents exactly that.
     bloomberg_bundle_dict: dict | None = None
     try:
-        from src.services.bloomberg_parser import load_bloomberg_bundle
-        from dataclasses import asdict as _dc_asdict
-        _bbg = load_bloomberg_bundle(ticker)
-        if _bbg is not None:
-            bloomberg_bundle_dict = _dc_asdict(_bbg)
+        from pathlib import Path as _P
+        import json as _json
+        manifest_path = _P("data/bloomberg") / f"{ticker}.manifest.json"
+        bbg_enabled = False
+        if manifest_path.is_file():
+            try:
+                _manifest = _json.loads(manifest_path.read_text())
+                bbg_enabled = bool(_manifest.get("enabled"))
+            except (OSError, _json.JSONDecodeError):
+                bbg_enabled = False
+        if bbg_enabled:
+            from src.services.bloomberg_parser import load_bloomberg_bundle
+            from dataclasses import asdict as _dc_asdict
+            _bbg = load_bloomberg_bundle(ticker)
+            if _bbg is not None:
+                bloomberg_bundle_dict = _dc_asdict(_bbg)
+                logger.info(
+                    "[bloomberg] %s bundle loaded (analyst-enabled): "
+                    "%d quarters, %d annuals",
+                    ticker, len(_bbg.consensus_quarterly), len(_bbg.annuals),
+                )
+        else:
             logger.info(
-                "[bloomberg] %s bundle loaded: %d quarters, %d annuals",
-                ticker, len(_bbg.consensus_quarterly), len(_bbg.annuals),
-            )
+                "[bloomberg] %s manifest absent or disabled — using "
+                "free-source data only", ticker)
     except Exception as exc:
-        logger.warning("[bloomberg] load failed for %s: %s", ticker, exc)
+        logger.warning("[bloomberg] manifest check failed for %s: %s", ticker, exc)
 
     # ── 3. Fetch quote ────────────────────────────────────────
     r = fetch_quote(ticker)
@@ -135,6 +157,43 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> tuple[str, list[StepR
     r = reconcile(ticker, company, quarterly, consensus, quote=quote)
     _collect(r, results)
     derived = r.data if r.status != Status.FAILED else None
+
+    # ── 7b. LIVE QUOTE REFRESH (overwrite volatile fields) ────
+    # After the reconciler picks canonical winners, fetch a single live
+    # yfinance quote for the intraday-volatile fields (price, market
+    # cap, 52w range) and overwrite the canonical-store cells. This
+    # closes the "Investing.com tab shows 0.427 but our deck shows 0.41"
+    # trust gap — the deck now matches what the analyst sees on a live
+    # quote page.
+    #
+    # Fails gracefully — on Yahoo rate-limit / missing-ticker / network
+    # error, the snapshot-sourced values remain authoritative. The
+    # provenance writer records whether live data was applied, and the
+    # slide-1 footer banner reflects which freshness tier each field
+    # ended up in.
+    live_quote_record: dict | None = None
+    try:
+        from src.services.live_quote import fetch_live_quote, merge_into_canonical
+        from src.services.ticker_registry import get_ticker_info as _gti
+        _tinfo = _gti(ticker)
+        _yf_support = (_tinfo.get("providers") or {}).get("yfinance", "supported")
+        if _yf_support != "unsupported":
+            lq = fetch_live_quote(ticker)
+            if lq.ok:
+                merge_result = merge_into_canonical(ticker, lq)
+                live_quote_record = {**lq.as_dict(), **merge_result}
+                logger.info(
+                    "[live_quote] %s live-refreshed: price=%s mcap=%s fields=%s",
+                    ticker, lq.price, lq.market_cap,
+                    merge_result.get("fields"))
+            else:
+                logger.info("[live_quote] %s skipped: %s",
+                            ticker, "; ".join(lq.warnings))
+        else:
+            logger.info("[live_quote] %s skipped — yfinance unsupported per registry",
+                        ticker)
+    except Exception as exc:
+        logger.warning("[live_quote] %s exception: %s", ticker, exc)
 
     # ── 8. Summarize news (LLM) ──────────────────────────────
     # Deferred: LLM should be the last thing produced before rendering.
@@ -211,6 +270,10 @@ def run_preview(ticker: str, *, skip_llm: bool = False) -> tuple[str, list[StepR
     if r.status == Status.SUCCESS and isinstance(r.data, dict):
         memo_data = r.data.get("memo_data")
         qa_audit = r.data.get("qa_audit")
+    # Attach the live-quote record so the renderer's freshness banner
+    # and the provenance writer both know whether live data was applied.
+    if memo_data is not None and live_quote_record is not None:
+        memo_data["live_quote_record"] = live_quote_record
 
     # ── 10b. Report readiness (fail loud before PPTX) ─────────
     r = run_readiness_check(payload, results)
