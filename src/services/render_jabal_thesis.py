@@ -1297,10 +1297,17 @@ def _build_annual_rows(*, ms_annual_forecasts: dict | None,
     fy_disp = [_fy_disp(p) for p in fy_labels_raw]
 
     # Pull metric series across the 3 forecast indices + the base.
+    # Bank P&L: net sales (total banking income) → EBIT (operating profit)
+    # → pre-tax (EBT) → net income → EPS. EBITDA is meaningless for banks
+    # (MS publishes it as 0.00) so it's never listed; the all-zero filter
+    # below also drops any of these MS rows that come back empty for a
+    # given name, so we never render a "0 / 0 / 0" line.
     metric_specs = []
     if is_bank:
         metric_specs = [
             (f"Revenue ({unit_suffix})", "net_sales", _money),
+            (f"EBIT ({unit_suffix})", "ebit", _money),
+            (f"Pre-tax ({unit_suffix})", "ebt", _money),
             (f"Net Income ({unit_suffix})", "net_income", _money),
             (f"EPS ({currency})", None, _eps_fmt),   # EPS handled separately
         ]
@@ -1308,9 +1315,21 @@ def _build_annual_rows(*, ms_annual_forecasts: dict | None,
         metric_specs = [
             (f"Revenue ({unit_suffix})", "net_sales", _money),
             (f"EBITDA ({unit_suffix})", "ebitda", _money),
+            (f"EBIT ({unit_suffix})", "ebit", _money),
+            (f"Pre-tax ({unit_suffix})", "ebt", _money),
             (f"Net Income ({unit_suffix})", "net_income", _money),
             (f"EPS ({currency})", None, _eps_fmt),
         ]
+
+    def _row_has_signal(base_v, fwd_vals) -> bool:
+        """True when the row carries at least one meaningful (non-zero,
+        non-None) value across base + forecasts. Filters MS's all-0.00
+        rows (EBITDA for banks; EBT/EBIT for names MS doesn't model) so the
+        deck never shows a dead '0 / 0 / 0' line."""
+        for v in [base_v, *fwd_vals]:
+            if isinstance(v, (int, float)) and abs(v) > 1e-9:
+                return True
+        return False
 
     rows: list[dict] = []
     for label, arr_name, fmt in metric_specs:
@@ -1326,6 +1345,11 @@ def _build_annual_rows(*, ms_annual_forecasts: dict | None,
         # Pad to 3 forecast columns
         while len(fwd_vals) < 3:
             fwd_vals.append(None)
+        # Drop rows MS returns as all-zero / all-missing (e.g. bank EBITDA,
+        # or EBIT/EBT for names MS doesn't break out) — but only the
+        # forecast strip matters for "is this row worth showing".
+        if not _row_has_signal(None, fwd_vals):
+            continue
         yoy_pct = _yoy(fwd_vals[0], base_v) if fwd_vals else None
         # CAGR: last non-None forecast vs base, annualised.
         cagr_pct = None

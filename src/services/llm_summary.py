@@ -474,7 +474,8 @@ trailing prose. JSON only.
    │ given the stock's reliance on future growth narratives.       │
    └───────────────────────────────────────────────────────────────┘
 
-   STRUCTURE (one sentence per slot):
+   STRUCTURE — THREE sentences total (the reference boxes above show a
+   legacy 4th "watch" sentence; OMIT it — see note):
      S1. "{{Company}} enters earnings with focus on [4 operational
          levers most central to the print]." Pick the levers that
          define how investors model THIS business. For banks:
@@ -486,16 +487,17 @@ trailing prose. JSON only.
          while [pressures] remain key concerns." Qualitative
          narrative — what the Street has been rewarding and what
          it's been worrying about.
-     S3. "Investors should watch [5-6 specific things including
-         management commentary on X]." A list of concrete
-         metrics + the one named commentary item.
-     S4. "The setup appears [balanced / cautiously attractive /
+     S3. "The setup appears [balanced / cautiously attractive /
          asymmetric / high-risk-high-reward], [one-clause
          reason]." Stop here. No scenario coda.
 
-   You may anchor 1-2 numbers in S2 or S3 if they sharpen the read
-   (e.g. a specific NIM percent, a current multiple). Do not stuff
-   numbers. The references each cite zero or one number total.
+   DO NOT write an "Investors should watch …" / "Key metrics to watch …"
+   sentence. Those questions live in their own "What to Watch" card on
+   the same slide; repeating them here is redundant. Three sentences only.
+
+   You may anchor 1-2 numbers in S2 if they sharpen the read (e.g. a
+   specific NIM percent, a current multiple). Do not stuff numbers. The
+   references each cite zero or one number total.
 
 ═══════════════════════════════════════════════════════════════════
 "highlights" — 5 short interpretive sentences (one per category).
@@ -505,16 +507,23 @@ trailing prose. JSON only.
    order: EARNINGS, VALUATION, POSITIONING, WATCH, RISK. Each body
    ≤18 words. One single thought per pill.
 
-   EARNINGS — what specifically about the upcoming print matters.
-     Good: "Q2 print will test whether NIM expansion has peaked."
-     Weak: "Stable macro provides a supportive backdrop." (macro
-            is not a print-level driver at this resolution)
+   EARNINGS — the company-specific operational lever this print will
+   test. NEVER frame it around GDP / inflation / "macro backdrop" —
+   that reads as filler and isn't a print-level driver. Name the lever.
+     Good: "Q2 print will test whether loan growth holds the prior
+            5-7% pace as deposit competition bites."
+     Weak: "Loan growth amid 1.6% GDP growth." (macro is backdrop,
+            not the driver; says nothing about the print)
 
-   VALUATION — the live multiple AND a comparator. Both required.
-     Good: "Forward P/E 12.1x trades at a 4% premium to its 5y
-            average of 10.7x and 9% below the GCC bank peer set."
-     Weak: "Trades at a premium to historical average." (no number;
-            no comparator)
+   VALUATION — lead with the LIVE multiple, then compare it to PEERS /
+   the industry (the comparator the reader actually weighs). A 5-year
+   own-average may be added as a secondary clause but never stand alone.
+     Good: "Trades at 11.1x trailing earnings, a ~20% premium to the
+            GCC bank peer median near 9.0x."
+     Also good: "Forward P/E 12.1x — in line with peers but a 4%
+            premium to its own 5y average of 10.7x."
+     Weak: "Trades at a premium to its 5-year average." (own-history
+            only; no live multiple, no peer anchor)
 
    POSITIONING — the Street's posture. Rating split, target
    dispersion, beat history. Interpretive, not restated.
@@ -526,54 +535,86 @@ trailing prose. JSON only.
      Good: "Whether management raises mid-cycle NIM guidance from
             3.2% on the call."
 
-   RISK — sharp and specific. Avoid "multiple compression"
-   generic risk; cite a mechanism.
-     Good: "Funding-cost catch-up could compress NIM from current
-            3.2% below the 3.0% comfort floor by year-end."
+   RISK — a SPECIFIC downside MECHANISM with a magnitude or baseline,
+   not a generic worry. Bad risks are vanilla ("slower activity could
+   pressure growth"); good risks name the channel AND a number/threshold.
+     Good: "A 25-30bp NIM slip as deposits reprice faster than the
+            ~60% CASA book would cut pre-provision profit mid-single
+            digits."
+     Weak: "Slower economic activity could pressure loan growth and
+            asset quality." (no mechanism, no magnitude, says nothing
+            a peer's risk pill couldn't)
 
 ═══════════════════════════════════════════════════════════════════
 "catalysts" — 3 forward-looking drivers specific to the company.
 ═══════════════════════════════════════════════════════════════════
 
    Each catalyst names a specific lever (management action,
-   operational milestone, named guidance range, sector flow). If
-   swapping the company name with a peer would still make the
-   bullet read true, the bullet is too generic — rewrite.
+   operational milestone, named guidance range, sector flow) AND, where
+   the data block supports it, anchors to a number. If swapping the
+   company name with a peer would still make the bullet read true, it's
+   too generic — rewrite.
+
+   Rules:
+     - Do NOT use GDP / macro as the driver of a catalyst (e.g. "loan
+       growth supported by GDP" is filler). Anchor on a company lever.
+     - Carry a baseline figure when one exists (a yield, a guidance
+       range, a ratio) so the reader can size the move.
+     - No vague nouns like "updates", "developments", "progress" — say
+       WHAT specifically (a buyback authorization, a guidance raise, a
+       fee-income mix shift).
 
    Examples of the right shape:
-     - "Any extension of the 4.83% dividend yield via a buyback
-        authorization on the call."
-     - "Loan-growth pipeline confirmation in line with management's
-        prior 5-7% range."
-     - "Fee income growing toward 25% of total revenue, reducing
+     - "A buyback authorization on the call that lifts the payout
+        beyond the current 4.22% dividend yield."
+     - "Loan-growth guidance confirmed at the prior 5-7% range despite
+        deposit-cost pressure."
+     - "Fee income climbing toward 25% of revenue, cutting
         spread-business dependence."
 
 ═══════════════════════════════════════════════════════════════════
 "risks" — 3 company-specific downside paths.
 ═══════════════════════════════════════════════════════════════════
 
-   Each risk ties to a baseline number when possible and avoids
-   restating valuation if that point already lives in the VALUATION
-   highlight pill. Pick risks the deck isn't already showing.
+   The 3 risks must each be DISTINCT — different channels, no overlap
+   with one another or with the RISK highlight pill on slide 1. Each
+   ties to a baseline number or named trigger. Do NOT restate valuation
+   if it already lives in the VALUATION pill.
+
+   Rules:
+     - Never use the bare word "unexpected"/"unforeseen" as the risk —
+       say what the event is and either a magnitude or whether it's a
+       one-off vs structural channel.
+     - Don't repeat the same worry (e.g. "slower loan growth") across
+       multiple bullets or across slides; if it's already on the deck,
+       pick a different downside path.
 
    Examples of the right shape:
-     - "Asset-quality drift from the current sub-2% NPL ratio
-        as the rate-cut cycle pressures provisioning."
-     - "Loss of market share to digitally-native challenger banks
-        accelerating cost-to-income deterioration."
+     - "Asset-quality drift from the current sub-2% NPL ratio as the
+        rate-cut cycle pressures provisioning expense."
+     - "A larger one-off provision charge — Oman corporate exposure is
+        concentrated — that resets the cost-of-risk run-rate higher."
+     - "Share loss to digitally-native challengers accelerating
+        cost-to-income deterioration from current levels."
 
 ═══════════════════════════════════════════════════════════════════
 "watch_list" — 3 questions to put to management on the call.
 ═══════════════════════════════════════════════════════════════════
 
-   Sharp, specific, ending in "?". These live in their own card on
-   the same slide — they are NOT echoed in the thesis paragraph.
+   Sharp, specific questions ending in "?". These live in their own
+   "What to Watch" card and are NOT echoed in the thesis paragraph
+   (the exec summary no longer carries a watch sentence). Because this
+   card now stands alone, make each question substantive — name the
+   metric AND the threshold/context that makes the answer actionable,
+   not just a one-line ask.
 
    Examples:
-     - "What is management's full-year NIM guidance range given
-        the rate path?"
-     - "Where does the loan-growth pipeline sit relative to the
-        prior 5-7% guidance?"
+     - "What is the full-year NIM guidance range, and how much deposit
+        repricing is already assumed in it?"
+     - "Where does the loan-growth pipeline sit versus the prior 5-7%
+        guidance, and which segments are driving it?"
+     - "Is the dividend payout sustainable at the current ~4.2% yield
+        if cost-of-risk normalizes from today's low base?"
 
 ═══════════════════════════════════════════════════════════════════
 NUMERIC DISCIPLINE
@@ -586,6 +627,13 @@ NUMERIC DISCIPLINE
   "FY26E") so the reader doesn't conflate them.
 
   When citing macro, keep the "(IMF YYYY)" / "(WB YYYY)" tag.
+
+MACRO DISCIPLINE
+  The macro block is BACKGROUND only. Do NOT make GDP or inflation the
+  driver of an EARNINGS pill, a catalyst, or a risk — those must anchor
+  on company-specific operational levers (loan growth, NIM, provisions,
+  fees, capital). Macro may appear at most once, in the thesis S2
+  "drivers/pressures" clause, and only if it genuinely moved the stock.
 """
 
 
