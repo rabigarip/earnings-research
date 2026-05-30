@@ -424,6 +424,26 @@ def fetch_historical_prices(ticker: str, *, days: int = 380) -> Optional[dict]:
         prev = _close_at_or_before(anchor_date)
         if prev and prev > 0:
             out[key] = (today_close / prev - 1.0) * 100
+
+    # Prefer Investing's OWN published performance percentages over the
+    # close-series recomputation above. These are the exact figures the
+    # analyst sees on the equity page; recomputing from daily closes uses a
+    # calendar-day window that drifts from Investing's definition (most
+    # visibly 1W / 1M), so the deck would disagree with the site the user
+    # cross-checks against. Published values win when present; the computed
+    # band remains the fallback for any null field.
+    pc = _equity_price_changes(state)
+    if isinstance(pc, dict):
+        for okey, pkey in (("perf_1d", "pct_1d"), ("perf_1w", "pct_1w"),
+                            ("perf_1m", "pct_1m"), ("perf_3m", "pct_3m"),
+                            ("perf_6m", "pct_6m"), ("perf_ytd", "pct_ytd")):
+            v = pc.get(pkey)
+            if isinstance(v, (int, float)):
+                out[okey] = float(v)
+        out["perf_source"] = "investing_published"
+        upd = pc.get("updated_at")
+        if upd:
+            out["perf_updated_at"] = upd
     # Persist successful network fetches to the disk cache so subsequent
     # calls hit (free local) instead of (paid network) — and so the local
     # refresh script can collect them all for committing to data/investing.

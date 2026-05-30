@@ -835,9 +835,15 @@ def build_snapshot_data(ticker: str, *, analyst_name: str = "Jabal Research",
     rating_split = _val("rating_split") or {}
     div_yield = _val("dividend_yield")
     hist_prices = _val("historical_prices") or {}
-    # Prefer Investing-derived history when canonical_store is empty (the
-    # GCC ex-Saudi tickers don't reach canonical_store via yfinance).
-    if not (isinstance(hist_prices, dict) and hist_prices) and isinstance(historical_override, dict):
+    # Prefer the Investing override whenever canonical lacks a REAL close
+    # series. For GCC ex-Saudi names canonical_store often holds only an
+    # iShares-EEM proxy (ETF metadata, no close_series/perf), which would
+    # otherwise make the deck fall through to MarketScreener's performance
+    # numbers — disagreeing with both Investing.com and our own provenance.
+    # Checking close_series (not mere truthiness) routes price/52w/perf
+    # through the Investing series the analyst actually cross-checks against.
+    if not (isinstance(hist_prices, dict) and hist_prices.get("close_series")) \
+       and isinstance(historical_override, dict) and historical_override.get("close_series"):
         hist_prices = historical_override
 
     # Currency: try profile first, else canonical_value units

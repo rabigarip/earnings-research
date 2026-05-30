@@ -368,23 +368,40 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
                         if not prior or prior[0][1] == 0: return None
                         return (prior[0][0].isoformat(),
                                 (last_v - prior[0][1]) / prior[0][1] * 100.0)
+                    # Prefer Investing's OWN published % (what the deck now
+                    # shows and what the analyst sees on the site); fall back
+                    # to the close-series computation when a published field
+                    # is absent. Keeps provenance == deck == Investing.
+                    _pub_perf = cv_hist if isinstance(cv_hist, dict) else {}
+                    _published = (str(_pub_perf.get("perf_source") or "")
+                                  == "investing_published")
                     buckets = [
-                        ("1 Day", _ret_pct(1)),
-                        ("1 Week", _ret_pct(7)),
-                        ("1 Month", _ret_pct(30)),
-                        ("3 Months", _ret_pct(91)),
-                        ("6 Months", _ret_pct(182)),
-                        ("YTD", _ytd_ret()),
+                        ("1 Day", "perf_1d", _ret_pct(1)),
+                        ("1 Week", "perf_1w", _ret_pct(7)),
+                        ("1 Month", "perf_1m", _ret_pct(30)),
+                        ("3 Months", "perf_3m", _ret_pct(91)),
+                        ("6 Months", "perf_6m", _ret_pct(182)),
+                        ("YTD", "perf_ytd", _ytd_ret()),
                     ]
-                    for label, result in buckets:
-                        if result is None: continue
-                        anchor_date, ret = result
-                        rows.append([
-                            "Slide 1", "Recent Performance", label,
-                            f"{ret:+.2f}%",
-                            hist_src, hist_src_url, "", hist_fetched,
-                            f"vs close on {anchor_date}",
-                        ])
+                    for label, pkey, result in buckets:
+                        pub_v = _pub_perf.get(pkey)
+                        if isinstance(pub_v, (int, float)):
+                            note = ("Investing.com published figure"
+                                    + (f" (updated {str(_pub_perf.get('perf_updated_at'))[:10]})"
+                                       if _pub_perf.get("perf_updated_at") else ""))
+                            rows.append([
+                                "Slide 1", "Recent Performance", label,
+                                f"{float(pub_v):+.2f}%",
+                                hist_src, hist_src_url, "", hist_fetched, note,
+                            ])
+                        elif result is not None:
+                            anchor_date, ret = result
+                            rows.append([
+                                "Slide 1", "Recent Performance", label,
+                                f"{ret:+.2f}%",
+                                hist_src, hist_src_url, "", hist_fetched,
+                                f"vs close on {anchor_date}",
+                            ])
             except (ValueError, TypeError):
                 pass
 
