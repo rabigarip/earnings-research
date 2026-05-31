@@ -161,7 +161,11 @@ date_confidence_policy = "from_source"
 model = "gemini-2.5-flash"
 # Investment View: more capable model for the memo's two-paragraph IV (evidence-based, sector-specific)
 investment_view_model = "gemini-2.5-pro"
-max_tokens = 8192
+# gemini-2.5-pro is a THINKING model — reasoning tokens count against this
+# budget. At 8192 a long think occasionally truncated the JSON before the
+# final sections (catalysts/risks/watch), which then fell back to the
+# deterministic templates. Raised so the full response always fits.
+max_tokens = 24576
 temperature = 0.2
 # IV validation word bounds (optional; defaults in src/constants/iv_quality.py)
 iv_min_total_words = 80

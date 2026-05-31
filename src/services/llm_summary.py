@@ -1001,6 +1001,59 @@ def _strip_banned_qualifiers(text: str) -> str:
     return _re.sub(r"\s{2,}", " ", out).strip()
 
 
+def _focused_sections_prompt(ctx: dict, which: list[str]) -> str:
+    """A SHORT, truncation-proof prompt that re-requests only the sections
+    the main call left empty (the big prompt occasionally truncates before
+    catalysts/risks/watch). Compact data block + just those rules."""
+    cur = ctx.get("currency") or ""
+    fy = ctx.get("bank_fy") or {}
+    L = [f"{ctx.get('company_name')} ({ctx.get('ticker')}) — {ctx.get('sector') or ''}."]
+    if isinstance(ctx.get("pe_recent"), (int, float)):
+        L.append(f"Trailing P/E {ctx['pe_recent']:.1f}x; peer-set average P/E "
+                 f"{ctx.get('peer_pe_avg','—')}x; dividend yield "
+                 f"{_fmt_num(ctx.get('dividend_yield_pct'))}% TTM.")
+    L.append(f"Consensus {ctx.get('rating_consensus') or '—'} "
+             f"({ctx.get('buy_count',0)}/{ctx.get('hold_count',0)}/{ctx.get('sell_count',0)} "
+             f"B/H/S); target {cur} {_fmt_num(ctx.get('target_mean'))} "
+             f"({_fmt_num(ctx.get('upside_pct'))}% upside).")
+    if isinstance(fy, dict) and fy:
+        seg = []
+        for lbl, k in [("net-profit growth", "net_profit_growth_pct"),
+                        ("loan growth", "loan_growth_pct"),
+                        ("deposit growth", "deposit_growth_pct"),
+                        ("non-interest income growth", "non_interest_income_growth_pct"),
+                        ("ROE", "roe_pct"), ("CAR", "car_pct")]:
+            v = fy.get(k)
+            if isinstance(v, (int, float)):
+                seg.append(f"{lbl} {v:+.1f}%" if "growth" in lbl else f"{lbl} {v:.2f}%")
+        if seg:
+            L.append("FY2025 (company IR): " + ", ".join(seg) + ".")
+    data = "\n".join(L)
+
+    rules = {
+        "catalysts": ('"catalysts": exactly 3 bullets, <=24 words each, what would make '
+                      'investors MORE POSITIVE after the print. Each = trigger -> effect on '
+                      'earnings/capital/valuation. Cite ONLY numbers above; describe other '
+                      'magnitudes qualitatively. No macro driver, no vague "update".'),
+        "risks": ('"risks": exactly 3 bullets, <=26 words each, what would cause a NEGATIVE '
+                  'share-price reaction. Each = mechanism + impact. 3 distinct channels. '
+                  'Cite ONLY numbers above. BANNED: "unexpected", "*-than-expected".'),
+        "watch_list": ('"watch_list": exactly 3 sharp questions to management ending in "?", '
+                       'each naming a metric + threshold (NIM/deposit costs, asset quality/'
+                       'cost of risk, loan & deposit growth, fee income, capital return).'),
+    }
+    want = [k for k in ("catalysts", "risks", "watch_list") if k in which]
+    body = "\n".join(rules[k] for k in want)
+    keys = ", ".join(f'"{k}": [...]' for k in want)
+    return (
+        "You are a senior sell-side bank analyst. Use ONLY the data below; "
+        "never invent numbers. Mechanism-driven, bank-specific (NIM, NII, cost "
+        "of risk, capital), no generic filler.\n\n"
+        f"DATA\n{data}\n\nWrite these sections:\n{body}\n\n"
+        f"Return JSON only: {{{keys}}}."
+    )
+
+
 def _validate_llm_output(payload: dict, ctx: dict) -> dict:
     """Drop sentences / bullets whose numbers don't trace to the context.
 
@@ -1247,11 +1300,12 @@ def generate_summary(ticker: str, *, force_refresh: bool = False) -> Optional[di
     if not out or not isinstance(out, dict):
         return None
 
-    # Validate shape
-    required = {"thesis_paragraph", "catalysts", "risks", "watch_list"}
-    missing = required - set(out.keys())
-    if missing:
-        log.warning("Gemini summary missing keys for %s: %s", ticker, missing)
+    # Validate shape — only the thesis is mandatory. If a truncated response
+    # dropped the catalysts/risks/watch KEYS entirely, don't fail the whole
+    # summary (that wastes the good thesis+highlights); the focused retry
+    # below regenerates the missing sections.
+    if not (out.get("thesis_paragraph") or "").strip():
+        log.warning("Gemini summary missing thesis_paragraph for %s", ticker)
         return None
 
     def _build_payload(raw: dict) -> dict:
@@ -1284,6 +1338,24 @@ def generate_summary(ticker: str, *, force_refresh: bool = False) -> Optional[di
     # number we can't trace back to the context. Voice and bullet count
     # are the model's leeway — only hallucinated numbers are policed.
     payload = _validate_llm_output(payload, ctx)
+
+    # FOCUSED RETRY — if the main (long, thinking-model) call truncated
+    # before catalysts/risks/watch and they came back empty, re-request
+    # JUST those with a short prompt so they're always real LLM output
+    # rather than the deterministic fallback templates.
+    _empty = [k for k in ("catalysts", "risks", "watch_list") if not payload.get(k)]
+    if _empty:
+        try:
+            from src.providers.gemini import _call_gemini as _cg
+            log.info("[llm] %s: focused retry for empty sections: %s", ticker, _empty)
+            _r = _cg(_focused_sections_prompt(ctx, _empty), for_investment_view=True) or {}
+            for k in _empty:
+                vals = _r.get(k)
+                if isinstance(vals, list) and vals:
+                    payload[k] = [_strip_banned_qualifiers(str(x).strip())
+                                  for x in vals[:3] if str(x).strip()]
+        except Exception as exc:
+            log.warning("[llm] %s: focused retry failed: %s", ticker, exc)
 
     # TIER-2 STRUCTURED VALIDATION — produces ValidationFinding records
     # alongside the scrubbed payload. The numeric-trace path above
