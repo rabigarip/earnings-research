@@ -646,9 +646,14 @@ investor concern, and the overall setup judgment. Do NOT include a
          asymmetric / high-risk-high-reward], [one-clause
          reason]." Stop here. No scenario coda.
 
-   Exactly FOUR full sentences (~80-110 words). Do not stuff numbers
-   beyond the one required company figure in S2 plus, optionally, one
-   valuation multiple.
+   ALL FOUR sentences are MANDATORY (~80-110 words total). The #1 failure
+   mode is dropping S2 to make room for the S3 watch sentence — DO NOT.
+   S2 (the drivers sentence with a concrete company figure) is the most
+   important; if space is tight, shorten S1 and S3, never omit S2. A
+   four-sentence summary whose ONLY numbers are a P/E and a yield has
+   FAILED — it must carry a real company figure (loan growth, NII trend,
+   ROE, profit growth) in S2. Do not stuff numbers beyond that one
+   required figure plus, optionally, one valuation multiple.
 
 ═══════════════════════════════════════════════════════════════════
 "highlights" — 5 short interpretive sentences (one per category).
@@ -1006,6 +1011,20 @@ def _validate_llm_output(payload: dict, ctx: dict) -> dict:
     a number is fine and often better than a number with no insight.
     """
     allowed = _allowed_numbers(ctx)
+
+    # Strip the empty "*-than-expected" qualifier FIRST — before the
+    # highlight word-cap check — so (a) shortening a pill can rescue it from
+    # the cap (and the datapoint-template fallback) and (b) it's gone
+    # everywhere downstream. Operate on a stripped copy of the payload.
+    payload = dict(payload)
+    payload["thesis_paragraph"] = _strip_banned_qualifiers(payload.get("thesis_paragraph", ""))
+    payload["highlights"] = [
+        {**h, "body": _strip_banned_qualifiers(h.get("body", ""))}
+        for h in (payload.get("highlights") or []) if isinstance(h, dict)
+    ]
+    for _k in ("catalysts", "risks", "watch_list"):
+        payload[_k] = [_strip_banned_qualifiers(x)
+                       for x in (payload.get(_k) or []) if isinstance(x, str)]
     cleaned = dict(payload)
 
     # Thesis: drop sentences whose numbers don't trace. Re-join the rest.
@@ -1062,17 +1081,6 @@ def _validate_llm_output(payload: dict, ctx: dict) -> dict:
         if ungrounded:
             log.info("[validate] %d %s bullet(s) carry an ungrounded number "
                      "(kept; flagged by QA)", len(ungrounded), key)
-
-    # Final deterministic cleanup: strip the empty "*-than-expected"
-    # qualifier from every text field (the model slips it in despite the
-    # ban). Meaning-preserving and reliable.
-    cleaned["thesis_paragraph"] = _strip_banned_qualifiers(cleaned.get("thesis_paragraph", ""))
-    cleaned["highlights"] = [
-        {**h, "body": _strip_banned_qualifiers(h.get("body", ""))}
-        for h in cleaned.get("highlights", []) if isinstance(h, dict)
-    ]
-    for key in ("catalysts", "risks", "watch_list"):
-        cleaned[key] = [_strip_banned_qualifiers(x) for x in cleaned.get(key, [])]
 
     return cleaned
 

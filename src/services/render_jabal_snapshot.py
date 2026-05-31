@@ -570,23 +570,28 @@ def _derive_highlights(*, cv: dict, currency: str, current_price,
     # SOEs, and dividend-heavy names. Fall back to current vs 52-week high
     # for growth names with no dividend.
     if isinstance(div_yield, (int, float)) and div_yield > 0:
-        rows.append(("POSITIONING", f"Dividend yield {float(div_yield):.2f}% supports income mandate fit."))
+        rows.append(("POSITIONING",
+            f"The {float(div_yield):.2f}% yield anchors income holders, but that base also limits appetite to chase a soft print."))
     elif (isinstance(current_price, (int, float)) and current_price > 0
           and isinstance(range_high, (int, float)) and range_high > 0):
         gap = (current_price / range_high - 1.0) * 100
-        rows.append(("POSITIONING", f"Trades {gap:+.1f}% versus 52-week high — entry-point context."))
+        rows.append(("POSITIONING",
+            f"Trading {gap:+.1f}% off the 52-week high — the debate is whether the pullback is value or a warning."))
     else:
-        rows.append(("POSITIONING", "Range-trading context; refer to slide 3 for the 52-week band."))
+        rows.append(("POSITIONING",
+            "Positioning hinges on whether the print breaks the recent trading range either way."))
 
-    # WATCH — the target-vs-price gap is the cleanest forward-looking number
-    # the audience asks about. Fall back to "next print awaited" line.
+    # WATCH — the swing factor heading into the print. Fall back to a
+    # mechanism (guidance closing the target gap), never a bare datapoint.
     if (isinstance(upside_pct, (int, float))
         and isinstance(target_mean, (int, float)) and target_mean > 0):
-        rows.append(("WATCH", f"Target {cur} {target_mean:,.2f} ({upside_pct:+.1f}% vs last close)."))
+        rows.append(("WATCH",
+            f"Whether guidance confirms the trajectory needed to close the {upside_pct:+.1f}% gap to the {cur} {target_mean:,.2f} target."))
     elif isinstance(target_mean, (int, float)) and target_mean > 0:
-        rows.append(("WATCH", f"Consensus target sits at {cur} {target_mean:,.2f}."))
+        rows.append(("WATCH",
+            "Management's forward guidance is the swing factor for whether the consensus target holds."))
     else:
-        rows.append(("WATCH", "Management commentary on forward outlook is the swing factor."))
+        rows.append(("WATCH", "Management commentary on the forward outlook is the swing factor for the print."))
 
     # RISK — analyst-distribution concentration is the most defensible
     # quantitative risk anchor (one-sided consensus = harder to surprise).
@@ -634,9 +639,10 @@ def _derive_highlights(*, cv: dict, currency: str, current_price,
                     f"No bears in the tape — {buy}/{total} buys, 0 sells across {total} analysts."))
             else:
                 rows.append(("RISK",
-                    f"Rating mix {buy}/{hold}/{sell} (buy/hold/sell) — view dispersion."))
+                    "A print short of consensus would trigger estimate cuts and a de-rating of the multiple."))
         else:
-            rows.append(("RISK", "Macro / sector sensitivity; refer to thesis on slide 2."))
+            rows.append(("RISK",
+                "A downside surprise on the print would pressure both forward estimates and the multiple."))
     else:
         rows.append(("RISK", "Macro / sector sensitivity; refer to thesis on slide 2."))
 
