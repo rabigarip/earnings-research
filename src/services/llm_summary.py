@@ -632,10 +632,14 @@ investor concern, and the overall setup judgment. Do NOT include a
          prices, capex, free cash flow. For tech: revenue growth,
          gross margin, AI/product momentum, guidance.
      S2. "Recent performance has been supported by [drivers],
-         while [pressures] remain key concerns." REQUIRED — this is
-         the meatiest interpretive sentence; never skip it. Qualitative
-         narrative on what the Street has been rewarding and worrying
-         about. Do not collapse the paragraph to two sentences.
+         while [pressures] remain key concerns." REQUIRED — never skip
+         it; do not collapse to two sentences. This sentence MUST cite at
+         least one CONCRETE COMPANY figure from the data block (e.g. loan
+         growth %, deposit growth %, the NII trend, net-profit growth %,
+         or ROE) — NOT a macro stat, NOT generic prose. A reader must be
+         able to tell this is {{Company}} and not "any bank". If the only
+         numbers you use in the whole paragraph are a P/E and a yield,
+         the summary has failed.
      S3. "The setup appears [balanced / cautiously attractive /
          asymmetric / high-risk-high-reward], [one-clause
          reason]." Stop here. No scenario coda.
