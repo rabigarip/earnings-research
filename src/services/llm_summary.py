@@ -572,7 +572,7 @@ Deliver a JSON object with these keys. No markdown, no preface, no
 trailing prose. JSON only.
 
 ═══════════════════════════════════════════════════════════════════
-"thesis_paragraph" — Executive Summary. THREE sentences, 80–110 words.
+"thesis_paragraph" — Executive Summary. FOUR sentences, 80–110 words.
 Start with "{{Company}} enters [the upcoming quarter] earnings with focus
 on …". Cover the main operating drivers, recent support factors, the key
 investor concern, and the overall setup judgment. Do NOT include a
@@ -622,36 +622,33 @@ investor concern, and the overall setup judgment. Do NOT include a
    │ given the stock's reliance on future growth narratives.       │
    └───────────────────────────────────────────────────────────────┘
 
-   STRUCTURE — THREE sentences total (the reference boxes above show a
-   legacy 4th "watch" sentence; OMIT it — see note):
-     S1. "{{Company}} enters earnings with focus on [4 operational
-         levers most central to the print]." Pick the levers that
-         define how investors model THIS business. For banks:
+   STRUCTURE — FOUR sentences total (matches the reference boxes):
+     S1. "{{Company}} enters [the upcoming quarter] earnings with focus
+         on [4 operational levers most central to the print]." Pick the
+         levers that define how investors model THIS business. For banks:
          net interest income, loan growth, credit quality, capital
-         returns. For oil & gas: production volumes, realized
-         prices, capex, free cash flow. For tech: revenue growth,
-         gross margin, AI/product momentum, guidance.
+         returns. For oil & gas: production volumes, realized prices,
+         capex, free cash flow. For tech: revenue growth, gross margin,
+         AI/product momentum, guidance.
      S2. "Recent performance has been supported by [drivers],
-         while [pressures] remain key concerns." REQUIRED — never skip
-         it; do not collapse to two sentences. This sentence MUST cite at
-         least one CONCRETE COMPANY figure from the data block (e.g. loan
-         growth %, deposit growth %, the NII trend, net-profit growth %,
-         or ROE) — NOT a macro stat, NOT generic prose. A reader must be
-         able to tell this is {{Company}} and not "any bank". If the only
-         numbers you use in the whole paragraph are a P/E and a yield,
-         the summary has failed.
-     S3. "The setup appears [balanced / cautiously attractive /
+         while [pressures] remain key concerns." REQUIRED. This sentence
+         MUST cite at least one CONCRETE COMPANY figure from the data
+         block (e.g. loan growth %, deposit growth %, the NII trend,
+         net-profit growth %, or ROE) — NOT a macro stat, NOT generic
+         prose. A reader must be able to tell this is {{Company}} and not
+         "any bank". If the only numbers in the whole paragraph are a P/E
+         and a yield, the summary has failed.
+     S3. "Investors should watch [4-6 specific things, including
+         management commentary on X]." A concise list of the concrete
+         metrics/lines the print will turn on — the high-level read; the
+         slide-2 card asks the detailed questions.
+     S4. "The setup appears [balanced / cautiously attractive /
          asymmetric / high-risk-high-reward], [one-clause
          reason]." Stop here. No scenario coda.
 
-   Exactly THREE full sentences (~70-110 words). DO NOT write an
-   "Investors should watch …" / "Key metrics to watch …" sentence —
-   those questions live in their own "What to Watch" card on the same
-   slide; repeating them here is redundant.
-
-   You may anchor 1-2 numbers in S2 if they sharpen the read (e.g. a
-   specific NIM percent, a current multiple). Do not stuff numbers. The
-   references each cite zero or one number total.
+   Exactly FOUR full sentences (~80-110 words). Do not stuff numbers
+   beyond the one required company figure in S2 plus, optionally, one
+   valuation multiple.
 
 ═══════════════════════════════════════════════════════════════════
 "highlights" — 5 short interpretive sentences (one per category).
@@ -720,11 +717,14 @@ investor concern, and the overall setup judgment. Do NOT include a
 
    Rules:
      - Do NOT mention "macro backdrop", GDP, or inflation in a catalyst
-       at all — not as a driver, not as a benchmark. Anchor entirely on
-       a company lever (e.g. "loan growth that outpaces the prior 5-7%
-       guidance", NOT "outpaces the macro backdrop").
-     - Carry a baseline figure when one exists (a yield, a guidance
-       range, a ratio) so the reader can size the move.
+       at all. Anchor on a company lever (e.g. "loan growth above the
+       FY25 +4.8% pace", NOT "outpaces the macro backdrop").
+     - ONLY cite a number that appears in the DATA block above (the FY
+       metrics, valuation multiples, yield, growth rates). For a
+       magnitude the data does NOT carry — NIM in bps, a guidance range,
+       a cost-of-risk level — describe it QUALITATIVELY ("a sharp step-up",
+       "above the recent run-rate"); NEVER invent a specific figure. An
+       invented number gets flagged and undermines the whole bullet.
      - No vague nouns like "updates", "developments", "progress" — say
        WHAT specifically (a buyback authorization, a guidance raise, a
        fee-income mix shift).
@@ -752,12 +752,15 @@ investor concern, and the overall setup judgment. Do NOT include a
    restate valuation if that already lives in the VALUATION pill.
 
    Rules:
-     - BANNED filler phrasings: "unexpected", "unforeseen",
-       "higher-than-expected", "lower-than-expected",
-       "slower-than-expected", "better-than-expected". They say nothing.
-       Replace with a concrete magnitude/threshold (e.g. "cost-of-risk
-       rising above 50bp") or a named trigger (a specific exposure, a
-       repricing channel, a one-off charge).
+     - BANNED filler — NEVER use these, they say nothing: "unexpected",
+       "unforeseen", "higher-than-expected", "lower-than-expected",
+       "slower-than-expected", "better-than-expected", "faster-than-
+       expected". Name the actual trigger (a repricing channel, a specific
+       exposure, a one-off charge) and its direction instead.
+     - ONLY cite a number that appears in the DATA block. For a magnitude
+       the data doesn't carry (NIM bps, cost-of-risk level, a guidance
+       range) describe it QUALITATIVELY ("a sharp normalization", "off the
+       current low base") — never invent a figure.
      - Don't repeat the same worry (e.g. "slower loan growth") across
        multiple bullets or across slides; if it's already on the deck,
        pick a different downside path.
@@ -975,6 +978,24 @@ def _validate_sentence(text: str, allowed: set[float]) -> bool:
     return all(_number_matches(n, allowed) for n in nums)
 
 
+_THAN_EXPECTED_RE = _re.compile(
+    r"\b(faster|slower|higher|lower|better|weaker|stronger|larger|smaller)"
+    r"[ -]than[ -]expected\b", _re.IGNORECASE)
+
+
+def _strip_banned_qualifiers(text: str) -> str:
+    """Deterministically remove the empty '*-than-expected' qualifier the
+    model occasionally slips in despite the prompt ban, keeping the
+    adjective so the sentence still reads: 'faster-than-expected deposit
+    repricing' -> 'faster deposit repricing'. Cheap, meaning-preserving,
+    reliable — no second LLM call."""
+    if not text:
+        return text
+    out = _THAN_EXPECTED_RE.sub(lambda m: m.group(1), text)
+    # tidy any double spaces the substitution leaves behind
+    return _re.sub(r"\s{2,}", " ", out).strip()
+
+
 def _validate_llm_output(payload: dict, ctx: dict) -> dict:
     """Drop sentences / bullets whose numbers don't trace to the context.
 
@@ -1025,22 +1046,33 @@ def _validate_llm_output(payload: dict, ctx: dict) -> dict:
         hl_kept.append(it)
     cleaned["highlights"] = hl_kept
 
-    # Catalysts / risks / watch_list: only the number-trace filter applies.
-    # A bullet that says nothing numeric is fine — the prompt explicitly
-    # allows interpretation without a number.
+    # Catalysts / risks / watch_list: KEEP every non-empty bullet. We used
+    # to DROP any bullet citing an untraceable number, but that meant a
+    # single analytical magnitude (e.g. "cost of risk above 50bp") wiped the
+    # whole bullet and the deck fell back to a GENERIC hardcoded default —
+    # far worse than the LLM's real, mechanism-driven bullet. The
+    # number-trace guard is meant for the thesis paragraph's REPORTED
+    # figures, not for analyst framing in catalysts/risks. Ungrounded
+    # numbers here are surfaced by the tier-3 QA flag instead of deleted.
     for key in ("catalysts", "risks", "watch_list"):
         items = payload.get(key) or []
-        kept: list[str] = []
-        for it in items:
-            if not isinstance(it, str) or not it.strip():
-                continue
-            if not _validate_sentence(it, allowed):
-                continue
-            kept.append(it)
+        kept = [it for it in items if isinstance(it, str) and it.strip()]
         cleaned[key] = kept
-        if len(kept) < len(items):
-            log.warning("Dropped %d %s bullet(s) (ungrounded numbers)",
-                         len(items) - len(kept), key)
+        ungrounded = [it for it in kept if not _validate_sentence(it, allowed)]
+        if ungrounded:
+            log.info("[validate] %d %s bullet(s) carry an ungrounded number "
+                     "(kept; flagged by QA)", len(ungrounded), key)
+
+    # Final deterministic cleanup: strip the empty "*-than-expected"
+    # qualifier from every text field (the model slips it in despite the
+    # ban). Meaning-preserving and reliable.
+    cleaned["thesis_paragraph"] = _strip_banned_qualifiers(cleaned.get("thesis_paragraph", ""))
+    cleaned["highlights"] = [
+        {**h, "body": _strip_banned_qualifiers(h.get("body", ""))}
+        for h in cleaned.get("highlights", []) if isinstance(h, dict)
+    ]
+    for key in ("catalysts", "risks", "watch_list"):
+        cleaned[key] = [_strip_banned_qualifiers(x) for x in cleaned.get(key, [])]
 
     return cleaned
 

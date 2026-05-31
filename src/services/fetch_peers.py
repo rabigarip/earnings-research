@@ -198,6 +198,13 @@ def _peer_row_from_investing(ticker: str) -> dict | None:
     }
 
 
+# Per-process memo so the slide-3 peer table and the LLM context's
+# peer-average (computed in two separate call sites within one render)
+# share ONE fetch — otherwise live-price drift between the two calls made
+# the highlight cite e.g. 9.1x while the table showed 9.0x.
+_PEER_ROWS_MEMO: dict[tuple, list[dict]] = {}
+
+
 def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
     """Fetch one peer-table row per ticker.
 
@@ -206,8 +213,12 @@ def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
     like ENBD.AE, FAB.AE, ENBD.AD). Tickers that fail both sources are
     skipped with a log warning.
 
-    Used by the slide-3 peer comparables table.
+    Used by the slide-3 peer comparables table AND the VALUATION-pill
+    peer average; memoized per process so both see identical numbers.
     """
+    _memo_key = tuple(peer_tickers or [])
+    if _memo_key in _PEER_ROWS_MEMO:
+        return _PEER_ROWS_MEMO[_memo_key]
     rows: list[dict] = []
     pb_cache = _read_peer_cache()
     cache_dirty = False
@@ -310,5 +321,6 @@ def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
         })
     if cache_dirty:
         _write_peer_cache(pb_cache)
+    _PEER_ROWS_MEMO[_memo_key] = rows
     return rows
 
