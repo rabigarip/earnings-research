@@ -437,8 +437,12 @@ def _prompt(ctx: dict) -> str:
         if _fy("Capital adequacy (CAR)", "car_pct", "%"): have.add("capital")
         if _fy("ROE", "roe_pct", "%"): have.add("roe")
         if fl:
-            fy_block = (f"FULL-YEAR {fy.get('period','FY')} (company-disclosed / IR)\n"
-                        + "\n".join(fl))
+            _fyp = fy.get('period', 'FY')
+            fy_block = (
+                f"{_fyp} REPORTED ACTUALS (company IR — already published; this is "
+                f"the most recent COMPLETED FULL YEAR, the prior-year baseline, "
+                f"NOT guidance for the upcoming print)\n"
+                + "\n".join(fl))
 
     # Inputs we still do NOT have — drop any the FY block now covers so the
     # model isn't told a metric is unavailable when it actually is.
@@ -567,6 +571,16 @@ to INTERPRET — give the analyst a qualitative read on what matters
 heading into the print. Anchor every claim to a MECHANISM and, where a
 number exists in the data above, cite it; stay qualitative on anything
 in the "NOT IN AVAILABLE DATA" line.
+
+PERIOD DISCIPLINE (critical): the "REPORTED ACTUALS" block is the most
+recent COMPLETED period the company has ALREADY published — it is the
+prior-year baseline, NOT a forecast. NEVER call a reported actual a
+"target", "guidance", "guide", "guided", or "ambitious goal". Frame it as
+achieved ("FY2025 DELIVERED +13.3% net-profit growth / a 13.57% ROE") and
+discuss the UPCOMING print RELATIVE to it ("the upcoming print will test
+whether that pace holds / whether deposit costs are now eroding it"). The
+forward question is about the NEXT print, never about the year already
+reported.
 
 Deliver a JSON object with these keys. No markdown, no preface, no
 trailing prose. JSON only.
@@ -1027,8 +1041,16 @@ def _focused_sections_prompt(ctx: dict, which: list[str]) -> str:
             if isinstance(v, (int, float)):
                 seg.append(f"{lbl} {v:+.1f}%" if "growth" in lbl else f"{lbl} {v:.2f}%")
         if seg:
-            L.append("FY2025 (company IR): " + ", ".join(seg) + ".")
+            L.append(f"{fy.get('period','FY2025')} REPORTED ACTUALS (already "
+                     "published; prior-year baseline, NOT guidance): "
+                     + ", ".join(seg) + ".")
     data = "\n".join(L)
+
+    period_rule = (
+        "PERIOD DISCIPLINE: the reported-actuals figures are the COMPLETED "
+        "prior year — NEVER call them a 'target'/'guidance'/'guided'. Frame as "
+        "achieved ('FY2025 delivered +X%') and discuss the UPCOMING print "
+        "relative to them.\n")
 
     rules = {
         "catalysts": ('"catalysts": exactly 3 bullets, <=24 words each, what would make '
@@ -1049,7 +1071,7 @@ def _focused_sections_prompt(ctx: dict, which: list[str]) -> str:
         "You are a senior sell-side bank analyst. Use ONLY the data below; "
         "never invent numbers. Mechanism-driven, bank-specific (NIM, NII, cost "
         "of risk, capital), no generic filler.\n\n"
-        f"DATA\n{data}\n\nWrite these sections:\n{body}\n\n"
+        f"DATA\n{data}\n\n{period_rule}\nWrite these sections:\n{body}\n\n"
         f"Return JSON only: {{{keys}}}."
     )
 
