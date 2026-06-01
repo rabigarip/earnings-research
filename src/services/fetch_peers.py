@@ -113,11 +113,30 @@ def _fmt_mcap_usd(v) -> str:
     return f"${v:,.0f}"
 
 
+# USD conversion. GCC currencies are USD-pegged (fixed), so these rates are
+# stable and need no live FX feed; the few floating majors are approximate
+# and only affect the relative SIZE gauge, not the per-share ratios. We
+# unify all peer market caps to USD so the column is comparable and a peer
+# AVERAGE market cap can be shown.
+_USD_PER_UNIT = {
+    "USD": 1.0, "OMR": 2.6008, "AED": 0.2723, "SAR": 0.2667, "QAR": 0.2747,
+    "BHD": 2.6596, "KWD": 3.26, "JOD": 1.41, "EGP": 0.0205, "HKD": 0.1282,
+    "CNY": 0.139, "INR": 0.0120, "GBP": 1.27, "EUR": 1.08, "JPY": 0.0064,
+}
+
+
+def _to_usd(v, currency) -> float | None:
+    """Convert a market cap in `currency` to USD. None when not convertible."""
+    if not isinstance(v, (int, float)) or v <= 0:
+        return None
+    rate = _USD_PER_UNIT.get((currency or "").upper())
+    return v * rate if rate else None
+
+
 def _fmt_mcap_labeled(v, currency: str) -> str:
-    """Market cap labeled with its OWN currency so the peer column isn't a
-    misleading mix of unlabeled magnitudes (e.g. OMR 3.1B sitting next to a
-    bare '109.0B' that is actually AED). USD keeps the '$'; everything else
-    is prefixed with its ISO code (AED / QAR / SAR / OMR …)."""
+    """Fallback label for a market cap we can't convert to USD (unknown
+    currency): show the native magnitude with its ISO code so it's at least
+    not a bare unlabeled number."""
     base = _fmt_mcap_usd(v)
     if base == "—":
         return "—"
@@ -125,6 +144,16 @@ def _fmt_mcap_labeled(v, currency: str) -> str:
     if cur == "USD" or not cur:
         return base
     return f"{cur} {base.replace('$', '')}"
+
+
+def _mcap_usd_fields(mcap, currency) -> tuple:
+    """(usd_value, display_str) for a peer market cap. Converts to USD when
+    the currency is known ('$8.1B'); otherwise falls back to a native
+    labeled value and a None usd (so it's excluded from the USD average)."""
+    usd = _to_usd(mcap, currency)
+    if usd is not None:
+        return usd, _fmt_mcap_usd(usd)
+    return None, _fmt_mcap_labeled(mcap, currency)
 
 
 def _peer_row_from_investing(ticker: str) -> dict | None:
@@ -176,7 +205,7 @@ def _peer_row_from_investing(ticker: str) -> dict | None:
         or ticker
     currency = (price_block.get("currency") or "").upper()
     mcap = fund.get("marketCapRaw")
-    mcap_fmt = _fmt_mcap_labeled(mcap, currency)
+    mcap_usd, mcap_fmt = _mcap_usd_fields(mcap, currency)
     pe = fund.get("ratio") if isinstance(fund.get("ratio"), (int, float)) else None
     pe_fmt = f"{pe:.1f}x" if pe else "—"
     div = fund.get("yield")
@@ -189,7 +218,7 @@ def _peer_row_from_investing(ticker: str) -> dict | None:
     ev_ebitda_fmt = f"{ev_ebitda:.1f}x" if ev_ebitda else "—"
     return {
         "name": name, "ticker": ticker,
-        "market_cap_fmt": mcap_fmt,
+        "market_cap_fmt": mcap_fmt, "market_cap_usd": mcap_usd,
         "pe": pe, "pe_fmt": pe_fmt,
         "pb": pb, "pb_fmt": pb_fmt,
         "ev_ebitda": ev_ebitda, "ev_ebitda_fmt": ev_ebitda_fmt,
@@ -249,13 +278,11 @@ def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
                 })
             continue
         name = info.get("longName") or info.get("shortName") or tt
-        mcap_usd = info.get("marketCap")
-        # Note: marketCap from Yahoo is in the listed currency, not USD —
-        # converting properly would need an FX layer. We render the number
-        # in its own listing currency and LABEL it (AED / SAR / …) so the
-        # peer column isn't a misleading mix of unlabeled magnitudes.
+        _mcap_native = info.get("marketCap")
+        # Yahoo's marketCap is in the listed currency; convert to USD via the
+        # peg/FX table so the peer column is comparable and averageable.
         currency = (info.get("currency") or "").upper()
-        mcap_fmt = _fmt_mcap_labeled(mcap_usd, currency)
+        mcap_usd, mcap_fmt = _mcap_usd_fields(_mcap_native, currency)
         pe = info.get("trailingPE") or info.get("forwardPE")
         pe_val = float(pe) if isinstance(pe, (int, float)) and pe > 0 else None
         pe_fmt = f"{pe_val:.1f}x" if pe_val else "—"
@@ -309,6 +336,7 @@ def fetch_peer_rows(peer_tickers: list[str]) -> list[dict]:
             "name": name,
             "ticker": tt,
             "market_cap_fmt": mcap_fmt,
+            "market_cap_usd": mcap_usd,
             "pe": pe_val,
             "pe_fmt": pe_fmt,
             "pb": pb_val,

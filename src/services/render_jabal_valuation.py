@@ -236,11 +236,12 @@ def _peer_label(ticker: str, sector: str = "", industry: str = "") -> str:
 
 def _peer_avg_row(peers: list[dict], *, is_bank: bool) -> dict:
     """Compute the 'PEER AVG' header row from the numeric fields on
-    each peer dict. Only ratio metrics are averaged (P/E, P/B / P/TBV,
-    EV/EBITDA, dividend yield, 1Y return); the market-cap column is
-    left as '—' since averaging mcaps across peers of different sizes
-    isn't analytically useful."""
+    each peer dict. Ratio metrics are averaged (P/E, P/B / P/TBV,
+    EV/EBITDA, dividend yield, 1Y return); market cap is now averaged too
+    because every peer's cap is unified to USD upstream, so the mean is a
+    meaningful size gauge for the subject vs the comp set."""
     import re as _re_avg
+    from src.services.fetch_peers import _fmt_mcap_usd as _fmt_mc
     def _vals(key):
         return [p.get(key) for p in peers if isinstance(p.get(key), (int, float))]
     def _mean(xs):
@@ -268,10 +269,12 @@ def _peer_avg_row(peers: list[dict], *, is_bank: bool) -> dict:
     ev_avg = _mean(_vals("ev_ebitda"))
     ret_avg = _mean(_vals("ret_1y"))
     div_avg = _div_mean()
+    mcap_avg = _mean(_vals("market_cap_usd"))
     return {
         "name": "Peer Average",
         "ticker": "",
-        "market_cap_fmt": "—",
+        "market_cap_fmt": _fmt_mc(mcap_avg) if mcap_avg else "—",
+        "market_cap_usd": mcap_avg,
         "pe": pe_avg,            "pe_fmt": _fmt_x(pe_avg),
         "pb": pb_avg,            "pb_fmt": _fmt_x(pb_avg),
         "ev_ebitda": ev_avg,     "ev_ebitda_fmt": _fmt_x(ev_avg),
@@ -295,10 +298,10 @@ def _peer_table(slide, top: float, peers: list[dict], *, is_bank: bool = False,
     Compact, borderless, alternating row tint.
     """
     if is_bank:
-        headers = ["COMPANY", "TICKER", "MCAP", "P/E", "P/TBV", "DIV YIELD", "1Y RETURN"]
+        headers = ["COMPANY", "TICKER", "MCAP (USD)", "P/E", "P/TBV", "DIV YIELD", "1Y RETURN"]
         col_w   = [1.85, 1.00, 1.05, 0.65, 0.70, 0.85, 0.85]
     else:
-        headers = ["COMPANY", "TICKER", "MCAP", "P/E", "P/B", "EV/EBITDA", "DIV YIELD", "1Y RETURN"]
+        headers = ["COMPANY", "TICKER", "MCAP (USD)", "P/E", "P/B", "EV/EBITDA", "DIV YIELD", "1Y RETURN"]
         col_w   = [1.65, 0.95, 0.95, 0.55, 0.55, 0.75, 0.70, 0.70]
     row_h   = 0.28
     # Header
@@ -1240,7 +1243,14 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
         # MS publishes mcap in millions; normalize to raw units when needed.
         if _mcap_num and _mcap_obs and (_mcap_obs.canonical_source or "").lower() == "marketscreener":
             _mcap_num *= 1_000_000.0
+        # Convert the subject's cap to USD so it sits on the SAME basis as
+        # the peer rows and the peer-average row (the peer table is unified
+        # in USD for comparability).
+        from src.services.fetch_peers import _to_usd as _peer_to_usd, _fmt_mcap_usd as _peer_fmt_mc
+        _mcap_usd_subj = _peer_to_usd(_mcap_num, currency)
         def _fmt_mcap(v):
+            if _mcap_usd_subj is not None:
+                return _peer_fmt_mc(_mcap_usd_subj)
             if not isinstance(v, (int, float)) or v <= 0: return "—"
             if v >= 1e9: return f"{currency.upper()} {v/1e9:.1f}B" if currency else f"{v/1e9:.1f}B"
             if v >= 1e6: return f"{currency.upper()} {v/1e6:.0f}M" if currency else f"{v/1e6:.0f}M"
@@ -1293,6 +1303,7 @@ def build_valuation_data(ticker: str, *, analyst_name: str = "Jabal Research",
             "name": pname,
             "ticker": ticker,
             "market_cap_fmt": _fmt_mcap(_mcap_num),
+            "market_cap_usd": _mcap_usd_subj,
             "pe": _pe_num if isinstance(_pe_num, (int, float)) else None,
             "pe_fmt": f"{_pe_num:.1f}x" if isinstance(_pe_num, (int, float)) else "—",
             "pb": _pb_num if isinstance(_pb_num, (int, float)) else None,
