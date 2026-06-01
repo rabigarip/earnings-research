@@ -208,6 +208,24 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
 
     rows: list[list[str]] = []
 
+    # 0. Deck-readiness scorecard — self-reports how grounded this deck is
+    #    (data-completeness tier + what's missing) so the analyst sees at a
+    #    glance whether the commentary is BKMB-grade or thin, and what to
+    #    curate. Best-effort; never blocks the sidecar.
+    try:
+        from src.services.deck_scorecard import score_ticker as _score
+        _sc = _score(ticker)
+        rows.append([
+            "All Slides", "Deck Readiness",
+            f"Data-completeness tier ({_sc['score']}/100)",
+            _sc["tier"], "Derived", "src/services/deck_scorecard.py",
+            "", "",
+            ("Nothing missing — deck-ready" if not _sc["missing"]
+             else "To improve: " + "; ".join(_sc["missing"][:4])),
+        ])
+    except Exception:
+        pass
+
     # 1. Every canonical_store cell for the ticker — parent summary row
     #    plus per-sub-key explosion for dict-valued cells so every number
     #    on the deck is individually traceable.
