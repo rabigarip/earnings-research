@@ -309,7 +309,7 @@ def _peer_table(slide, top: float, peers: list[dict], *, is_bank: bool = False,
     for i, h in enumerate(headers):
         align = PP_ALIGN.LEFT if i < 2 else PP_ALIGN.RIGHT
         _text(slide, x, top, col_w[i] - 0.05, row_h, h,
-              size=SZ_LABEL, color=MUTED, all_caps=True, align=align)
+              size=SZ_LABEL, color=MUTED, all_caps=True, align=align, wrap=False)
         x += col_w[i]
     _hrule(slide, MARGIN_L, top + row_h - 0.02, CONTENT_W, color=MUTED)
 
@@ -362,13 +362,21 @@ def _peer_table(slide, top: float, peers: list[dict], *, is_bank: bool = False,
                 p.get("ret_1y_fmt", "—"),
             ]
         ret_val = p.get("ret_1y")
+        # Company-name column can carry long legal names ("Abu Dhabi
+        # Commercial Bank PJSC"); truncate to what the column holds so it
+        # never spills into the TICKER column. _fit_pt shrinks any residual.
+        _name_max = 26 if is_bank else 23
+        nm = str(cells[0])
+        if len(nm) > _name_max:
+            cells[0] = nm[: _name_max - 1].rstrip() + "…"
         for i, cell in enumerate(cells):
             align = PP_ALIGN.LEFT if i < 2 else PP_ALIGN.RIGHT
             color = BLACK
             if i == ret_col_idx and isinstance(ret_val, (int, float)):
                 color = signed_color(ret_val)
+            # Single-line cells — never wrap (numbers must stay aligned).
             _text(slide, x, y, col_w[i] - 0.05, row_h, str(cell),
-                  size=SZ_BODY, color=color, align=align, bold=is_bold)
+                  size=SZ_BODY, color=color, align=align, bold=is_bold, wrap=False)
             x += col_w[i]
     # Faint separator under the bold rows so the reader sees where the
     # "comparable" section starts.

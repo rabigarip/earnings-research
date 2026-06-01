@@ -23,8 +23,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
+import math
 from pptx.enum.shapes import MSO_SHAPE
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.util import Inches, Pt, Emu
 
 from src.services.jabal_design_tokens import (
@@ -63,23 +64,71 @@ def _normalize_date(s: str) -> str:
 
 # ── Low-level primitives ────────────────────────────────────
 
+def _fit_pt(text: str, width_in: float, height_in: float, base_pt: float,
+            *, wrap: bool, all_caps: bool) -> float:
+    """Return a font size (pt) that makes `text` fit `width_in × height_in`,
+    shrinking from `base_pt` only when it would overflow. Baked into the
+    saved file so it renders correctly in EVERY viewer, not just PowerPoint.
+
+    - A space-less token (a number like "$106.7B", a single word) is never
+      wrapped — it's fitted to the width on one line so it can't break and
+      misalign a column.
+    - A short box (≈ one line tall) is treated as single-line.
+    - Multi-word text in a tall box is fitted by wrapped-line height.
+    Conservative: a small tolerance and a floor (~60% of base) keep it from
+    over-shrinking text that already fits."""
+    t = (text or "").strip()
+    if not t or width_in <= 0 or height_in <= 0:
+        return base_pt
+    # caps and digits are wider than mixed-case lowercase
+    cw_factor = 0.58 if all_caps else 0.50
+    base_lh = base_pt * 1.18 / 72.0
+    single_line = (not wrap) or (" " not in t) or (height_in < 1.7 * base_lh)
+    size = float(base_pt)
+    floor = max(6.0, base_pt * 0.60)
+    while size > floor:
+        cw = size * cw_factor / 72.0
+        lh = size * 1.18 / 72.0
+        if single_line:
+            if len(t) * cw <= width_in * 1.03:
+                break
+        else:
+            cpl = max(1, int(width_in / cw))
+            lines = max(1, math.ceil(len(t) / cpl))
+            if lines * lh <= height_in * 1.03:
+                break
+        size -= 0.5
+    return round(size, 1)
+
+
 def _text(slide, left, top, width, height, text, *,
           font=FONT_UI, size=SZ_BODY, bold=False, italic=False, color=BLACK,
           align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP, all_caps=False,
-          letter_spacing=None):
-    """Insert a text box with one paragraph + one run. Returns the shape."""
+          letter_spacing=None, wrap=True, fit=True):
+    """Insert a text box with one paragraph + one run. Returns the shape.
+
+    `fit` (default on) shrinks the font deterministically so the text fits
+    its box in any viewer; `wrap` controls whether long text may break to a
+    new line (set False for numbers/labels that must stay on one line).
+    `auto_size` is also set so PowerPoint re-fits on open as a backstop."""
     tb = slide.shapes.add_textbox(in_(left), in_(top), in_(width), in_(height))
     tf = tb.text_frame
     tf.margin_left = tf.margin_right = 0
     tf.margin_top = tf.margin_bottom = 0
-    tf.word_wrap = True
+    tf.word_wrap = wrap
+    try:
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    except Exception:
+        pass
     tf.vertical_anchor = anchor
     p = tf.paragraphs[0]
     p.alignment = align
     r = p.add_run()
     r.text = text.upper() if all_caps else text
     r.font.name = font
-    r.font.size = size
+    eff = _fit_pt(r.text, float(width), float(height), float(size.pt),
+                  wrap=wrap, all_caps=False) if fit else float(size.pt)
+    r.font.size = Pt(eff)
     r.font.bold = bold
     r.font.italic = italic
     r.font.color.rgb = color

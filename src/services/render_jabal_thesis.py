@@ -87,7 +87,7 @@ def _estimates_table(slide, top: float, rows: list[dict],
     for i, h in enumerate(headers):
         align = PP_ALIGN.LEFT if i == 0 else PP_ALIGN.RIGHT
         _text(slide, x, header_top, col_w[i] - 0.05, row_h, h,
-              size=SZ_LABEL, color=MUTED, all_caps=True, align=align)
+              size=SZ_LABEL, color=MUTED, all_caps=True, align=align, wrap=False)
         x += col_w[i]
     _hrule(slide, MARGIN_L, header_top + row_h - 0.02, CONTENT_W,
             color=MUTED)
@@ -116,7 +116,7 @@ def _estimates_table(slide, top: float, rows: list[dict],
             elif val is None:
                 val = "—"
             _text(slide, x, y, col_w[i] - 0.05, row_h, str(val),
-                  size=SZ_BODY, color=color, align=align)
+                  size=SZ_BODY, color=color, align=align, wrap=False)
             x += col_w[i]
 
 
@@ -144,7 +144,7 @@ def _annual_estimates_table(slide, top: float, rows: list[dict],
     for i, h in enumerate(headers):
         align = PP_ALIGN.LEFT if i == 0 else PP_ALIGN.RIGHT
         _text(slide, x, header_top, col_w[i] - 0.05, row_h, h,
-              size=SZ_LABEL, color=MUTED, all_caps=True, align=align)
+              size=SZ_LABEL, color=MUTED, all_caps=True, align=align, wrap=False)
         x += col_w[i]
     _hrule(slide, MARGIN_L, header_top + row_h - 0.02, CONTENT_W, color=MUTED)
     for ri, row in enumerate(rows):
@@ -166,7 +166,7 @@ def _annual_estimates_table(slide, top: float, rows: list[dict],
             elif val is None:
                 val = "—"
             _text(slide, x, y, col_w[i] - 0.05, row_h, str(val),
-                  size=SZ_BODY, color=color, align=align)
+                  size=SZ_BODY, color=color, align=align, wrap=False)
             x += col_w[i]
 
 
