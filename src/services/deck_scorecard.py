@@ -107,9 +107,20 @@ def score_ticker(ticker: str) -> dict[str, Any]:
     pts: dict[str, int] = {}
     missing: list[str] = []
 
-    # Grounded FY metrics — the BKMB differentiator.
-    pts["grounded_fy"] = _WEIGHTS["grounded_fy"] if has_fy else 0
-    if not has_fy:
+    # Grounded FY metrics — the BKMB differentiator — but only count them at
+    # FULL weight when they are CURRENT for today's date. Stale grounding
+    # (a newer annual is due) earns half and is flagged, so a ticker that was
+    # an A silently drops to B the moment its baseline goes out of date.
+    if has_fy:
+        from src.services.reporting_calendar import grounding_staleness
+        _st = grounding_staleness(ticker)
+        if _st.get("annual_current"):
+            pts["grounded_fy"] = _WEIGHTS["grounded_fy"]
+        else:
+            pts["grounded_fy"] = _WEIGHTS["grounded_fy"] // 2
+            missing.append(f"refresh FY metrics — {_st.get('status')}")
+    else:
+        pts["grounded_fy"] = 0
         missing.append("grounded FY metrics (add disclosed fy_highlights)")
 
     # Consensus rating + target.

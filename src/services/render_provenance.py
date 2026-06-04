@@ -226,6 +226,23 @@ def write_provenance_xlsx(ticker: str, out_path: Path,
     except Exception:
         pass
 
+    # 0b. Grounding currency — is the FY baseline the latest the company has
+    #     filed, computed against its reporting calendar for TODAY? Makes the
+    #     baseline's vintage an explicit, honest fact on the audit trail.
+    try:
+        from src.services.reporting_calendar import grounding_staleness as _gs
+        _cur = _gs(ticker)
+        if _cur.get("have_grounded_fy"):
+            rows.append([
+                "All Slides", "Deck Readiness", "Grounding currency",
+                ("CURRENT" if _cur["annual_current"] else "STALE"),
+                "Derived", "src/services/reporting_calendar.py",
+                _cur.get("disclosed_annual") or "", "",
+                _cur.get("status") or "",
+            ])
+    except Exception:
+        pass
+
     # 1. Every canonical_store cell for the ticker — parent summary row
     #    plus per-sub-key explosion for dict-valued cells so every number
     #    on the deck is individually traceable.
