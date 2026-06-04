@@ -37,3 +37,6 @@ Thumbs.db
 # Frontend (build output in static/ is committed for one-site Render deploy)
 frontend/node_modules/
 frontend/dist/
+
+# Auto-grounding extractor candidates (regeneratable; promote individually after review)
+data/disclosed/_staging/
