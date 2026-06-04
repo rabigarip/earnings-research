@@ -63,23 +63,20 @@
   "_fy_highlights_comment": "Full-year FY2025 audited results from the Annual Report 2025 (and confirmed by Muscat Daily / Zawya results coverage, 18 Jan 2026). Values in OMR millions unless noted (percentages and per-share as-is). These supply the bank balance-sheet + ratio metrics the income-statement quarters don't carry (loans, deposits, CAR, ROE) and give an IR-sourced FY2025 cross-check for the MarketScreener actuals.",
   "fy_highlights": {
     "period": "FY 2025",
-    "net_profit_rO_mn": 255.54,
-    "net_profit_prior_rO_mn": 225.58,
+    "net_profit_mn": 255.54,
     "net_profit_growth_pct": 13.3,
-    "nii_combined_rO_mn": 413.01,
+    "nii_mn": 413.01,
     "nii_growth_pct": 3.8,
-    "non_interest_income_rO_mn": 174.18,
+    "non_interest_income_mn": 174.18,
     "non_interest_income_growth_pct": 20.1,
-    "total_operating_income_rO_mn": 587.19,
-    "eps_rO": 0.031,
-    "net_loans_rO_mn": 10731,
-    "loan_growth_pct": 4.8,
-    "customer_deposits_rO_mn": 10430,
-    "deposit_growth_pct": 6.7,
+    "eps": 0.031,
+    "net_loans_mn": 10731,
+    "net_loans_growth_pct": 4.8,
+    "customer_deposits_mn": 10430,
+    "customer_deposits_growth_pct": 6.7,
     "car_pct": 19.66,
     "roe_pct": 13.57,
-    "dividend_per_share_rO": 0.018,
-    "dividend_total_rO_mn": 135.115,
-    "source_doc": "Annual_Report_EN_2025.pdf"
+    "dps": 0.018,
+    "source": "Annual Report 2025 (bankmuscat.om); Muscat Daily / Zawya 18-Jan-2026"
   }
 }

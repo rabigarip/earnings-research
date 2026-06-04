@@ -233,10 +233,17 @@ def build_context(ticker: str) -> dict:
             s = s[2:].lstrip()
         return s
 
+    try:
+        from src.services.ticker_registry import get_ticker_info as _gti
+        _template_family = _gti(ticker).get("template_family") or "other"
+    except Exception:
+        _template_family = "other"
+
     return {
         "peer_pe_avg": peer_pe_avg,
         "disclosed_quarters": disclosed_quarters,
         "bank_fy": bank_fy,
+        "template_family": _template_family,
         "ticker": ticker,
         "company_name": profile.get("name") or ticker,
         "sector": profile.get("sector") or "—",
@@ -414,48 +421,49 @@ def _prompt(ctx: dict) -> str:
         + "\n".join(_act_lines)
     ) if _act_lines else ""
 
-    # Full-year IR metrics (loans/deposits/CAR/ROE/growth) — quantifies the
-    # bank balance sheet the quarters don't carry.
+    # Full-year IR metrics — SECTOR-AWARE: iterate the ticker's family
+    # grounding schema so banks get loans/deposits/CAR/ROE, energy gets
+    # production/FCF/capex, materials gets volumes/EBITDA margin, etc.
+    from src.services.grounding_schema import schema_for, not_disclosed_for
     fy = ctx.get("bank_fy") or {}
+    fam = ctx.get("template_family") or "other"
     fy_block = ""
-    have = set()
     if isinstance(fy, dict) and fy:
+        # Financials are reported in the company's FUNCTIONAL currency, which
+        # can differ from the trading currency (Tencent/ICBC report RMB but
+        # trade in HKD). Label money with the filing's reporting currency.
+        _rc = fy.get("reporting_currency") or cur
         fl = []
-        def _fy(label, key, unit="", grow=None):
+        for key, label, kind in schema_for(fam):
             v = fy.get(key)
-            if isinstance(v, (int, float)):
-                g = fy.get(grow) if grow else None
-                gs = f" ({g:+.1f}% YoY)" if isinstance(g, (int, float)) else ""
-                fl.append(f"  {label}: {v:g}{unit}{gs}")
-                return True
-            return False
-        if _fy("Net profit", "net_profit_rO_mn", f" {cur}m", "net_profit_growth_pct"): have.add("profit")
-        if _fy("NII (conv.+Islamic)", "nii_combined_rO_mn", f" {cur}m", "nii_growth_pct"): have.add("nii")
-        if _fy("Non-interest income", "non_interest_income_rO_mn", f" {cur}m", "non_interest_income_growth_pct"): have.add("fees")
-        if _fy("Net loans", "net_loans_rO_mn", f" {cur}m", "loan_growth_pct"): have.add("loans")
-        if _fy("Customer deposits", "customer_deposits_rO_mn", f" {cur}m", "deposit_growth_pct"): have.add("deposits")
-        if _fy("Capital adequacy (CAR)", "car_pct", "%"): have.add("capital")
-        if _fy("ROE", "roe_pct", "%"): have.add("roe")
+            if not isinstance(v, (int, float)):
+                continue
+            # growth key is named off the BASE metric: net_profit_mn ->
+            # net_profit_growth_pct (the "_mn" suffix is dropped).
+            _base = key[:-3] if key.endswith("_mn") else key
+            g = fy.get(f"{_base}_growth_pct") or fy.get(f"{key}_growth_pct")
+            gs = f" ({g:+.1f}% YoY)" if isinstance(g, (int, float)) else ""
+            if kind == "money_mn":
+                disp = f"{v:,.0f} {_rc}m{gs}"
+            elif kind == "pct":
+                disp = f"{v:.2f}%{gs}"
+            elif kind == "eps":
+                disp = f"{v:g} {_rc}/sh{gs}"
+            else:
+                disp = f"{v:g}{gs}"
+            fl.append(f"  {label}: {disp}")
         if fl:
-            _fyp = fy.get('period', 'FY')
+            _fyp = fy.get("period", "FY")
             fy_block = (
                 f"{_fyp} REPORTED ACTUALS (company IR — already published; this is "
                 f"the most recent COMPLETED FULL YEAR, the prior-year baseline, "
                 f"NOT guidance for the upcoming print)\n"
                 + "\n".join(fl))
 
-    # Inputs we still do NOT have — drop any the FY block now covers so the
-    # model isn't told a metric is unavailable when it actually is.
-    _missing = []
-    if "nii" not in have: _missing.append("NIM (spread %)")
-    else: _missing.append("NIM (spread %)")  # NIM % itself is still not disclosed
-    if "loans" not in have: _missing.append("loan & deposit balances")
-    if "capital" not in have: _missing.append("capital ratios")
-    _missing += ["cost of risk / impairment charge", "NPL / asset-quality ratios",
-                 "buyback / capital-return plans"]
+    # Sector-appropriate "not disclosed" list (qualitative-only metrics).
     not_disclosed_block = (
         "NOT IN AVAILABLE DATA (discuss qualitatively, never cite a number for "
-        "these): " + ", ".join(dict.fromkeys(_missing)) + "."
+        "these): " + ", ".join(not_disclosed_for(fam)) + "."
     )
 
     # Short commodity tags (e.g. "hh" for Henry Hub) get truncated by the
@@ -1031,17 +1039,20 @@ def _focused_sections_prompt(ctx: dict, which: list[str]) -> str:
              f"B/H/S); target {cur} {_fmt_num(ctx.get('target_mean'))} "
              f"({_fmt_num(ctx.get('upside_pct'))}% upside).")
     if isinstance(fy, dict) and fy:
+        # Schema-driven: list the family's grounded actuals (growth where we
+        # have it, else the level) so non-bank sectors get a real FY line too.
+        from src.services.grounding_schema import schema_for
         seg = []
-        for lbl, k in [("net-profit growth", "net_profit_growth_pct"),
-                        ("loan growth", "loan_growth_pct"),
-                        ("deposit growth", "deposit_growth_pct"),
-                        ("non-interest income growth", "non_interest_income_growth_pct"),
-                        ("ROE", "roe_pct"), ("CAR", "car_pct")]:
-            v = fy.get(k)
-            if isinstance(v, (int, float)):
-                seg.append(f"{lbl} {v:+.1f}%" if "growth" in lbl else f"{lbl} {v:.2f}%")
+        for key, label, kind in schema_for(ctx.get("template_family") or "other"):
+            _base = key[:-3] if key.endswith("_mn") else key
+            g = fy.get(f"{_base}_growth_pct")
+            v = fy.get(key)
+            if isinstance(g, (int, float)):
+                seg.append(f"{label} {g:+.1f}% YoY")
+            elif isinstance(v, (int, float)) and kind == "pct":
+                seg.append(f"{label} {v:.2f}%")
         if seg:
-            L.append(f"{fy.get('period','FY2025')} REPORTED ACTUALS (already "
+            L.append(f"{fy.get('period','FY')} REPORTED ACTUALS (already "
                      "published; prior-year baseline, NOT guidance): "
                      + ", ".join(seg) + ".")
     data = "\n".join(L)
