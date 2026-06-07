@@ -23,18 +23,23 @@ from src.services.grounding_extractor import extract_grounding, write_staging  #
 
 def _all_cached_tickers() -> list[str]:
     """Every ticker that has an income_statement snapshot, from both the live
-    cache and the repo-tracked snapshot dir. Reverse-maps the filename grammar
-    back to a TICKER (best-effort — short snapshot form only)."""
+    cache and the repo-tracked snapshot dir. Handles BOTH filename grammars —
+    short `ms_<SYM>_<EX>_income_statement.html` and full
+    `ms_ms_<SYM>_<EX>_<ISIN|noisin>_<SLUG>_income_statement.html` — by stripping
+    the prefix/suffix and reading the first two tokens (symbol, 2-letter MIC)."""
     from src.config import root
-    import re
+    suffix = "_income_statement.html"
     seen = set()
     for d in (root() / "cache", root() / "data" / "marketscreener"):
         if not d.is_dir():
             continue
-        for f in d.glob("ms_*_income_statement.html"):
-            m = re.match(r"ms_([A-Z0-9]+_[A-Z]{2})_income_statement\.html$", f.name)
-            if m:
-                seen.add(m.group(1).replace("_", ".", 1) if "_" in m.group(1) else m.group(1))
+        for f in d.glob("ms_*" + suffix):
+            stem = f.name[3:-len(suffix)]          # strip leading 'ms_' + suffix
+            if stem.startswith("ms_"):
+                stem = stem[3:]                     # full form has a second 'ms_'
+            toks = stem.split("_")
+            if len(toks) >= 2 and len(toks[1]) == 2 and toks[1].isalpha():
+                seen.add(f"{toks[0]}.{toks[1]}")
     return sorted(seen)
 
 

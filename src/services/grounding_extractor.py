@@ -79,17 +79,43 @@ def _resolve_prefix(ticker: str, page: str) -> Optional[str]:
     return None
 
 
+def _scale_to_millions(scale_str: Optional[str]) -> Optional[float]:
+    """Multiplier to convert a value in `scale_str` units to millions.
+    Returns None for an unrecognized/absent label (caller decides fallback)."""
+    s = (scale_str or "").lower()
+    if "bill" in s:
+        return 1000.0
+    if "mill" in s:
+        return 1.0
+    if "thou" in s:
+        return 0.001
+    return None
+
+
 def _yoy(cur: Optional[float], prev: Optional[float]) -> Optional[float]:
     if cur is None or prev in (None, 0):
         return None
     return round((cur - prev) / abs(prev) * 100.0, 1)
 
 
-def _last_two_idx(series: list, periods: list) -> tuple[Optional[int], Optional[int]]:
+def _period_year(label: str) -> Optional[int]:
+    import re
+    m = re.search(r"(20\d{2})", label or "")
+    return int(m.group(1)) if m else None
+
+
+def _last_two_idx(series: list, periods: list,
+                  max_year: Optional[int] = None) -> tuple[Optional[int], Optional[int]]:
     """Latest index with a non-None value, and the consecutive prior index
-    (for YoY). Returns (anchor_idx, prev_idx)."""
+    (for YoY). When max_year is given, periods AFTER that year are skipped —
+    the MS income-statement page can carry forward estimate columns, and we
+    must anchor on the latest reported ACTUAL, never an estimate."""
     anchor = None
     for i in range(len(periods) - 1, -1, -1):
+        if max_year is not None:
+            y = _period_year(periods[i])
+            if y is not None and y > max_year:
+                continue
         if i < len(series) and series[i] is not None:
             anchor = i
             break
@@ -156,6 +182,15 @@ def extract_grounding(ticker: str, family: Optional[str] = None,
             "fy_highlights": {},
         }
 
+    # Bound the anchor to the latest year the company should have reported by
+    # now (reporting calendar) so we never anchor on a forward estimate column.
+    try:
+        from src.services.reporting_calendar import expected_latest
+        _exp = (expected_latest(ticker) or {}).get("annual_period")
+        max_year = _period_year(_exp)
+    except Exception:
+        max_year = None
+
     # ── Anchor on the latest reported net income (income statement = actuals)
     ni_co = IS.get("net_income_to_company") or []
     ni_is = IS.get("net_income_is") or []
@@ -163,7 +198,7 @@ def extract_grounding(ticker: str, family: Optional[str] = None,
     if not any(v is not None for v in ni_series):
         ni_series = ann.get("net_income") or []
         periods = ann.get("periods") or periods
-    anchor_i, prev_i = _last_two_idx(ni_series, periods)
+    anchor_i, prev_i = _last_two_idx(ni_series, periods, max_year=max_year)
     if anchor_i is None:
         return {
             "ticker": ticker, "company": info.get("company_name", ticker),
@@ -171,25 +206,40 @@ def extract_grounding(ticker: str, family: Optional[str] = None,
             "_extractor": {"warnings": ["no reported net income to anchor on"]},
             "fy_highlights": {},
         }
-    anchor_period = periods[anchor_i]
+    # Normalize the label to FY<year> so a "2025 (USD)"-style header still
+    # matches the reporting calendar's "FY2025".
+    _raw_anchor = periods[anchor_i]
+    _ay = _period_year(_raw_anchor)
+    anchor_period = f"FY{_ay}" if _ay else _raw_anchor
     prev_period = periods[prev_i] if prev_i is not None else None
 
     # ── Align the /finances/ page (mixed actual+estimate) to the anchor FY
     fin_periods = ann.get("periods") or []
     fin_i = fin_periods.index(anchor_period) if anchor_period in fin_periods else None
     fin_prev_i = fin_i - 1 if (fin_i is not None and fin_i - 1 >= 0) else None
-    # Calibrate finances scale to the income-statement scale via net income,
-    # so EBITDA (only on /finances/) is expressed in the same absolute units.
-    fin_scale = 1.0
+    # ── Units. Do NOT assume a fixed scale: MS displays vary (some pages give
+    # absolute currency units via "256M"/"350B" suffixes; Chinese A-shares give
+    # plain millions). Anchor on the /finances/ page's DECLARED unit_scale, and
+    # align the income-statement page to it via the net-income ratio.
+    fin_mult = _scale_to_millions(FIN.get("unit_scale"))   # FIN raw -> millions
+    if fin_mult is None:
+        fin_mult = 1.0
     fin_ni = _at(ann.get("net_income") or [], fin_i)
     is_ni = _at(ni_series, anchor_i)
     if fin_ni not in (None, 0) and is_ni not in (None, 0):
-        fin_scale = is_ni / fin_ni
+        is_mult = (fin_ni * fin_mult) / is_ni              # IS raw -> millions
+    else:
+        # No /finances/ net income to calibrate against — fall back to the
+        # income-statement convention of absolute currency units.
+        is_mult = 1e-6
 
-    # ── Source each candidate metric (value already in absolute units)
+    # ── Source each candidate metric, normalized to MILLIONS.
     prov: dict[str, str] = {}
-    money_abs: dict[str, Optional[float]] = {}
-    money_prev_abs: dict[str, Optional[float]] = {}
+    money_mn: dict[str, Optional[float]] = {}
+    money_prev_mn: dict[str, Optional[float]] = {}
+
+    def _mn(raw, mult):
+        return raw * mult if raw is not None else None
 
     is_bank = fam in ("bank", "financial_services", "insurance")
 
@@ -206,30 +256,27 @@ def extract_grounding(ticker: str, family: Optional[str] = None,
         rev_src, rev_label = (ann.get("net_sales") or []), "MS finances: Net sales"
         rev_from_finances = True
     if rev_from_finances:
-        rv, rvp = _at(rev_src, fin_i), _at(rev_src, fin_prev_i)
-        money_abs["revenue_mn"] = rv * fin_scale if rv is not None else None
-        money_prev_abs["revenue_mn"] = rvp * fin_scale if rvp is not None else None
+        money_mn["revenue_mn"] = _mn(_at(rev_src, fin_i), fin_mult)
+        money_prev_mn["revenue_mn"] = _mn(_at(rev_src, fin_prev_i), fin_mult)
     else:
-        money_abs["revenue_mn"] = _at(rev_src, anchor_i)
-        money_prev_abs["revenue_mn"] = _at(rev_src, prev_i)
-    if money_abs["revenue_mn"] is not None:
+        money_mn["revenue_mn"] = _mn(_at(rev_src, anchor_i), is_mult)
+        money_prev_mn["revenue_mn"] = _mn(_at(rev_src, prev_i), is_mult)
+    if money_mn["revenue_mn"] is not None:
         prov["revenue_mn"] = rev_label
 
-    # net profit (abs)
-    money_abs["net_profit_mn"] = _at(ni_series, anchor_i)
-    money_prev_abs["net_profit_mn"] = _at(ni_series, prev_i)
-    if money_abs["net_profit_mn"] is not None:
+    # net profit (income statement, aligned to FIN scale)
+    money_mn["net_profit_mn"] = _mn(_at(ni_series, anchor_i), is_mult)
+    money_prev_mn["net_profit_mn"] = _mn(_at(ni_series, prev_i), is_mult)
+    if money_mn["net_profit_mn"] is not None:
         prov["net_profit_mn"] = ("MS income-statement: Net Income to Company"
                                  if ni_series is ni_co else "MS: Net income")
 
-    # ebitda (abs, finances-only, scale-calibrated) — non-banks
+    # ebitda (finances-only, FIN scale) — non-banks
     if not is_bank:
-        eb = _at(ann.get("ebitda") or [], fin_i)
-        eb_prev = _at(ann.get("ebitda") or [], fin_prev_i)
-        money_abs["ebitda_mn"] = eb * fin_scale if eb is not None else None
-        money_prev_abs["ebitda_mn"] = eb_prev * fin_scale if eb_prev is not None else None
-        if money_abs["ebitda_mn"] is not None:
-            prov["ebitda_mn"] = "MS finances: EBITDA (scale-calibrated to net income)"
+        money_mn["ebitda_mn"] = _mn(_at(ann.get("ebitda") or [], fin_i), fin_mult)
+        money_prev_mn["ebitda_mn"] = _mn(_at(ann.get("ebitda") or [], fin_prev_i), fin_mult)
+        if money_mn["ebitda_mn"] is not None:
+            prov["ebitda_mn"] = "MS finances: EBITDA"
 
     # ── Assemble fy_highlights on the sector schema
     rc = (FIN.get("unit_currency") or info.get("reporting_currency")
@@ -242,15 +289,15 @@ def extract_grounding(ticker: str, family: Optional[str] = None,
     def _emit_money(key: str):
         if key not in schema_keys:
             return
-        v = money_abs.get(key)
-        if v is None:
+        mn = money_mn.get(key)
+        if mn is None:
             return
-        mn = round(v / 1e6, 2)
+        mn = round(mn, 2)
         if not sanity_ok(key, mn):
             warnings.append(f"{key}={mn} failed sanity bounds — dropped")
             return
         fy[key] = mn
-        g = _yoy(v, money_prev_abs.get(key))
+        g = _yoy(money_mn.get(key), money_prev_mn.get(key))
         gk = (key[:-3] if key.endswith("_mn") else key) + "_growth_pct"
         if g is not None and sanity_ok("_growth_pct", g):
             fy[gk] = g
@@ -258,18 +305,18 @@ def extract_grounding(ticker: str, family: Optional[str] = None,
     for k in ("revenue_mn", "net_profit_mn", "ebitda_mn"):
         _emit_money(k)
 
-    # margins (ratios — scale cancels, computed from finances raw)
-    rev_for_margin = money_abs.get("revenue_mn")
+    # margins (ratios — unit-independent, computed from finances raw values)
+    rev_for_margin = money_mn.get("revenue_mn")
     if rev_for_margin:
         if "operating_margin_pct" in schema_keys:
-            ebit = _at(ann.get("ebit") or [], fin_i)
-            if ebit is not None:
-                m = round(ebit * fin_scale / rev_for_margin * 100.0, 2)
+            ebit_mn = _mn(_at(ann.get("ebit") or [], fin_i), fin_mult)
+            if ebit_mn is not None:
+                m = round(ebit_mn / rev_for_margin * 100.0, 2)
                 if sanity_ok("operating_margin_pct", m):
                     fy["operating_margin_pct"] = m
                     prov["operating_margin_pct"] = "MS finances: EBIT / revenue"
-        if "ebitda_margin_pct" in schema_keys and money_abs.get("ebitda_mn"):
-            m = round(money_abs["ebitda_mn"] / rev_for_margin * 100.0, 2)
+        if "ebitda_margin_pct" in schema_keys and money_mn.get("ebitda_mn"):
+            m = round(money_mn["ebitda_mn"] / rev_for_margin * 100.0, 2)
             if sanity_ok("ebitda_margin_pct", m):
                 fy["ebitda_margin_pct"] = m
                 prov["ebitda_margin_pct"] = "MS finances: EBITDA / revenue"
@@ -325,7 +372,7 @@ def extract_grounding(ticker: str, family: Optional[str] = None,
             "prev_period": prev_period,
             "confidence": confidence,
             "fiscal_year_end_month": fye,
-            "fin_scale_factor": round(fin_scale, 6),
+            "unit_scale": {"finances_to_mn": fin_mult, "income_stmt_to_mn": is_mult},
             "metrics_emitted": n_metrics,
             "needs_ir": needs_ir,
             "provenance": prov,
@@ -333,6 +380,48 @@ def extract_grounding(ticker: str, family: Optional[str] = None,
         },
         "fy_highlights": fy,
     }
+
+
+def promotion_gate(staging: dict[str, Any]) -> tuple[bool, list[str]]:
+    """Decide whether a staging candidate is STRUCTURALLY safe to promote to
+    the verified disclosed store. Returns (ok, reasons_blocking).
+
+    Gates (all must pass):
+      * _status is auto_unverified (a real extraction, not a no-cache stub)
+      * confidence == 'high' (December-FYE; non-Dec needs a human to map the
+        period — the ICICI class)
+      * every emitted value passes the grounding sanity bounds
+      * PERIOD CURRENCY: the anchor period equals what the reporting calendar
+        says the company should have filed by now. This is the automated
+        anti-staleness guard — it rejects a stale snapshot still showing last
+        year, and a mis-labeled non-Dec fiscal year.
+
+    A pass means "the shape, period and bounds are right" — NOT "the values
+    are IR-verified". MS line-item values can still diverge from the headline
+    (the Aramco class), which is why promote defaults to human-reviewed and
+    auto-promotions are marked reviewed=false."""
+    reasons: list[str] = []
+    if staging.get("_status") != "auto_unverified":
+        reasons.append(f"status={staging.get('_status')}")
+    ext = staging.get("_extractor") or {}
+    if ext.get("confidence") != "high":
+        reasons.append(f"confidence={ext.get('confidence')}")
+    fy = staging.get("fy_highlights") or {}
+    n_metrics = sum(1 for k, v in fy.items() if isinstance(v, (int, float)))
+    if n_metrics < 2:
+        reasons.append(f"only {n_metrics} metric(s)")
+    for k, v in fy.items():
+        if isinstance(v, (int, float)) and not sanity_ok(k, v):
+            reasons.append(f"{k} fails sanity")
+    try:
+        from src.services.reporting_calendar import expected_latest
+        want = (expected_latest(staging.get("ticker", "")) or {}).get("annual_period")
+        got = ext.get("anchor_period")
+        if want and got and got != want:
+            reasons.append(f"period {got} != expected {want}")
+    except Exception:
+        pass
+    return (len(reasons) == 0, reasons)
 
 
 def write_staging(ticker: str, data: dict[str, Any]) -> Path:

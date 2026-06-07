@@ -63,6 +63,20 @@ def test_no_cache_ticker_returns_clean_status():
     assert res["fy_highlights"] == {}
 
 
+def test_plain_millions_ashare_units():
+    """Regression guard for the units bug: Chinese A-shares display
+    income-statement values in plain millions (no B/M suffix). A fixed
+    /1e6 produced net_profit_mn=0.04 for Midea. The FIN-scale calibration
+    must keep it in the tens-of-thousands-of-millions band (~CNY 40bn)."""
+    res = extract_grounding("000333.SZ")
+    if res["_status"] != "auto_unverified":
+        import pytest
+        pytest.skip("no MS cache for 000333.SZ in this checkout")
+    np_mn = res["fy_highlights"].get("net_profit_mn")
+    assert np_mn is not None and np_mn > 1000, (
+        f"Midea net_profit_mn={np_mn} — units mis-scaled (the 0.04 bug)")
+
+
 def test_emitted_values_pass_sanity_bounds():
     from src.services.grounding_schema import sanity_ok
     res = extract_grounding("BKMB.OM")
