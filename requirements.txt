@@ -1,5 +1,9 @@
 # ── Core ────────────────────────────────────────
 requests>=2.31.0
+curl_cffi>=0.7   # Chrome TLS impersonation — bypasses Cloudflare for live
+                 # Investing.com + MarketScreener fetches on Render. Without it
+                 # both providers silently fall back to committed snapshots only.
+                 # Explicit pin (don't rely on yfinance's transitive dependency).
 beautifulsoup4>=4.12.0
 lxml>=5.1.0
 yfinance>=0.2.40,<1.0.0   # Pin: Yahoo API changes break newer versions

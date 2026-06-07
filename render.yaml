@@ -24,6 +24,13 @@ services:
       # Allow previews when Yahoo has a quote but financials/MS are thin (maximize ticker coverage)
       - key: REPORT_READINESS_MODE
         value: permissive
+      # Fetch MarketScreener LIVE for the requested ticker (on-demand, per
+      # request) via curl_cffi Chrome-TLS impersonation — the same Cloudflare
+      # bypass Investing.com already uses on Render. No universe pre-refresh
+      # needed; committed data/marketscreener/ snapshots stay as the fallback
+      # when a live fetch fails.
+      - key: MS_USE_CURL_CFFI
+        value: "1"
       # Optional: restrict CORS to your frontend (comma-separated origins)
       # - key: CORS_ORIGINS
       #   value: https://your-app.onrender.com,https://your-custom-domain.com

@@ -166,6 +166,20 @@ def _snapshot_path_for(cache_slug: str):
         return None
 
 
+def _write_disk_cache(cache_slug: str, text: str) -> None:
+    """Persist live HTML to the on-disk ./cache so re-runs and the
+    auto-grounding extractor can read the just-fetched ticker. Best-effort."""
+    try:
+        if not (_USE_CONFIG and cfg().get("scraping", {}).get("cache_html")):
+            return
+        cache_dir = root() / "cache"
+        cache_dir.mkdir(exist_ok=True)
+        safe = re.sub(r"[^a-zA-Z0-9-]", "_", cache_slug)[:80]
+        (cache_dir / f"ms_{safe}.html").write_text(text, encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _read_snapshot(cache_slug: str) -> str | None:
     """Return the snapshot HTML for a cache_slug, or None if absent /
     blocked-content / unreadable. Used as the fallback when live fetch
@@ -273,6 +287,7 @@ def _fetch_page(url: str, cache_slug: str) -> tuple[BeautifulSoup | None, list[s
                     else:
                         if os.environ.get("MS_TRACKED_REFRESH") == "1":
                             _write_snapshot(cache_slug, text)
+                        _write_disk_cache(cache_slug, text)
                         return BeautifulSoup(text, "lxml"), errors
             except Exception as e:
                 errors.append(f"curl_cffi exception: {e}")
