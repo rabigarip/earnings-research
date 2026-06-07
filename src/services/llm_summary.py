@@ -349,6 +349,140 @@ _SYSTEM = (
 )
 
 
+def _sector_playbook(fam: str) -> dict:
+    """Sector-appropriate analyst vocabulary, levers, and few-shot examples
+    for the catalysts/risks/watch prompts. Without this the prompt only ever
+    showed BANK levers (NIM, cost of risk, loan growth) — so a fertilizer or
+    energy name got bank commentary stamped onto it. Keyed by the same
+    template_family the grounding schema uses; falls back to a generic
+    industrial/consumer playbook."""
+    f = (fam or "other").lower()
+    BANK = {
+        "persona": "bank",
+        "cat_levers": "loan growth, NII/NIM, fee income, credit costs, dividend sustainability, capital generation, valuation re-rating",
+        "risk_levers": "NIM compression, funding costs, credit-cost normalization, slower loan growth, weak fee income, asset quality, dividend risk",
+        "watch_metrics": "NIM/deposit costs, asset quality/cost of risk, loan & deposit growth, fee income, capital return",
+        "cat_examples": (
+            '     - "A buyback authorization on the call that lifts the payout\n'
+            '        beyond the current 4.22% dividend yield."\n'
+            '     - "Loan-growth guidance confirmed at the prior 5-7% range despite\n'
+            '        deposit-cost pressure."\n'
+            '     - "Fee income climbing toward 25% of revenue, cutting\n'
+            '        spread-business dependence."'),
+        "risk_examples": (
+            '     - "Asset-quality drift from the current sub-2% NPL ratio as the\n'
+            '        rate-cut cycle pressures provisioning expense."\n'
+            '     - "A larger one-off provision charge resetting the cost-of-risk\n'
+            '        run-rate higher."\n'
+            '     - "Share loss to digital challengers accelerating cost-to-income\n'
+            '        deterioration."'),
+        "watch_examples": (
+            '     - "What is the full-year NIM guidance range, and how much deposit\n'
+            '        repricing is already assumed in it?"\n'
+            '     - "Where does the loan-growth pipeline sit versus the prior 5-7%\n'
+            '        guidance, and which segments are driving it?"\n'
+            '     - "Is the dividend payout sustainable if cost-of-risk normalizes\n'
+            '        from today\'s low base?"'),
+    }
+    ENERGY = {
+        "persona": "energy / oil & gas",
+        "cat_levers": "production volumes, realized prices, unit lifting/operating costs, free cash flow, capex discipline, dividend/buyback capacity, reserve replacement",
+        "risk_levers": "a realized-price downcycle, unit-cost inflation, production outages, capex overruns, dividend coverage at lower prices",
+        "watch_metrics": "production & realized prices, unit operating cost, free cash flow & capex, dividend coverage at the strip",
+        "cat_examples": (
+            '     - "A buyback top-up on the call that lifts the payout beyond the\n'
+            '        current dividend yield as free cash flow recovers."\n'
+            '     - "Full-year production guidance held despite natural field decline."\n'
+            '     - "Free-cash-flow breakeven falling, widening the dividend cushion."'),
+        "risk_examples": (
+            '     - "A sustained pullback in realized prices compressing the free\n'
+            '        cash flow that funds the dividend."\n'
+            '     - "Unit operating costs drifting higher as mature fields decline,\n'
+            '        squeezing upstream margins."\n'
+            '     - "A capex overrun deferring the promised free-cash-flow inflection."'),
+        "watch_examples": (
+            '     - "What is full-year production guidance, and how much price\n'
+            '        sensitivity is embedded in the free-cash-flow outlook?"\n'
+            '     - "Where is the unit lifting cost trending versus the prior run-rate?"\n'
+            '     - "Is the dividend covered by free cash flow at the strip?"'),
+    }
+    MATERIALS = {
+        "persona": "materials & chemicals",
+        "cat_levers": "product spreads, realized selling prices, feedstock/input costs, plant utilization, sales volumes, EBITDA margin, capacity additions, dividend",
+        "risk_levers": "product-spread contraction, feedstock-cost inflation, new-capacity oversupply, demand softness lowering utilization, operating deleverage",
+        "watch_metrics": "realized product spreads & prices, feedstock-cost pass-through, plant utilization & volumes, EBITDA margin, dividend",
+        "cat_examples": (
+            '     - "Product spreads widening off the trough as feedstock costs ease,\n'
+            '        lifting the EBITDA margin from the FY25 level."\n'
+            '     - "Utilization stepping up after turnaround season, driving\n'
+            '        operating leverage on higher volumes."\n'
+            '     - "A dividend top-up signalled as free cash flow recovers with prices."'),
+        "risk_examples": (
+            '     - "A renewed contraction in product spreads as new capacity floods\n'
+            '        the market, reversing prior-year profit growth."\n'
+            '     - "Feedstock/gas-cost inflation outpacing selling prices,\n'
+            '        compressing the EBITDA margin."\n'
+            '     - "Demand softness in a key export region forcing lower utilization\n'
+            '        and operating deleverage."'),
+        "watch_examples": (
+            '     - "Where are realized product spreads versus last quarter, and what\n'
+            '        is the feedstock-cost pass-through assumption?"\n'
+            '     - "What plant utilization rate is assumed for the year, and how\n'
+            '        does turnaround timing affect volumes?"\n'
+            '     - "Is the dividend sustainable at mid-cycle spreads?"'),
+    }
+    TECH = {
+        "persona": "technology",
+        "cat_levers": "revenue growth, segment mix, gross/operating margin, bookings/deferred revenue, user & engagement metrics, capex/AI investment, free cash flow",
+        "risk_levers": "decelerating segment growth, competitive pricing, margin compression from reinvestment, a bookings/backlog slowdown",
+        "watch_metrics": "core-segment revenue growth, gross/operating margin, bookings, capex/AI spend, free cash flow",
+        "cat_examples": (
+            '     - "Revenue growth re-accelerating off the FY25 pace as the core\n'
+            '        segment reaccelerates."\n'
+            '     - "Operating-margin expansion as cost discipline outpaces reinvestment."\n'
+            '     - "A buyback expansion as free-cash-flow conversion improves."'),
+        "risk_examples": (
+            '     - "Decelerating segment growth as competition intensifies,\n'
+            '        pressuring the revenue trajectory."\n'
+            '     - "Margin compression as AI/capacity investment outruns monetization."\n'
+            '     - "A bookings/backlog slowdown signalling softer forward revenue."'),
+        "watch_examples": (
+            '     - "What is the growth trajectory of the core segment versus last\n'
+            '        quarter?"\n'
+            '     - "Where is the operating margin heading as reinvestment scales?"\n'
+            '     - "How is capex/AI spend tracking against the monetization timeline?"'),
+    }
+    GENERIC = {
+        "persona": "equity",
+        "cat_levers": "revenue growth, volume/price mix, operating margin, input costs, free cash flow, capex efficiency, dividend/buyback",
+        "risk_levers": "volume softness, input-cost inflation outpacing pricing, margin compression, a working-capital/capex step-up",
+        "watch_metrics": "revenue growth & volume/price mix, operating margin, input costs, free cash flow, capital return",
+        "cat_examples": (
+            '     - "Revenue growth holding the prior pace as volume and price both\n'
+            '        contribute."\n'
+            '     - "Operating-margin expansion as input costs ease faster than\n'
+            '        pricing resets."\n'
+            '     - "A capital-return step-up as free-cash-flow conversion improves."'),
+        "risk_examples": (
+            '     - "Volume softening in the core market, pressuring operating\n'
+            '        leverage and the margin."\n'
+            '     - "Input-cost inflation outpacing pricing, compressing the\n'
+            '        operating margin."\n'
+            '     - "A working-capital or capex step-up eroding the free-cash-flow\n'
+            '        outlook."'),
+        "watch_examples": (
+            '     - "What is the volume/price split behind the revenue outlook?"\n'
+            '     - "Where is the operating margin heading as input costs move?"\n'
+            '     - "Is the dividend/buyback sustainable on current free cash flow?"'),
+    }
+    return {
+        "bank": BANK, "financial_services": BANK, "insurance": BANK,
+        "energy": ENERGY,
+        "materials": MATERIALS,
+        "tech": TECH, "telco": TECH,
+    }.get(f, GENERIC)
+
+
 def _prompt(ctx: dict) -> str:
     # Pre-format numeric anchors so the model sees clean strings, not raw floats.
     cur = ctx.get("currency") or ""
@@ -427,6 +561,7 @@ def _prompt(ctx: dict) -> str:
     from src.services.grounding_schema import schema_for, not_disclosed_for
     fy = ctx.get("bank_fy") or {}
     fam = ctx.get("template_family") or "other"
+    pb = _sector_playbook(fam)  # sector-appropriate levers + examples
     fy_block = ""
     if isinstance(fy, dict) and fy:
         # Financials are reported in the company's FUNCTIONAL currency, which
@@ -716,13 +851,15 @@ investor concern, and the overall setup judgment. Do NOT include a
             conviction."
 
    WATCH — the single highest-conviction thing to listen for. One.
-     Good: "Whether management raises mid-cycle NIM guidance from
-            3.2% on the call."
+     Good (bank): "Whether management raises mid-cycle NIM guidance on
+            the call." Good (materials): "Whether product spreads have
+            troughed and management signals a margin recovery."
 
    RISK — a SPECIFIC downside MECHANISM with a magnitude or baseline,
    not a generic worry. Bad risks are vanilla ("slower activity could
    pressure growth"); good risks name the channel AND a number/threshold.
-     Good: "A 25-30bp NIM slip as deposits reprice faster than the
+   Use the sector's own levers ({pb['risk_levers']}).
+     Good (bank): "A 25-30bp NIM slip as deposits reprice faster than the
             ~60% CASA book would cut pre-provision profit mid-single
             digits."
      Weak: "Slower economic activity could pressure loan growth and
@@ -736,8 +873,7 @@ investor concern, and the overall setup judgment. Do NOT include a
    What could make investors MORE POSITIVE after the print. Each bullet
    is ≤24 words and MUST carry an explicit cause→effect (the trigger AND
    the read-through to earnings, capital, valuation, or the share price).
-   For banks, draw from: loan growth, NII/NIM, fee income, credit costs,
-   dividend sustainability, capital generation, valuation re-rating.
+   For this company ({fam} sector), draw from: {pb['cat_levers']}.
    Anchor to a number where the data supports it. If swapping the company
    name with a peer would still make the bullet read true, it's too
    generic — rewrite.
@@ -757,12 +893,7 @@ investor concern, and the overall setup judgment. Do NOT include a
        fee-income mix shift).
 
    Examples of the right shape:
-     - "A buyback authorization on the call that lifts the payout
-        beyond the current 4.22% dividend yield."
-     - "Loan-growth guidance confirmed at the prior 5-7% range despite
-        deposit-cost pressure."
-     - "Fee income climbing toward 25% of revenue, cutting
-        spread-business dependence."
+{pb['cat_examples']}
 
 ═══════════════════════════════════════════════════════════════════
 "risks" — 3 company-specific downside paths.
@@ -771,10 +902,9 @@ investor concern, and the overall setup judgment. Do NOT include a
    What could cause a NEGATIVE share-price reaction after the print.
    Each bullet is ≤26 words and MUST explain BOTH the mechanism AND the
    impact (on earnings, capital generation, valuation, or investor
-   confidence). For banks, draw from: NIM compression, funding costs,
-   credit-cost normalization, slower loan growth, weak fee income, asset
-   quality, dividend risk. Avoid generic macro risk unless directly
-   linked to this bank's earnings. The 3 must be DISTINCT channels, no
+   confidence). For this company ({fam} sector), draw from: {pb['risk_levers']}.
+   Avoid generic macro risk unless directly linked to this company's
+   earnings. The 3 must be DISTINCT channels, no
    overlap with one another or with the slide-1 RISK pill, and must not
    restate valuation if that already lives in the VALUATION pill.
 
@@ -793,12 +923,7 @@ investor concern, and the overall setup judgment. Do NOT include a
        pick a different downside path.
 
    Examples of the right shape:
-     - "Asset-quality drift from the current sub-2% NPL ratio as the
-        rate-cut cycle pressures provisioning expense."
-     - "A larger one-off provision charge — Oman corporate exposure is
-        concentrated — that resets the cost-of-risk run-rate higher."
-     - "Share loss to digitally-native challengers accelerating
-        cost-to-income deterioration from current levels."
+{pb['risk_examples']}
 
 ═══════════════════════════════════════════════════════════════════
 "watch_list" — 3 questions to put to management on the call.
@@ -812,12 +937,7 @@ investor concern, and the overall setup judgment. Do NOT include a
    not just a one-line ask.
 
    Examples:
-     - "What is the full-year NIM guidance range, and how much deposit
-        repricing is already assumed in it?"
-     - "Where does the loan-growth pipeline sit versus the prior 5-7%
-        guidance, and which segments are driving it?"
-     - "Is the dividend payout sustainable at the current ~4.2% yield
-        if cost-of-risk normalizes from today's low base?"
+{pb['watch_examples']}
 
 ═══════════════════════════════════════════════════════════════════
 NUMERIC DISCIPLINE
@@ -834,8 +954,8 @@ NUMERIC DISCIPLINE
 MACRO DISCIPLINE
   The macro block is BACKGROUND only. Do NOT make GDP or inflation the
   driver of an EARNINGS pill, a catalyst, or a risk — those must anchor
-  on company-specific operational levers (loan growth, NIM, provisions,
-  fees, capital). Macro may appear at most once, in the thesis S2
+  on company-specific operational levers ({pb['cat_levers']}). Macro may
+  appear at most once, in the thesis S2
   "drivers/pressures" clause, and only if it genuinely moved the stock.
 """
 
@@ -1029,6 +1149,7 @@ def _focused_sections_prompt(ctx: dict, which: list[str]) -> str:
     catalysts/risks/watch). Compact data block + just those rules."""
     cur = ctx.get("currency") or ""
     fy = ctx.get("bank_fy") or {}
+    pb = _sector_playbook(ctx.get("template_family") or "other")
     L = [f"{ctx.get('company_name')} ({ctx.get('ticker')}) — {ctx.get('sector') or ''}."]
     if isinstance(ctx.get("pe_recent"), (int, float)):
         L.append(f"Trailing P/E {ctx['pe_recent']:.1f}x; peer-set average P/E "
@@ -1072,16 +1193,16 @@ def _focused_sections_prompt(ctx: dict, which: list[str]) -> str:
                   'share-price reaction. Each = mechanism + impact. 3 distinct channels. '
                   'Cite ONLY numbers above. BANNED: "unexpected", "*-than-expected".'),
         "watch_list": ('"watch_list": exactly 3 sharp questions to management ending in "?", '
-                       'each naming a metric + threshold (NIM/deposit costs, asset quality/'
-                       'cost of risk, loan & deposit growth, fee income, capital return).'),
+                       'each naming a metric + threshold (' + pb["watch_metrics"] + ').'),
     }
     want = [k for k in ("catalysts", "risks", "watch_list") if k in which]
     body = "\n".join(rules[k] for k in want)
     keys = ", ".join(f'"{k}": [...]' for k in want)
     return (
-        "You are a senior sell-side bank analyst. Use ONLY the data below; "
-        "never invent numbers. Mechanism-driven, bank-specific (NIM, NII, cost "
-        "of risk, capital), no generic filler.\n\n"
+        f"You are a senior sell-side {pb['persona']} analyst. Use ONLY the data "
+        "below; never invent numbers. Mechanism-driven and sector-specific "
+        f"(draw from: {pb['cat_levers']}), no generic filler. Do NOT use banking "
+        "vocabulary (NIM, cost of risk, loans/deposits) unless this is a bank.\n\n"
         f"DATA\n{data}\n\n{period_rule}\nWrite these sections:\n{body}\n\n"
         f"Return JSON only: {{{keys}}}."
     )
