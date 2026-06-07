@@ -790,11 +790,11 @@ investor concern, and the overall setup judgment. Do NOT include a
      S2. "Recent performance has been supported by [drivers],
          while [pressures] remain key concerns." REQUIRED. This sentence
          MUST cite at least one CONCRETE COMPANY figure from the data
-         block (e.g. loan growth %, deposit growth %, the NII trend,
-         net-profit growth %, or ROE) — NOT a macro stat, NOT generic
-         prose. A reader must be able to tell this is {{Company}} and not
-         "any bank". If the only numbers in the whole paragraph are a P/E
-         and a yield, the summary has failed.
+         block (a sector-relevant operating metric: revenue/volume growth %,
+         a margin trend, net-profit growth %, ROE, or one of {pb['cat_levers']})
+         — NOT a macro stat, NOT generic prose. A reader must be able to tell
+         this is {{Company}} and not "any peer". If the only numbers in the
+         whole paragraph are a P/E and a yield, the summary has failed.
      S3. "Investors should watch [4-6 specific things, including
          management commentary on X]." A concise list of the concrete
          metrics/lines the print will turn on — the high-level read; the
@@ -826,9 +826,12 @@ investor concern, and the overall setup judgment. Do NOT include a
    test. NEVER frame it around GDP / inflation / "macro backdrop" —
    that reads as filler and isn't a print-level driver. Name the lever.
    KEEP IT TIGHT: ≤18 words (this pill tends to run long and get cut).
-     Good: "Q2 print will test whether loan growth holds the prior
+   Use one of this company's own levers ({pb['cat_levers']}).
+     Good (bank): "Q2 print will test whether loan growth holds the prior
             5-7% pace as deposit competition bites."
-     Weak: "Loan growth amid 1.6% GDP growth." (macro is backdrop,
+     Good (materials): "Q2 print will test whether product spreads have
+            troughed after the FY25 margin squeeze."
+     Weak: "Growth amid 1.6% GDP growth." (macro is backdrop,
             not the driver; says nothing about the print)
 
    VALUATION — ALWAYS lead with the LIVE multiple (the number on the
