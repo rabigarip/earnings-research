@@ -40,5 +40,15 @@
     "peer_set": ["ENBD.AE", "FAB.AE", "ADCB.AE", "QNBK.QA", "1180.SR", "BKMB.OM"],
     "providers": {"yfinance": "partial", "marketscreener": "supported", "investing": "supported", "bloomberg_ticker": null},
     "notes": "registry_overrides: UAE bank; name-less source row defaulted to 'other'."
+  },
+
+  "9988.HK": {
+    "reporting_currency": "CNY",
+    "fiscal_year_end_month": 3,
+    "notes": "registry_overrides: Alibaba reports in RMB (CNY) and its fiscal year ENDS 31 March (registry default Dec/HKD was wrong, breaking grounding-currency staleness checks)."
+  },
+  "0981.HK": {
+    "reporting_currency": "USD",
+    "notes": "registry_overrides: SMIC reports its financials in USD (registry defaulted to HKD)."
   }
 }
