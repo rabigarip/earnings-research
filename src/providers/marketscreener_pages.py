@@ -1331,7 +1331,7 @@ def fetch_consensus_summary(base_company_url: str, cache_key_prefix: str | None 
     status = PageStepStatus(step="fetch_consensus_summary", message="")
     start = time.perf_counter() * 1000
 
-    result = fetch_marketscreener_consensus_summary(url)
+    result = fetch_marketscreener_consensus_summary(url, cache_key_prefix=cache_key_prefix)
     data = result.extracted_data.to_report_payload()
     data["source_page"] = url
     data["source_type"] = "consensus_summary"

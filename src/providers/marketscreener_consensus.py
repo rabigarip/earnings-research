@@ -89,15 +89,30 @@ class MarketScreenerConsensusResult(BaseModel):
 
 # ─── Fetch (separate from parse) ─────────────────────────────────────────────
 
-def _fetch_consensus_page(url: str) -> tuple[BeautifulSoup | None, str, list[str]]:
+def _fetch_consensus_page(url: str, cache_key_prefix: str | None = None) -> tuple[BeautifulSoup | None, str, list[str]]:
     """
     Fetch consensus page HTML. Returns (soup, short_message, errors).
     Does not parse; only retrieves and checks for block/captcha.
+
+    When a cache_key_prefix is supplied, route through the UNIFIED
+    marketscreener_pages._fetch_page so consensus gets the same hardened
+    path as every other MS page: offline-cache read, curl_cffi Cloudflare
+    bypass, and committed-snapshot fallback. Without this the consensus
+    summary used plain `requests`, which is 403'd from Render's IPs — so
+    the deck's rating/target/analyst-count box came back empty even though
+    the rest of the MS data loaded fine.
     """
     errors: list[str] = []
     if not url or "/consensus" not in url.lower():
         errors.append("Invalid or non-consensus URL")
         return None, "Invalid URL", errors
+
+    if cache_key_prefix:
+        from src.providers.marketscreener_pages import _fetch_page, _cache_slug
+        soup, ferrors = _fetch_page(url, _cache_slug(url, "consensus", cache_key_prefix))
+        if soup is None:
+            return None, "; ".join(ferrors) or "fetch failed", ferrors
+        return soup, "ok", ferrors
 
     timeout = 15
     if _USE_CONFIG:
@@ -294,17 +309,21 @@ def _detect_sections(soup: BeautifulSoup) -> list[DetectedSection]:
 
 # ─── Main entry: fetch + parse + status ──────────────────────────────────────
 
-def fetch_marketscreener_consensus_summary(url: str) -> MarketScreenerConsensusResult:
+def fetch_marketscreener_consensus_summary(url: str, cache_key_prefix: str | None = None) -> MarketScreenerConsensusResult:
     """
     Fetch a MarketScreener consensus page URL, extract summary, detect sections.
     Returns structured result with extracted_data, step_status, raw_warnings, detected_sections.
+
+    `cache_key_prefix` routes the fetch through the unified hardened fetcher
+    (curl_cffi + snapshot fallback + offline cache) — pass it from the
+    pipeline so consensus survives Render's Cloudflare block.
     """
     result = MarketScreenerConsensusResult()
     step = StepStatus(step="marketscreener_consensus_summary", source="marketscreener")
     start_ms = time.perf_counter() * 1000
 
     # ─── Fetch ─────────────────────────────────────────────────────────────
-    soup, fetch_msg, fetch_errors = _fetch_consensus_page(url)
+    soup, fetch_msg, fetch_errors = _fetch_consensus_page(url, cache_key_prefix)
     if soup is None:
         step.status = "failed"
         step.message = fetch_msg
