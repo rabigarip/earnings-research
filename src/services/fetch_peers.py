@@ -121,7 +121,16 @@ def _fmt_mcap_usd(v) -> str:
 _USD_PER_UNIT = {
     "USD": 1.0, "OMR": 2.6008, "AED": 0.2723, "SAR": 0.2667, "QAR": 0.2747,
     "BHD": 2.6596, "KWD": 3.26, "JOD": 1.41, "EGP": 0.0205, "HKD": 0.1282,
-    "CNY": 0.139, "INR": 0.0120, "GBP": 1.27, "EUR": 1.08, "JPY": 0.0064,
+    "CNY": 0.139, "CNH": 0.139, "INR": 0.0120, "GBP": 1.27, "GBX": 0.0127,
+    "EUR": 1.08, "JPY": 0.0064,
+    # Peer sets reach beyond the GCC (e.g. Yara in NOK, EM/DM comparables) —
+    # without these a peer's market cap fell back to its native currency under
+    # a "MCAP (USD)" header. Approximate spot rates; peer-cap display only.
+    "NOK": 0.092, "SEK": 0.094, "DKK": 0.145, "CHF": 1.11, "CAD": 0.73,
+    "AUD": 0.65, "NZD": 0.60, "TWD": 0.0312, "KRW": 0.00072, "SGD": 0.74,
+    "THB": 0.0285, "MYR": 0.222, "IDR": 0.0000615, "PHP": 0.0175,
+    "BRL": 0.18, "MXN": 0.058, "ZAR": 0.055, "TRY": 0.030, "PLN": 0.25,
+    "NGN": 0.00065, "PKR": 0.0036, "VND": 0.0000393,
 }
 
 
