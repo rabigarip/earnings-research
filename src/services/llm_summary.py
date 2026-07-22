@@ -738,7 +738,7 @@ investor concern, and the overall setup judgment. Do NOT include a
 
    THE VOICE WE WANT. Three reference examples — match this rhythm,
    word count, and qualitative register. Notice: almost no numbers,
-   no Mohamed-pleasing acronyms, no macro filler. Just a clean
+   no acronyms, no macro filler. Just a clean
    interpretive read.
 
    ┌─ Apple ───────────────────────────────────────────────────────┐
