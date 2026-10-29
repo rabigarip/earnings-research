@@ -11,7 +11,7 @@
     });
 </script><script data-action="prototypes">
         Array.prototype.pushEvent = function(callback) {this.push = function(e) {Array.prototype.push.call(this, e);callback(this);};};
-    </script><link rel='stylesheet' href='https://cdn.zonebourse.com/static/css/ads/internal.css?v=20260316'><meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=5, shrink-to-fit=no"><meta name="keywords" lang="en"
+    </script><link rel='stylesheet' href='https://cdn.zonebourse.com/static/css/ads/businessAD.css?v=20260316'><script type="text/javascript" src="/ba_utils/marketscreener.com.js"></script><meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=5, shrink-to-fit=no"><meta name="keywords" lang="en"
       content="Markets"><meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large"><meta property="fb:app_id" content="1202840733111754"><meta name="format-detection" content="telephone=no"><meta name="msvalidate.01" content="8E1C9AF149514AB658B7178E8A38825C"><meta name='dailymotion-domain-verification'
       content='dm7kawzgqfwuriair'><link rel="search" type="application/opensearchdescription+xml" title="Advanced search on MarketScreener"
       href="https://www.marketscreener.com/opensearch.xml"><script type="application/ld+json">
@@ -118,29 +118,55 @@ function onunloadUI()
     } 
 </script>
 
-<script>var country_location = "US";
-function startAdsServiceD(){
-        gaEvent('adspv', 'internal_start', 'US');
-        $(document).ready(function() {
-            displayViewableAds('internal');
-            $( window ).scroll(function() {
-                displayViewableAds('internal');
-            });
-         });
+<script>var country_location = "XX";
+
+        let BAConf = {
+          "Middle2": "Ads_BA_BS",
+          "Middle3": "Ads_BA_FLB",
+          "Middle4": "Ads_BA_FLB2",
+          "Middle5": "Ads_BA_FLB3",
+          "Right2": "Ads_BA_CAD",
+          "Right3": "Ads_BA_CAD2",
+          "Article": "Ads_BA_CAD3",
+          "Footer": "Ads_BA_FOOT",
+          "Mobile_Bann" : "Ads_BA_BS",
+          "Mobile_Rect" : "Ads_BA_CAD",
+          "Mobile_Rect1" : "Ads_BA_CAD2",
+          "Mobile_Rect2" : "Ads_BA_CAD3",
+          "Mobile_Rect3" : "Ads_BA_CAD4",
+          "Mobile_Rect4" : "Ads_BA_CAD5",
+          "Mobile_Rect5" : "Ads_BA_CAD6",
+          "Mobile_Rect6" : "Ads_BA_CAD7",
+          "Mobile_Rect7" : "Ads_BA_CAD8",
+          "Mobile_Rect8" : "Ads_BA_CAD9",
+          "Mobile_Rect9" : "Ads_BA_CAD10",
+          "Mobile_Rect_Footer" : "Ads_BA_CAD11",
+          "Mobile_Bann_Footer" : "Ads_BA_FOOT",
         }
-$(document).ready(function() {gaEvent('adspv', 'internal', 'US');});
+        
+        
+        var containerDiv = document.querySelector(".pcontent .container");
+        var newDiv = document.createElement("div");
+        newDiv.setAttribute("id", "zppSky1");
+        newDiv.innerHTML = "<div id=\"Ads_BA_SKY\"></div>" 
+        containerDiv.insertBefore(newDiv, containerDiv.firstChild);
+        
+        for (var element in BAConf) {
+         if (document.getElementById("zpp"+element)) {
+           document.getElementById("zpp"+element).innerHTML = "<div id=\""+BAConf[element]+"\"></div>";
+         }
+        } 
+        
+$(document).ready(function() {gaEvent('adspv', 'businessAD', 'XX');});
 googletag.cmd.push(function() { 
 googletag.pubads().setTargeting('Edition', 'en_US');
 googletag.pubads().setTargeting('UserType', 'free');
-var iAdsPos = 0; aAdsList.forEach(function(e) { if (aAdsListSize[iAdsPos] !== null && (aAdsListCA[iAdsPos] === null || aAdsListCA[iAdsPos] == country_location)) { googletag.defineSlot('/4093671/_'+e+'_/internal_'+e, aAdsListSize[iAdsPos], 'zpp'+e).addService(googletag.pubads());}iAdsPos++;});
 googletag.enableServices();
-var iAdsPos = 0; aAdsList.forEach(function(e) { if (aAdsListSize[iAdsPos] !== null && (aAdsListCA[iAdsPos] === null || aAdsListCA[iAdsPos] == country_location)) { googletag.display('zpp'+e); }iAdsPos++;});
-try{googletag.pubads().getSlots().forEach(function(slot){if(slot.getSlotElementId().startsWith('zpp')){;}else{googletag.pubads().refresh([slot],{changeCorrelator: false});}})}catch(error){console.error(error)}
 });
 $(document).ready(function() { $( document).on('zbv_visible',function () {startAdsService();}); if (document[zbv_hidden]===false) { startAdsService(); } });
 </script>  </div><script async defer src="https://ats-wrapper.privacymanager.io/ats-modules/7b190444-c935-406d-8261-160ca079fd9a/ats.js"></script><script>DISABLE_TRACK = true;</script><script data-action="live-opts">
     const liveHtml_BASE_URL = "https://live.marketscreener.com";
-    const liveHtml_AUTH = { hkKey: "b3a344dbb5ed80025491427166975886", pvKey: "efcaa7e5ca263829f38a106766f4246a", uKey:"L2xvZ2luLw==" };
+    const liveHtml_AUTH = { hkKey: "b3a344dbb5ed80025491427166975886", pvKey: "de438d575d5c918b3c78d162cbcf3ccf", uKey:"L2xvZ2luLw==" };
     const liveHtml_TOJS = [];
 </script><div id="editionModal" class="modal modal--large "><span class="js_modal_close modal__close-btn" onclick="close_modal('editionModal')"><i class="bi-x txt-s7 txt-black"></i></span><div class="modal__content"><div class="modal_title-custom pt-15"><div class="grid align-center"><i class="pl-10 bi-globe2 globe-icon c-none cm-inline"></i><div><p class="pl-10 txt-bold m-0">Select your edition</p><p class="txt-s1 txt-muted m-0 pl-10">All financial news and data tailored to specific country editions</p></div></div></div><div class="grid mb-5 mt-15"><div class="c-12 cm-3 c-flex gcol gbetween"><div class="mb-10"><p class="region-title pl-5 mb-10">NORTH AMERICA</p><div class="c-flex flex-wrap countries-grid--1"><a class="country-item align-center active" data-edition="en_US" href="/"><div class="country-flag"><img data-src="https://cdn.zonebourse.com/images/png-country/24x24/us.png"
                                                 alt="MarketScreener"
@@ -185,4 +211,4 @@ $(document).ready(function() { $( document).on('zbv_visible',function () {startA
          data-login_uri="https://www.marketscreener.com/login/google/"
          data-auto_prompt="true"
          data-itp_support="true"
-    ></div><script src="https://cdn.zonebourse.com/static/assets/mPulse/mpulse-surperformance.js" async></script><input type="hidden" id="csrf-token" value="71ac0c5f37f96f5abba677355dc4c9.Pf144ffEXp8gdBNDkD5cy-P3QloRkaw2cb8_jOm49LY.XJRVp7yTMtNxEiQSo0QXuJeHHQNkzpVVMOhoz5DMpdVpmxuTmoobwGIVdA"></body></html>
+    ></div><script src="https://cdn.zonebourse.com/static/assets/mPulse/mpulse-surperformance.js" async></script><input type="hidden" id="csrf-token" value="698d1c46a867c5d13470c01146f.mnUMoRcL23tyGMbqAwDfOxo4oYhLiDbLghgE1FwzzZ0.yj5n6UVAohcGYLPcbDGwQVFA_uMx4WWZ2nc0mDF4qdjWEXn0RGGvFiRenw"></body></html>
